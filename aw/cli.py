@@ -154,7 +154,11 @@ def build_parser() -> argparse.ArgumentParser:
     cli_browsers.add_parsers(sub)
     ig = sub.add_parser("integrate", help="opt-in agent integration (reversible)")
     ig.add_argument("agent", choices=["claude-code", "codex", "antigravity", "hermes"])
-    ig.add_argument("action", choices=["status", "install", "uninstall", "show"])
+    ig.add_argument("action", choices=["status", "install", "uninstall", "show", "run"])
+    ig.add_argument("prompt", nargs="?", help="with 'run': the one-off prompt")
+    ig.add_argument("--dry-run", action="store_true", help="print what install/uninstall would do")
+    ig.add_argument("--model", help="with 'run': model name (default: the cheapest suitable one)")
+    ig.add_argument("--project", help="with 'run': project name used in the workspace name")
     ig.add_argument("--workspace", help="default workspace for this agent")
     ig.add_argument("--config", help="override the agent config path (testing)")
     return ap

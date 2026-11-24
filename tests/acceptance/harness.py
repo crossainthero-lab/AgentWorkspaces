@@ -51,9 +51,10 @@ def host_fingerprint() -> Dict[str, Any]:
 
 def run_agent(agent: str, prompt: str, base: str, project: str, run_dir: str, model: Optional[str] = None,
               timeout: float = 240.0, extra_env: Optional[Dict[str, str]] = None, shots_every: float = 6.0,
-              ws_name: Optional[str] = None) -> Dict[str, Any]:
+              ws_name: Optional[str] = None, instructions: bool = True) -> Dict[str, Any]:
     os.makedirs(run_dir, exist_ok=True)
-    plan = agentrun.plan(agent, prompt, model=model, project=project, base_dir=base, extra_env=extra_env)
+    plan = agentrun.plan(agent, prompt, model=model, project=project, base_dir=base, extra_env=extra_env,
+                      instructions=instructions)
     assert "DISPLAY" not in plan.env and "WAYLAND_DISPLAY" not in plan.env
     out_f = open(os.path.join(run_dir, "agent.stdout"), "wb")
     err_f = open(os.path.join(run_dir, "agent.stderr"), "wb")
@@ -119,7 +120,7 @@ def run_agent(agent: str, prompt: str, base: str, project: str, run_dir: str, mo
                            "agent_env_names_seen": len(env_names)}
     try:
         w = cl.call("workspace.get", workspace=name)
-        res["workspace_state"] = {"state": w["state"], "agent": w["agent"]["kind"], "viewers": w["viewers"],
+        res["workspace_state"] = {"id": w["id"], "created_at": w.get("created_at"), "state": w["state"], "agent": w["agent"]["kind"], "viewers": w["viewers"],
                                   "windows": [x.get("title") for x in w.get("windows", [])],
                                   "display": w["display"], "usage": w.get("usage")}
         cl.call("screen.screenshot", workspace=name, agent_kind="human", path=os.path.join(run_dir, "final.png"),

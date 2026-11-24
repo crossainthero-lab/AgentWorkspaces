@@ -57,8 +57,10 @@ def clean_env(rt_dir: str, extra: Optional[Dict[str, str]] = None, host: Optiona
     return env
 
 
-def mcp_env(kind: str, project: str, base_dir: Optional[str], extra: Optional[Dict[str, str]] = None) -> Dict[str, str]:
-    e = {"AW_AGENT_KIND": kind, "AW_PROJECT": project}
+def mcp_env(kind: str, base_dir: Optional[str], extra: Optional[Dict[str, str]] = None) -> Dict[str, str]:
+    # No AW_PROJECT: the MCP server names the workspace after the directory the agent started it in, exactly
+    # as it does after `integrate install`.
+    e = {"AW_AGENT_KIND": kind}
     if base_dir:
         e["AW_BASE_DIR"] = base_dir
     for k in ("AW_APP_DENY", "AW_VISION_URL", "AW_VISION_MODEL", "AW_VISION_KEY_ENV"):
@@ -69,7 +71,8 @@ def mcp_env(kind: str, project: str, base_dir: Optional[str], extra: Optional[Di
 
 
 def plan(agent: str, prompt: str, model: Optional[str] = None, project: str = "demo", base_dir: Optional[str] = None,
-         cwd: Optional[str] = None, max_turns: int = 12, extra_env: Optional[Dict[str, str]] = None) -> Plan:
+         cwd: Optional[str] = None, max_turns: int = 12, extra_env: Optional[Dict[str, str]] = None,
+         instructions: bool = True) -> Plan:
     kind = ig.AGENTS[agent]["kind"]
     tmp = tempfile.mkdtemp(prefix="aw-run-")
     rt = os.path.join(tmp, "rt")
@@ -77,7 +80,7 @@ def plan(agent: str, prompt: str, model: Optional[str] = None, project: str = "d
     cwd = cwd or os.path.join(tmp, project)
     os.makedirs(cwd, exist_ok=True)
     server = ig.server_command()
-    menv = mcp_env(kind, project, base_dir, extra_env)
+    menv = mcp_env(kind, base_dir, extra_env)
     env = clean_env(rt)
     model = model or CHEAP_MODEL.get(agent)
     notes: List[str] = []
@@ -102,7 +105,7 @@ def plan(agent: str, prompt: str, model: Optional[str] = None, project: str = "d
                 "-c", f"mcp_servers.{ig.NAME}.args={toml(server[1:])}",
                 "-c", f"mcp_servers.{ig.NAME}.env={{{', '.join(f'{k}={toml(v)}' for k, v in menv.items())}}}",
                 "-c", f"mcp_servers.{ig.NAME}.default_tools_approval_mode=\"approve\"",
-                "-c", f"developer_instructions={toml(ig.INSTRUCTIONS)}",
+                *(["-c", f"developer_instructions={toml(ig.INSTRUCTIONS)}"] if instructions else []),
                 "-C", cwd]
         if model:
             argv += ["-m", model, "-c", 'model_reasoning_effort="low"']
@@ -115,7 +118,7 @@ def plan(agent: str, prompt: str, model: Optional[str] = None, project: str = "d
 def run(args) -> int:
     import subprocess
     p = plan(args.agent, args.prompt, model=args.model, project=args.project or "demo",
-             base_dir=os.environ.get("AW_BASE_DIR"))
+             base_dir=os.environ.get("AW_BASE_DIR"), cwd=None if args.project else os.getcwd())
     try:
         print("+", " ".join(shlex.quote(a) for a in p.argv[:4]), "...", file=sys.stderr)
         return subprocess.run(p.argv, env=p.env, cwd=p.cwd, stdin=subprocess.DEVNULL).returncode

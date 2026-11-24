@@ -44,7 +44,7 @@ class Integrations(unittest.TestCase):
                 if agent == "claude-code":
                     sk = os.path.join(home, ".claude", "skills", "agent-workspaces", "SKILL.md")
                     self.assertTrue(os.path.exists(sk))
-                    self.assertIn("never the personal desktop", open(sk).read())
+                    self.assertIn("never the user's personal desktop", open(sk).read())
                 u = self.run_cli(home, agent, "uninstall")
                 self.assertEqual(u.returncode, 0, f"{agent} uninstall: {u.stdout} {u.stderr}")
                 st = self.run_cli(home, agent, "status")
@@ -67,7 +67,7 @@ class Integrations(unittest.TestCase):
         try:
             for agent in ("claude-code", "codex", "antigravity", "hermes"):
                 r = self.run_cli(home, agent, "show")
-                self.assertIn("ASSIGNED AgentWorkspace, never the personal desktop", r.stdout)
+                self.assertIn("never the user's personal desktop", r.stdout)
         finally:
             shutil.rmtree(home, ignore_errors=True)
 
