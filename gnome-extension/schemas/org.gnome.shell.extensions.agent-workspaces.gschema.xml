@@ -21,6 +21,18 @@
       <description>When entering and no AgentWorkspaces viewer window exists, create a dedicated GNOME workspace and ask the AgentWorkspaces service to open the viewer there. When off, entering only works while a viewer window already exists.</description>
     </key>
 
+    <key name="environment-mode" type="b">
+      <default>true</default>
+      <summary>Open the viewer as a full-screen environment</summary>
+      <description>On: the viewer opens full screen without window chrome; its controls appear when the mouse moves. Off: it opens as an ordinary maximized window with a title bar and the workspace list.</description>
+    </key>
+
+    <key name="use-cube-transition" type="b">
+      <default>true</default>
+      <summary>Turn the Desktop Cube when entering and leaving</summary>
+      <description>When the Desktop Cube extension is enabled, entering AgentWorkspaces turns the cube down onto the agent workspace and leaving turns it back up. Off, or without Desktop Cube, the vertical slide is used.</description>
+    </key>
+
     <!-- State kept by the extension. Not shown in preferences. -->
     <key name="backup" type="s">
       <default>""</default>

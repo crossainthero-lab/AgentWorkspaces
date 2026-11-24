@@ -582,7 +582,7 @@ class Daemon:
         e.update({k: v for k, v in env.items() if k in ("WAYLAND_DISPLAY", "DISPLAY", "XDG_RUNTIME_DIR",
                                                        "DBUS_SESSION_BUS_ADDRESS")})
         viewer = [sys.executable, "-m", "aw.viewer"] + ([ws.name] if ws else []) + \
-                 (["--maximized"] if p.get("maximized") else [])
+                 (["--environment"] if p.get("environment") else (["--maximized"] if p.get("maximized") else []))
         proc = subprocess.Popen(viewer, env=e, cwd=os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
                                 stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
                                 stderr=open(os.path.join(paths.base_dir(), "viewer.log"), "ab"), start_new_session=True)

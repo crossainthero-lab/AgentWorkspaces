@@ -13,12 +13,15 @@ import St from 'gi://St';
 
 import {Extension} from 'resource:///org/gnome/shell/extensions/extension.js';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
+import * as Background from 'resource:///org/gnome/shell/ui/background.js';
 
 const VIEWER_APP_ID = 'dev.agentworkspaces.Viewer';
 const VIEWER_TITLE_PREFIX = 'AgentWorkspaces:';
 const GNOME_WM = 'org.gnome.desktop.wm.keybindings';
 const TAKEOVER_KEYS = ['switch-to-workspace-up', 'switch-to-workspace-down'];
 const SLIDE_MS = 250; // same as GNOME Shell's own workspace switch
+const CUBE_UUID = 'desktop-cube@schneegans.github.com';
+const CUBE_MS = 450; // a 90 degree turn is a longer way than Desktop Cube's 250 ms between neighbouring faces
 // Small public interface so the viewer's "Back to desktop" button (and any other program) can do what the
 // shortcuts do. Same-user session bus only; it can only switch workspace.
 const PUBLIC_NAME = 'dev.agentworkspaces.ShellExtension';
@@ -100,6 +103,7 @@ export default class AgentWorkspacesExtension extends Extension {
     }
 
     disable() {
+        this._queued = null;
         this._exportPublic(false);
         for (const id of this._handlers ?? [])
             this._settings.disconnect(id);
@@ -283,6 +287,12 @@ export default class AgentWorkspacesExtension extends Extension {
     // From the Activities overview (Super): close it first, then travel. The slide needs the normal workspace view,
     // and leaving the shell in the overview of another workspace would be a surprise.
     _afterOverview(fn) {
+        if (this._slide) {
+            // A turn is still running (the key was pressed again half way): let it finish, then do this; only the
+            // last request counts. Cancelling would make the cube jump to its end position.
+            this._queued = fn;
+            return;
+        }
         if (!Main.overview.visible && !Main.overview.animationInProgress) {
             fn();
             return;
@@ -412,8 +422,9 @@ export default class AgentWorkspacesExtension extends Extension {
             ws.activate(global.get_current_time());
             return;
         }
+        const cube = this._cubeEnabled();
         try {
-            snap = this._snapshotWindows();
+            snap = this._snapshotWindows(cube);
         } catch (e) {
             log(`no snapshot of the old windows: ${e}`);
         }
@@ -434,15 +445,48 @@ export default class AgentWorkspacesExtension extends Extension {
         if (patched) { // the switch did not go through animateSwitch (e.g. animations blocked)
             delete ctrl.animateSwitch;
         }
-        this._playSlide(snap, dir);
+        if (cube && snap) {
+            try {
+                this._playCube(snap, dir);
+            } catch (e) {
+                log(`cube turn failed, no animation: ${e}`);
+                this._slide = null;
+                const g = global.window_group;
+                g.rotation_angle_x = 0;
+                g.translation_z = 0;
+                g.pivot_point_z = 0;
+                g.set_pivot_point(0, 0);
+                snap._bg && this._destroyFace(snap._bg);
+                snap.destroy();
+            }
+        } else {
+            this._playSlide(snap, dir);
+        }
     }
 
-    _snapshotWindows() {
+    _snapshotWindows(withBackground = false) {
         // Clutter clones of the windows currently on screen. A clone keeps painting its source after the
         // switch hides the source window actor, which is what lets the old workspace slide away.
+        // withBackground: the face also carries the wallpaper, so that it turns like a cube face.
         const group = global.window_group;
         const snap = new Clutter.Actor({reactive: false});
         let count = 0;
+        if (withBackground) {
+            snap.set_size(global.stage.width, global.stage.height);
+            snap._bg = this._backgroundClone();
+            snap.add_child(snap._bg);
+            snap._chrome = [];
+            for (const a of this._chromeActors()) {
+                if (!a.visible)
+                    continue;
+                const [x, y] = a.get_transformed_position();
+                const c = new Clutter.Clone({source: a, reactive: false});
+                c.set_position(x, y);
+                c.set_size(a.width, a.height);
+                snap.add_child(c);
+                snap._chrome.push(c);
+            }
+        }
         for (const a of group.get_children()) {
             if (!a.visible || !a.meta_window)
                 continue;
@@ -452,7 +496,7 @@ export default class AgentWorkspacesExtension extends Extension {
             snap.add_child(clone);
             count++;
         }
-        if (!count) {
+        if (!count && !withBackground) {
             snap.destroy();
             return null; // empty workspace: nothing to slide out, the new content alone slides in
         }
@@ -460,12 +504,63 @@ export default class AgentWorkspacesExtension extends Extension {
         return snap;
     }
 
+    _chromeActors() {
+        // Your own desktop's furniture: the top bar and the dock. They belong to the personal world, so they turn away
+        // with the personal face and are not on the agent's face (the viewer is full screen).
+        const out = [Main.layoutManager.panelBox];
+        for (const c of Main.uiGroup.get_children()) {
+            if (c.constructor.name === 'DashToDock')
+                out.push(c);
+        }
+        return out.filter(a => a);
+    }
+
+    _backgroundClone() {
+        // A cube face carries its own wallpaper: a fresh BackgroundManager per monitor in a holder the size of the
+        // stage, exactly what the shell's own workspace-switch groups do (clones of the live background paint blank).
+        const holder = new Meta.BackgroundGroup();
+        holder.set_size(global.stage.width, global.stage.height);
+        holder._mgrs = [];
+        for (const m of Main.layoutManager.monitors) {
+            holder._mgrs.push(new Background.BackgroundManager({
+                container: holder, monitorIndex: m.index, vignette: false,
+            }));
+        }
+        return holder;
+    }
+
+    _destroyFace(f) {
+        for (const m of f._mgrs ?? [])
+            m.destroy();
+        f.destroy();
+    }
+
+    _cubeEnabled() {
+        // Desktop Cube loaded and active in THIS shell, and not switched off in our own settings.
+        try {
+            return this._settings.get_boolean('use-cube-transition') &&
+                Main.extensionManager.lookup(CUBE_UUID)?.state === 1;
+        } catch (e) {
+            return false;
+        }
+    }
+
+    _cubeParallax() {
+        // Desktop Cube's own `window-parallax` (how far the cube is pushed back while it turns), read from its
+        // settings when they are reachable, else its default.
+        try {
+            return Main.extensionManager.lookup(CUBE_UUID).stateObj._settings.get_double('window-parallax');
+        } catch (e) {
+            return 0.5;
+        }
+    }
+
     _playSlide(snap, dir) {
         const group = global.window_group;
         const H = global.stage.height;
         const samples = [];
         const sid = group.connect('notify::translation-y', () => samples.push(Math.round(group.translation_y)));
-        this._slide = {snap, sid, samples};
+        this._slide = {kind: 'slide', snap, sid, samples};
         group.translation_y = dir * H;
         group.ease({
             translation_y: 0,
@@ -480,12 +575,87 @@ export default class AgentWorkspacesExtension extends Extension {
         });
     }
 
+    // The cube-native version, used while Desktop Cube is enabled. The two faces are two faces of a cube that
+    // turns about a horizontal axis: the face you leave (a snapshot of its windows plus the wallpaper) and the face you
+    // arrive on (the live window group plus a wallpaper clone). Same ingredients as Desktop Cube's own turn: faces
+    // rotated about a pivot `centerDepth` behind them (pivot_point_z), the whole cube pushed back while it turns
+    // (its `window-parallax`, strongest half way), the shell's own stage perspective, ease-out-cubic.
+    _playCube(snap, dir) {
+        // The live window group already carries the real wallpaper (the shell keeps its background group inside it), so
+        // it is a complete face; the face you leave brings its own wallpaper (see _snapshotWindows).
+        const group = global.window_group;
+        const H = global.stage.height;
+        const D = H / 2;                                     // face to axis: 90 degrees between faces
+        const corner = Math.sqrt(D * D + (H / 2) * (H / 2));
+        const maxBack = corner - D;                          // keeps the edge that swings towards you on the screen plane
+        const backdrop = new St.Widget({reactive: false, style: 'background-color: #0b141b;'});
+        backdrop.set_size(global.stage.width, global.stage.height);
+        Main.uiGroup.insert_child_below(backdrop, group);
+        const orig = {pivot: group.get_pivot_point(), pivotZ: group.pivot_point_z};
+        const chrome = this._chromeActors().map(a => ({a, opacity: 255}));
+        for (const c of chrome)
+            c.a.opacity = 0;                                   // the personal desktop's bar and dock turn with its face
+        const faces = [snap, group];
+        for (const f of faces) {
+            f.set_pivot_point(0.5, 0.5);
+            f.pivot_point_z = -D;
+        }
+        const samples = [];
+        const tl = new Clutter.Timeline({actor: global.stage, duration: this._cubeMs ?? CUBE_MS,
+            progress_mode: Clutter.AnimationMode.EASE_OUT_CUBIC});
+        let nearer = null;
+        const apply = p => {
+            const back = maxBack * (1 - Math.abs(2 * p - 1));
+            // dir +1 (down): the face you leave turns up and away, the new one comes up from below
+            snap.rotation_angle_x = dir * 90 * p;
+            group.rotation_angle_x = -dir * 90 * (1 - p);
+            for (const f of faces)
+                f.translation_z = -back;
+            // painter's order: the face that is turned further away is painted first
+            const oldNearer = p < 0.5;
+            if (nearer !== oldNearer) {
+                nearer = oldNearer;
+                if (oldNearer)
+                    Main.uiGroup.set_child_above_sibling(snap, group);
+                else
+                    Main.uiGroup.set_child_below_sibling(snap, group);
+            }
+            samples.push(Math.round(group.rotation_angle_x));
+        };
+        apply(0);
+        tl.connect('new-frame', () => apply(tl.get_progress()));
+        tl.connect('completed', () => this._finishSlide());
+        this._slide = {kind: 'cube', snap, backdrop, tl, orig, samples, chrome};
+        tl.start();
+    }
+
     _finishSlide() {
         const s = this._slide;
         if (!s)
             return;
         this._slide = null;
         const group = global.window_group;
+        if (s.kind === 'cube') {
+            try {
+                s.tl.stop();
+            } catch (e) { /* already finished */ }
+            group.rotation_angle_x = 0;
+            group.translation_z = 0;
+            group.pivot_point_z = s.orig.pivotZ;
+            group.set_pivot_point(s.orig.pivot[0], s.orig.pivot[1]);
+            s.backdrop.destroy();
+            for (const c of s.chrome) {                          // arriving on a personal workspace: bar and dock fade in
+                c.a.remove_all_transitions();
+                c.a.ease({opacity: c.opacity, duration: 160, mode: Clutter.AnimationMode.EASE_OUT_QUAD});
+            }
+            if (s.snap._bg)
+                this._destroyFace(s.snap._bg);
+            s.snap.destroy();
+            this._lastSamples = s.samples;
+            this._lastKind = 'cube';
+            this._runQueued();
+            return;
+        }
         group.disconnect(s.sid);
         group.remove_all_transitions();
         group.translation_y = 0;
@@ -494,6 +664,18 @@ export default class AgentWorkspacesExtension extends Extension {
             s.snap.destroy();
         }
         this._lastSamples = s.samples;
+        this._lastKind = 'slide';
+        this._runQueued();
+    }
+
+    _runQueued() {
+        const q = this._queued;
+        this._queued = null;
+        if (q)
+            GLib.idle_add(GLib.PRIORITY_DEFAULT, () => {
+                q();
+                return GLib.SOURCE_REMOVE;
+            });
     }
 
     _cancelSlide() {
@@ -601,7 +783,8 @@ export default class AgentWorkspacesExtension extends Extension {
                 if (GLib.getenv(k))
                     env[k] = GLib.getenv(k);
             // no workspace named: the viewer opens on the one you used last (else the most recently active)
-            await this._daemonCall('workspace.enter', {display_env: env, maximized: true});
+            await this._daemonCall('workspace.enter', {display_env: env, environment: this._settings.get_boolean('environment-mode'),
+                maximized: !this._settings.get_boolean('environment-mode')});
         } catch (e) {
             if (String(e.message).includes('daemon-unavailable'))
                 Main.notify('AgentWorkspaces', 'The AgentWorkspaces service is not running. Start it with: agent-workspaces daemon');

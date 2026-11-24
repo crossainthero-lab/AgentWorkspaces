@@ -176,12 +176,12 @@ Agents may only ask; a person decides through the CLI on a terminal, the viewer 
 * `workspace.start|stop|destroy {workspace}`
 * `workspace.pause {workspace, reason?}` (alias `workspace.takeover`) / `workspace.resume {workspace}`
 * `workspace.usage {workspace}` -> `{memory_bytes, cpu_ns, tasks}` (cgroup accounting of the whole workspace)
-* `workspace.enter {workspace?, takeover?, maximized?, display_env?}`: **enter request**. Emits
+* `workspace.enter {workspace?, takeover?, maximized?, environment?, display_env?}`: **enter request**. Emits
   `workspace.enter_requested` and opens the viewer window on the user's desktop (using the daemon's
   `WAYLAND_DISPLAY`, or `display_env` passed by the caller: `WAYLAND_DISPLAY`, `DISPLAY`, `XDG_RUNTIME_DIR`,
   `DBUS_SESSION_BUS_ADDRESS`; when its `XDG_RUNTIME_DIR` differs from the daemon's, the daemon's session bus address is
   not inherited). Without `workspace` the viewer opens on the workspace you used last, else the most recently active
-  (what the GNOME extension does). `maximized` opens the window maximized. A viewer that is already open is reused.
+  (what the GNOME extension does). `maximized` opens the window maximized; `environment` opens it full screen with the header as an overlay (the extension's "environment mode"). A viewer that is already open is reused.
   Returns `{launched, pid}`.
 * `workspace.launch {workspace, argv:[...], cwd?, env?}` -> `{app, pid, log, argv}`. The program runs with a
   freshly built environment that only references the workspace (see `docs/isolation-model.md`).
