@@ -39,7 +39,7 @@ DISPLAY_VARS = ("DISPLAY", "WAYLAND_DISPLAY", "WAYLAND_SOCKET", "XAUTHORITY", "X
                 "DBUS_SESSION_BUS_ADDRESS", "GDK_BACKEND", "QT_QPA_PLATFORM", "SDL_VIDEODRIVER")
 # Entries of the real runtime dir that stay reachable inside the guard directory: they are not display or desktop
 # services (systemd's private socket keeps `systemctl --user status` working; the session bus does NOT).
-LINKS = ("systemd", "gnupg", "podman", "docker.sock", "docker", "containers", "snapd-session-agent.socket")
+LINKS = ("systemd", "gnupg", "podman", "docker.sock", "docker", "containers")
 
 PRELUDE_ENV = {
     "WAYLAND_DISPLAY": GUARD_DISPLAY_NAME,
@@ -103,7 +103,7 @@ VIRTUAL_X = re.compile(r"\b(xvfb-run|Xvfb|Xvnc|Xephyr|Xnest|xvnc|x11vnc|Xwayland
 
 
 # The guard's own configuration: an agent must not edit it (a safety rail the guarded program can rewrite is no rail).
-PROTECTED_PATH_RE = re.compile(r"/\.claude/settings(\.local)?\.json|/\.hermes/(config\.yaml|shell-hooks-allowlist\.json)|"
+PROTECTED_PATH_RE = re.compile(r"(?<![A-Za-z0-9_])\.claude/settings(\.local)?\.json|(?<![A-Za-z0-9_])\.hermes/(config\.yaml|shell-hooks-allowlist\.json)|"
                                r"/agent-workspaces/(aw/guard|guard)|shell-hooks-allowlist\.json|\.claude\.json\b")
 WRITE_HINT_RE = re.compile(r"(^|[\s;&|(])(sed|perl|ruby)\s+(-[A-Za-z]*i|--in-place)|(^|[\s;&|(])(tee|mv|cp|rm|truncate|ln|"
                            r"install|dd|chmod|chattr|patch)\s|(^|[^<>0-9&])>>?\s*\S|\b(open|write_text|write_bytes|"
@@ -115,6 +115,8 @@ PROTECTED_MSG = ("Blocked by the AgentWorkspaces graphical-isolation guard: this
 
 
 def protected_write(text: str) -> Optional[str]:
+    if re.search(r"\bhermes\s+hooks\s+(revoke|remove|rm)\b", text or ""):
+        return "hermes hooks revoke"
     m = PROTECTED_PATH_RE.search(text or "")
     if m and WRITE_HINT_RE.search(text):
         return m.group(0).strip("/")
