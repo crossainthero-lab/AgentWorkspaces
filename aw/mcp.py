@@ -352,6 +352,15 @@ class Server:
             c.call("window.action", workspace=ws, window=int(a["window"]), action=a["action"], **ck)
             return self._text("ok")
         if name in mcp_ext.NAMES:                 # windows (move/resize/geometry), browsers, audio: aw/mcp_ext.py
+            if name == "launch_browser" and not a.get("browser"):
+                # "open my browser": pick the first browser that can actually be launched (the daemon's own default
+                # may be one that is only known from leftover profile data)
+                bl = c.call("browser.list", workspace=ws)["browsers"]
+                ok = [b for b in bl if b.get("launchable")]
+                if not ok:
+                    raise ApiError("E_NO_BROWSER", "no installed browser can be launched here: " + "; ".join(
+                        f"{b['id']}: {b.get('reason')}" for b in bl))
+                a = dict(a, browser=ok[0]["id"])
             return mcp_ext.call(c, name, a, ws)
         if name == "launch_app":
             return self._launch(ws, a)

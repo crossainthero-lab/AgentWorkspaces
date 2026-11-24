@@ -203,6 +203,22 @@ class McpTests(unittest.TestCase):
         for n in ("window_resize", "window_set_geometry", "list_browsers", "launch_browser", "request_browser_profile"):
             self.assertIn(n, names)
 
+    def test_launch_browser_without_a_name_picks_a_launchable_browser(self):
+        s = server([ws("mine", "claude-code")], default="mine")
+        real = s.client.call
+        def call(m, **p):
+            if m == "browser.list":
+                return {"browsers": [{"id": "chromium", "launchable": False, "reason": "not-installed"},
+                                     {"id": "google-chrome", "launchable": True}]}
+            if m == "browser.launch":
+                s.client.calls.append((m, p))
+                return {"browser": p["browser"], "app": 1, "pid": 5, "profile": {"mode": "throwaway", "name": ""}}
+            return real(m, **p)
+        s.client.call = call
+        r = self.rpc(s, "tools/call", {"name": "launch_browser", "arguments": {"url": "https://example.org"}})["result"]
+        self.assertFalse(r["isError"], r)
+        self.assertEqual([c for c in s.client.calls if c[0] == "browser.launch"][0][1]["browser"], "google-chrome")
+
     def test_browser_role_goes_through_browser_launch_with_a_throwaway_profile(self):
         s = server([ws("mine", "claude-code")], default="mine")
         import aw.apps as apps

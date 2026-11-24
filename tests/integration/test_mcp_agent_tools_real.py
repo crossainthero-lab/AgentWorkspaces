@@ -155,3 +155,53 @@ class AgentToolSurface(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
+
+
+class AgentWindowTools(unittest.TestCase):
+    """window_move / window_resize / window_set_geometry through the MCP server, checked on real pixels and on the
+    geometry the compositor / X server reports (floating workspace; SA2's window API)."""
+
+    def test_move_resize_and_geometry_are_real(self):
+        import base64
+        import time
+        proj = os.path.join(tempfile.mkdtemp(prefix="awproj"), "winproj")
+        os.makedirs(proj)
+        C.call("workspace.create", name="codex-winproj", agent_kind="codex", width=1000, height=700,
+               window_policy="floating")
+        m = Mcp("codex", proj)
+        try:
+            log = os.path.join(K.BASE, "win.log")
+            open(log, "w").close()
+            r = m.tool("launch_app", command=["/usr/bin/python3", K.PROBE, "WINBOX", log, "#2b6cb0"], screenshot=False)
+            self.assertFalse(r["isError"], r)
+            self.assertTrue(K.wait_for(lambda: any(e.get("ev") == "ready" for e in K.log_events(log)), 15))
+            time.sleep(1.0)
+            wins = json.loads(m.text("list_windows")[1])
+            wid = [w for w in wins if w["title"] == "probe WINBOX"][0]["id"]
+            err, txt = m.text("window_set_geometry", window=wid, x=300, y=200, width=500, height=300)
+            self.assertFalse(err, txt)
+            time.sleep(1.0)
+            g = json.loads(txt)["geometry"]
+            self.assertEqual((g["x"], g["y"], g["width"], g["height"]), (300, 200, 500, 300))
+
+            def pix(x, y):
+                r = m.tool("screenshot", region=[x, y, 1, 1])
+                import base64 as b64
+                png = b64.b64decode([c for c in r["content"] if c["type"] == "image"][0]["data"])
+                return K.pixel(png, 0, 0)
+            inside = pix(330, 240)          # the blue banner of the probe, inside the new rectangle
+            outside = pix(100, 100)
+            self.assertTrue(inside[2] > 120 and inside[0] < 90, f"banner not at the requested place: {inside}")
+            self.assertFalse(outside[2] > 120 and outside[0] < 90, f"window also covers the old place: {outside}")
+            err, txt = m.text("window_move", window=wid, x=500, y=350)
+            self.assertFalse(err, txt)
+            time.sleep(1.0)
+            self.assertTrue(pix(530, 390)[2] > 120)
+            self.assertFalse(pix(330, 240)[2] > 120 and pix(330, 240)[0] < 90, "window left a ghost at the old place")
+            err, txt = m.text("window_resize", window=wid, width=420, height=260)
+            self.assertFalse(err, txt)
+            g = json.loads(txt)["geometry"]
+            self.assertEqual((g["width"], g["height"]), (420, 260))
+        finally:
+            m.close()
+            C.call("workspace.destroy", workspace="codex-winproj")
