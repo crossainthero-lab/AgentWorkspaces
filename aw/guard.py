@@ -349,10 +349,43 @@ def _check_words(words: List[str], raw: str, depth: int) -> Optional[str]:
     return None
 
 
+HEREDOC_RE = re.compile(r"<<-?\s*(['\"]?)([A-Za-z_][A-Za-z0-9_]*)\1")
+
+
+def strip_heredocs(cmd: str) -> str:
+    """Remove here-document BODIES that are data for a program (python, cat, tee, jq ...). A body fed to a shell (sh, bash, zsh,
+    source, eval) is kept: those lines are commands. Without this, `python3 - <<EOF ... open(f) ... EOF` would be read as a
+    command called `open`."""
+    lines = cmd.split("\n")
+    out, i = [], 0
+    while i < len(lines):
+        line = lines[i]
+        out.append(line)
+        m = HEREDOC_RE.search(line)
+        i += 1
+        if not m:
+            continue
+        tag = m.group(2)
+        j = i
+        while j < len(lines) and lines[j].strip() != tag and lines[j].lstrip("\t") != tag:
+            j += 1
+        body = lines[i:j]
+        words = []
+        for w in _split_simple(line[:m.start()]):
+            words = _strip_wrappers(w) or words
+        feeds_shell = bool(words) and (os.path.basename(words[0]) in SHELLS or words[0] in ("source", ".", "eval", "ssh"))
+        if feeds_shell:
+            out.extend(body)
+        out.append(lines[j]) if j < len(lines) else None
+        i = j + 1
+    return "\n".join(out)
+
+
 def check_command(cmd: str, depth: int = 0) -> Decision:
     """Decide whether the shell command may run. Allowed commands still run under the guard environment."""
     if not isinstance(cmd, str):
         return Decision()
+    cmd = strip_heredocs(cmd)
     if WEBBROWSER_RE.search(cmd):
         return Decision(True, MSG.format(why="it opens the desktop browser through Python's webbrowser module"))
     pw = protected_write(cmd)

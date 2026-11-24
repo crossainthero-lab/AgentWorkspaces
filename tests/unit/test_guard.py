@@ -47,6 +47,7 @@ BLOCKED = [
     "flatpak run org.mozilla.firefox", "kioclient5 exec http://x", "mimeopen file.pdf", "xdg-open http://x &",
     "f(){ google-chrome \"$@\"; }; f http://x", "for u in a b; do firefox $u; done", "if true; then google-chrome http://x; fi",
     "ln -s /usr/bin/google-chrome-stable /tmp/c", "cp /usr/bin/firefox /tmp/f", "BROWSER=google-chrome python3 -m webbrowser x",
+    "bash <<EOF\nxdg-open http://x\nEOF", "sh <<'X'\nxeyes; xdotool key a\nX", "bash -s <<'E'\ngoogle-chrome http://x\nE",
     "google-chrome https://example.org", "firefox https://example.org", "firefox", "chromium-browser x",
     "/usr/bin/google-chrome-stable x", "nohup google-chrome x &", "brave-browser", "epiphany x",
 ]
@@ -61,6 +62,8 @@ ALLOWED = [
     "systemctl --user restart agent-workspaces.service", "journalctl --user -u foo -n 5",
     "google-chrome --headless --disable-gpu --screenshot=/tmp/x.png http://127.0.0.1:8000/",
     "chromium --headless=new --dump-dom http://127.0.0.1:8000/", "firefox --headless --screenshot /tmp/x.png http://127.0.0.1",
+    "python3 - <<'E'\ns = open('f').read()\nprint(s)\nE", "python3 <<EOF\nimport webbrowser_not_used\nx = open('a')\nEOF",
+    "cat > note.txt <<EOF\nuse xdg-open or firefox to view\nEOF", "tee f <<'X'\nopen the door\nX", "python3 -c \"s = open('f').read()\"",
     "code --list-extensions", "code --install-extension ms-python.python", "code --version", "libreoffice --headless --convert-to pdf a.odt",
     "google-chrome --user-data-dir=/tmp/p --no-first-run about:blank", "firefox --profile /tmp/ffp --version",
     "git commit -m 'open the browser docs'", "echo open", "grep -rn webbrowser src/", "python3 -c \"print('webbrowser')\"",
