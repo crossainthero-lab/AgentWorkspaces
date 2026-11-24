@@ -49,6 +49,11 @@ class Integrations(unittest.TestCase):
                 if agent == "antigravity":
                     rf = os.path.join(home, ".gemini", "GEMINI.md")
                     self.assertIn("agent-workspaces:begin", open(rf).read())
+                if agent in ("claude-code", "hermes"):
+                    self.assertIn("guard is ON", st.stdout, f"{agent}: {st.stdout}")
+                if agent == "hermes":
+                    soul = os.path.join(home, ".hermes", "SOUL.md")
+                    self.assertIn("agent-workspaces:begin", open(soul).read())
                 u = self.run_cli(home, agent, "uninstall")
                 self.assertEqual(u.returncode, 0, f"{agent} uninstall: {u.stdout} {u.stderr}")
                 st = self.run_cli(home, agent, "status")
@@ -57,6 +62,11 @@ class Integrations(unittest.TestCase):
                     self.assertFalse(os.path.exists(sk))
                 if agent == "antigravity":
                     self.assertFalse(os.path.exists(rf), "the managed block (the only content) must be removed")
+                if agent == "hermes":
+                    # Hermes seeds its own starter SOUL.md: our block must be gone, the rest stays
+                    self.assertTrue(not os.path.exists(soul) or "agent-workspaces:begin" not in open(soul).read())
+                if agent in ("claude-code", "hermes"):
+                    self.assertIn("guard is OFF", st.stdout)
                 tried.append(agent)
             finally:
                 shutil.rmtree(home, ignore_errors=True)

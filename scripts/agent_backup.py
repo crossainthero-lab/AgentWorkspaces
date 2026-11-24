@@ -20,7 +20,7 @@ import sys
 
 DEFAULT_FILES = [
     "~/.claude.json", "~/.claude/settings.json", "~/.claude/skills/agent-workspaces/SKILL.md",
-    "~/.hermes/config.yaml", "~/.hermes/shell-hooks-allowlist.json",
+    "~/.hermes/config.yaml", "~/.hermes/SOUL.md", "~/.hermes/shell-hooks-allowlist.json",
     "~/.config/agent-workspaces/guard-state.json", "~/.local/bin/agent-workspaces",
     "~/.config/systemd/user/agent-workspaces.service",
 ]

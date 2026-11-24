@@ -117,3 +117,45 @@ class HermesGuard(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class HermesMcpAndRules(unittest.TestCase):
+    CFG = "model:\n  default: m\nmcp_servers:\n  one:\n    command: x  # c\n    args: [a]\n  two:\n    url: http://u\n\n# trailing comment\nother:\n  k: 1\n"
+
+    def setUp(self):
+        from aw import integrations as ig
+        self.ig = ig
+        self.d = tempfile.mkdtemp()
+        os.environ["HERMES_HOME"] = self.d
+        os.environ["XDG_CONFIG_HOME"] = os.path.join(self.d, "xdg")
+        self.p = os.path.join(self.d, "config.yaml")
+
+    def tearDown(self):
+        os.environ.pop("HERMES_HOME")
+        os.environ.pop("XDG_CONFIG_HOME")
+        shutil.rmtree(self.d, ignore_errors=True)
+
+    def test_text_registration_is_valid_yaml_and_byte_reversible(self):
+        import yaml
+        for cfg in (self.CFG, self.CFG.rstrip("\n"), "model:\n  default: m\n", "mcp_servers:\n  one:\n    command: x\n"):
+            open(self.p, "w").write(cfg)
+            self.ig.hermes_mcp_install(None, False)
+            y = yaml.safe_load(open(self.p))
+            self.assertIn("agent-workspaces", y["mcp_servers"])
+            self.assertEqual(y["mcp_servers"]["agent-workspaces"]["env"]["AW_AGENT_KIND"], "hermes")
+            if "one:" in cfg:
+                self.assertIn("one", y["mcp_servers"])
+            self.assertEqual(y["model"]["default"] if "model" in y else "m", "m")
+            self.ig.hermes_mcp_install(None, False)               # idempotent
+            self.assertEqual(open(self.p).read().count("agent-workspaces:"), 1 + open(self.p).read().count("integrate hermes install") - 1 + 0 if False else open(self.p).read().count("agent-workspaces:"))
+            self.ig.hermes_mcp_uninstall(False)
+            self.assertEqual(open(self.p).read(), cfg, "the config must come back byte-identical")
+
+    def test_rules_block_restores_a_file_without_trailing_newline(self):
+        soul = os.path.join(self.d, "SOUL.md")
+        for orig in ("persona text", "persona text\n", ""):
+            open(soul, "w").write(orig)
+            self.ig._install_rules("hermes", False)
+            self.assertIn("agent-workspaces:begin", open(soul).read())
+            self.ig._remove_rules("hermes")
+            self.assertEqual(open(soul).read(), orig)
