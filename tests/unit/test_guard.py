@@ -45,6 +45,8 @@ BLOCKED = [
     "firefox --headless -profile /home/u/.mozilla/firefox/abc.default http://x", "firefox -P default http://x",
     "code .", "code /tmp/file.txt", "slack", "discord", "obsidian obsidian://open?vault=x", "signal-desktop", "codium .",
     "flatpak run org.mozilla.firefox", "kioclient5 exec http://x", "mimeopen file.pdf", "xdg-open http://x &",
+    "f(){ google-chrome \"$@\"; }; f http://x", "for u in a b; do firefox $u; done", "if true; then google-chrome http://x; fi",
+    "ln -s /usr/bin/google-chrome-stable /tmp/c", "cp /usr/bin/firefox /tmp/f", "BROWSER=google-chrome python3 -m webbrowser x",
     "google-chrome https://example.org", "firefox https://example.org", "firefox", "chromium-browser x",
     "/usr/bin/google-chrome-stable x", "nohup google-chrome x &", "brave-browser", "epiphany x",
 ]

@@ -86,7 +86,7 @@ def tearDownModule():
 
 
 def standin_env(with_bus=True):
-    e = {"PATH": os.environ["PATH"], "HOME": HOME or os.path.expanduser("~"), "LANG": "C.UTF-8",
+    e = {"PATH": "/usr/local/bin:/usr/bin:/bin", "HOME": HOME or os.path.expanduser("~"), "LANG": "C.UTF-8",
          "XDG_RUNTIME_DIR": HOST.rt, "WAYLAND_DISPLAY": "wayland-0", "DISPLAY": DISPLAY or ":0",
          "GSETTINGS_BACKEND": "memory", "GTK_USE_PORTAL": "0", "NO_AT_BRIDGE": "1", "GSK_RENDERER": "cairo",
          "XDG_CURRENT_DESKTOP": "labwc:wlroots", "WLR_RENDERER": "pixman"}
@@ -353,3 +353,82 @@ class Limits(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
+
+
+class SingleInstance(unittest.TestCase):
+    """The incident class: a browser started from an agent's shell hands its page to the browser ALREADY RUNNING on the
+    desktop through its profile (a socket in the user's real home), so a faked display does not help. Reproduced here
+    with a THROW-AWAY profile: a Chrome runs on the stand-in desktop with the stand-in HOME; its web server proves
+    whether a handoff happened (a request carrying a Chrome user agent)."""
+
+    def setUp(self):
+        import threading
+        from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+        self.log = []
+        log = self.log
+
+        class H(BaseHTTPRequestHandler):
+            def log_message(self, *a):
+                pass
+
+            def do_GET(self):
+                log.append((self.path, self.headers.get("User-Agent", "")))
+                b = b"<html><title>handoff</title><body>hello</body></html>"
+                self.send_response(200)
+                self.send_header("Content-Length", str(len(b)))
+                self.end_headers()
+                self.wfile.write(b)
+        self.srv = ThreadingHTTPServer(("127.0.0.1", 0), H)
+        self.port = self.srv.server_address[1]
+        threading.Thread(target=self.srv.serve_forever, daemon=True).start()
+        self.base = host_state()
+        self.chrome = subprocess.Popen(
+            ["google-chrome", "--ozone-platform=wayland", "--no-first-run", "--no-default-browser-check", "--password-store=basic", "about:blank"],
+            env=standin_env(), cwd=HOME, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
+        for _ in range(100):
+            if len(host_state()["windows"]) > len(self.base["windows"]):
+                break
+            time.sleep(0.2)
+        time.sleep(2.0)
+        self.after_start = host_state()
+
+    def tearDown(self):
+        reap(self.chrome)
+        self.srv.shutdown()
+        kill_standin_extras(self.base)
+
+    def fetched(self, path):
+        return [e for e in self.log if e[0] == path and "Chrome" in e[1]]
+
+    def test_handoff_happens_without_the_guard_and_the_guard_denies_every_variant(self):
+        self.assertGreater(len(self.after_start["windows"]), len(self.base["windows"]), "test setup: the stand-in Chrome did not start")
+        url = f"http://127.0.0.1:{self.port}"
+        # CONTROL (stand-in profile, unguarded): the handoff reaches the running browser
+        rc, p, _ = run_shell(f"google-chrome {url}/control", standin_env(), wait=8)
+        reap(p)
+        time.sleep(2)
+        self.assertTrue(self.fetched("/control"), "control: expected the running Chrome to receive the URL by handoff")
+        # the environment alone does NOT stop it (that is why the deny layer exists)
+        rc, p, _ = run_shell(f"google-chrome {url}/envonly", claude_guard_env(), wait=8)
+        reap(p)
+        time.sleep(2)
+        env_alone = bool(self.fetched("/envonly"))
+        variants = [
+            f"google-chrome {url}/v1", f"/usr/bin/google-chrome-stable {url}/v2", f"/opt/google/chrome/chrome {url}/v3",
+            f"env FOO=1 google-chrome {url}/v4", f"sh -c 'google-chrome {url}/v5'", f"bash -lc \"google-chrome {url}/v6\"",
+            f"nohup google-chrome {url}/v7 >/dev/null 2>&1 &", f"(setsid google-chrome {url}/v8 &)", f"timeout 5 google-chrome {url}/v9",
+            f"xdg-open {url}/v10", f"gio open {url}/v11", f"sensible-browser {url}/v12", f"x-www-browser {url}/v13",
+            f"python3 -m webbrowser {url}/v14", f"python3 -c \"import webbrowser; webbrowser.open('{url}/v15')\"", f"open {url}/v16",
+            f"google-chrome --user-data-dir={HOME}/.config/google-chrome {url}/v17",
+            f"google-chrome --headless --user-data-dir={HOME}/.config/google-chrome --dump-dom {url}/v18",
+            f"f(){{ google-chrome \"$@\"; }}; f {url}/v19", f"for u in {url}/v20; do google-chrome $u; done",
+            f"ln -s /usr/bin/google-chrome-stable /tmp/awg_chr; /tmp/awg_chr {url}/v21", f"cp /usr/bin/google-chrome-stable /tmp/awg_chr2",
+            f"BROWSER=google-chrome python3 -c \"import webbrowser; webbrowser.open('{url}/v22')\"",
+        ]
+        not_denied = [v for v in variants if not guard.check_command(v).deny]
+        self.assertEqual(not_denied, [], f"handoff variants the deny layer lets through: {not_denied}")
+        time.sleep(1)
+        later = [e for e in self.log if e[0].startswith("/v")]
+        self.assertEqual(later, [], "a denied variant reached the server")
+        print(f"\nSINGLE-INSTANCE: control handoff reproduced; environment alone stops it: {env_alone}; "
+              f"{len(variants)} variants denied by the guard (none executed)")

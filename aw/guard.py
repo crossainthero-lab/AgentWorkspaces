@@ -31,6 +31,7 @@ import json
 import os
 import re
 import shlex
+import shutil
 import sys
 from typing import List, Optional, Tuple
 
@@ -54,6 +55,7 @@ PRELUDE_UNSET = ("DISPLAY", "XAUTHORITY", "WAYLAND_SOCKET", "DBUS_SESSION_BUS_AD
 WRAPPERS = {"env", "nohup", "setsid", "time", "exec", "command", "builtin", "timeout", "nice", "ionice", "stdbuf",
             "unbuffer", "chronic", "flock", "taskset", "sudo", "doas", "xargs", "watch", "script", "dbus-run-session",
             "systemd-cat", "firejail", "bwrap", "unshare", "chrt", "prlimit", "setarch", "runuser"}
+KEYWORDS = {"{", "}", "do", "done", "then", "else", "elif", "fi", "if", "while", "until", "!", "function", "coproc"}
 SHELLS = {"sh", "bash", "dash", "zsh", "ksh", "fish"}
 
 # command word -> reason. Basenames; matched after wrappers are stripped.
@@ -252,7 +254,7 @@ def _strip_wrappers(words: List[str]) -> List[str]:
     """Drop leading VAR=value words and wrapper commands (with their options) to reach the real command word."""
     w = list(words)
     for _ in range(12):
-        while w and re.match(r"^[A-Za-z_][A-Za-z0-9_]*=", w[0]):
+        while w and (re.match(r"^[A-Za-z_][A-Za-z0-9_]*=", w[0]) or w[0] in KEYWORDS):
             w.pop(0)
         if not w:
             return w
@@ -290,6 +292,15 @@ def _check_words(words: List[str], raw: str, depth: int) -> Optional[str]:
     base = os.path.basename(w[0])
     args = w[1:]
     joined = " ".join(args)
+    # a symlink or copy with another name must not hide a browser: look at what the word really is
+    if not (BROWSERS.match(base) or ELECTRON_APPS.match(base) or base in DENY_BIN):
+        try:
+            real = os.path.realpath(shutil.which(w[0]) or w[0]) if ("/" in w[0] or shutil.which(w[0])) else ""
+        except (OSError, ValueError):
+            real = ""
+        rb = os.path.basename(real) if real else ""
+        if rb and rb != base and (BROWSERS.match(rb) or ELECTRON_APPS.match(rb) or rb in DENY_BIN):
+            base = rb
     if base in DENY_BIN:
         return f"`{base}` ({DENY_BIN[base]})"
     if base in ("gio",) and args and args[0] in GIO_DENY_SUBCMDS:
@@ -308,6 +319,9 @@ def _check_words(words: List[str], raw: str, depth: int) -> Optional[str]:
                 return "`systemctl --user " + verbs[0] + "` of a graphical unit"
     if base in ("at", "batch"):
         return f"`{base}` (scheduled launch inside the desktop session)"
+    if base in ("ln", "cp", "mv", "install", "rsync") and any(
+            BROWSERS.match(os.path.basename(a)) or ELECTRON_APPS.match(os.path.basename(a)) for a in args if not a.startswith("-")):
+        return f"`{base}` of a browser or single-instance application binary (an alias would hide it from this guard)"
     if base == "flatpak" and args and args[0] in ("run", "override"):
         return "`flatpak run` (starts an app in the desktop session)"
     if BROWSERS.match(base) or ELECTRON_APPS.match(base):

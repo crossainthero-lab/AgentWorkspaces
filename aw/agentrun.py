@@ -38,7 +38,8 @@ CHEAP_MODEL = {"claude-code": "haiku", "codex": "gpt-6-luna", "antigravity": "ge
 # environment variable holding its key. Both are the acceptance harness's defaults; override for another setup.
 HERMES_PROVIDER = os.environ.get("AW_HERMES_PROVIDER", "spark")
 HERMES_KEY_NAME = os.environ.get("AW_HERMES_KEY_ENV", "SPARK_LLM_API_KEY")
-HERMES_RUN_HOME = os.path.join(os.path.expanduser("~"), ".cache", "agent-workspaces", "hermes-home")
+# outside every real home directory: the agent process must not see a real-home path (tests/acceptance/privenv.py)
+HERMES_RUN_HOME = os.path.join("/tmp", f"awt-hermes-home-{os.getuid()}")
 
 
 def _hermes_key_env() -> Dict[str, str]:

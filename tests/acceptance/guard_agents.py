@@ -16,7 +16,7 @@ import subprocess
 import sys
 import time
 
-from tests.acceptance import harness
+from tests.acceptance import harness, privenv
 from aw import agentrun, guard, guard_install
 import tests.integration.test_guard_real as G
 
@@ -45,11 +45,12 @@ def settings_for_claude():
                                       "hooks": [{"type": "command", "command": guard_install.hook_command("claude")}]}]}}
 
 
-def standin_agent_env(extra=None):
+def standin_vars():
+    """The stand-in desktop's variables for the agent ('its host environment'). HOME is the stand-in's throw-away home, so
+    a handoff to the stand-in's running browser is possible (and would be seen); the user's real home never is."""
     e = G.standin_env()
-    e["HOME"] = os.path.expanduser("~")       # the agent's own login; the stand-in has no credentials
-    e.update({"TERM": "dumb", "NO_COLOR": "1", "BROWSER": "xdg-open"})      # BROWSER as a typical desktop has it
-    e.update(extra or {})
+    e["PATH"] = privenv.SYSTEM_PATH
+    e["BROWSER"] = "xdg-open"          # as a typical desktop has it
     return e
 
 
@@ -60,7 +61,8 @@ def customize_claude(guard_on):
         a[a.index("--allowedTools") + 1] = "mcp__agent-workspaces,Bash"
         if guard_on:
             a += ["--settings", json.dumps(settings_for_claude())]
-        plan.env = standin_agent_env()
+        plan.extra_env = standin_vars()
+        plan.allowed_roots = (G.K.BASE,)
     return cust
 
 
@@ -82,9 +84,8 @@ def customize_hermes(guard_on):
                 os.environ.pop("HERMES_HOME", None)
             else:
                 os.environ["HERMES_HOME"] = old
-        env = standin_agent_env({"HERMES_HOME": home})
-        env.update(agentrun._hermes_key_env())
-        plan.env = env
+        plan.extra_env = standin_vars()
+        plan.allowed_roots = (G.K.BASE,)
     return cust
 
 
@@ -141,6 +142,11 @@ def main(agent, guard_on):
     port = int(srv.stdout.readline().split("port")[1].split()[0])
     results = []
     out = os.path.join(ROOT, ".scratch", "guardruns")
+    os.makedirs(out, exist_ok=True)
+    chrome = subprocess.Popen(["google-chrome", "--ozone-platform=wayland", "--no-first-run", "--no-default-browser-check",
+                               "--password-store=basic", "about:blank"], env=G.standin_env(), cwd=G.HOME, stdin=subprocess.DEVNULL,
+                              stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
+    time.sleep(6)       # a browser is running on the stand-in desktop: a leaked `google-chrome URL` would hand its page to it
     try:
         for name, prompt in PROMPTS:
             base_state = G.host_state()
@@ -160,6 +166,7 @@ def main(agent, guard_on):
                 G.kill_standin_extras(base_state)
     finally:
         os.killpg(srv.pid, signal.SIGTERM)
+        G.reap(chrome)
         json.dump(results, open(os.path.join(out, f"{agent}-{'guard' if guard_on else 'noguard'}-summary.json"), "w"), indent=1, default=str)
         G.tearDownModule()
         common.stop_daemon(cli)

@@ -30,7 +30,7 @@ def have(cmd):
 
 def _spawn_daemon(extra_env=None):
     global DAEMON
-    env = {"PATH": os.environ["PATH"], "HOME": os.path.expanduser("~"), "AW_BASE_DIR": BASE, "PYTHONPATH": ROOT,
+    env = {"PATH": os.environ["PATH"], "HOME": os.environ.get("AW_TEST_DAEMON_HOME") or os.path.expanduser("~"), "AW_BASE_DIR": BASE, "PYTHONPATH": ROOT,
            "XDG_RUNTIME_DIR": f"/run/user/{os.getuid()}",
            "DBUS_SESSION_BUS_ADDRESS": os.environ.get("DBUS_SESSION_BUS_ADDRESS",
                                                       f"unix:path=/run/user/{os.getuid()}/bus"),
