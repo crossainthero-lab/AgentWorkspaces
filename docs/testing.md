@@ -32,7 +32,7 @@ Requirements: labwc, python3-gi (GTK4), a systemd user session; GPU tests skip w
 python3 -m unittest tests.integration.test_reliability_real tests.integration.test_sandbox_real -v   # 35 tests, about 75 s
 ```
 
-Last runs of the integrated branch (`feat/integration`) on the development workstation, one module at a time, no host display variables: `test_workspaces_real` 17 tests (1 skipped: Electron binary not provided), `test_reliability_real` 22, `test_sandbox_real` 13, `test_windows_audio_real` 8, `test_browsers_real` 11 (10 run, 1 skipped: Firefox, no non-snap build provided), `test_mcp_agent_tools_real` 3, all passing; `gnome-extension/tests/run_real.py --plain` 50/50. `test_agent_integrations_real` (real agent CLIs) and the real-model acceptance runs were not repeated on the integrated branch (the acceptance results in [compatibility-matrix.md](compatibility-matrix.md) were measured on `feat/agents-integration`). Each module starts its own daemon under `/run/user/UID/awt-*`, uses at most two compositors at a time and removes everything it started (processes are killed only by exact pid).
+Last runs of the integrated branch (`feat/integration`) on the development workstation, one module at a time, no host display variables: `test_workspaces_real` 17 tests (1 skipped: Electron binary not provided), `test_reliability_real` 22, `test_sandbox_real` 13, `test_windows_audio_real` 8, `test_browsers_real` 11 (10 run, 1 skipped: Firefox, no non-snap build provided), `test_mcp_agent_tools_real` 3, all passing; `gnome-extension/tests/run_real.py --plain` 50/50, `run_isolated.py` 29/29, `run_cube.py --personal 2` and `--personal 4` 21/21 each (the first `--personal 4` run lost its shell (D-Bus `NoReply`) after 12 checks, cause unknown, log not kept; it passed in 6 of 6 reruns). `test_agent_integrations_real` (real agent CLIs) and the real-model acceptance runs were not repeated on the integrated branch (the acceptance results in [compatibility-matrix.md](compatibility-matrix.md) were measured on `feat/agents-integration`). Each module starts its own daemon under `/run/user/UID/awt-*`, uses at most two compositors at a time and removes everything it started (processes are killed only by exact pid).
 
 | Test class | What it really does | Maps to validation item |
 |---|---|---|
@@ -81,9 +81,10 @@ The test harness (`tests/harness.py`) provides **HostSim**, the stand-in desktop
 
 ## Isolated GNOME Shell, real stack
 
-`python3 gnome-extension/tests/run_real.py [--plain] [--media DIR]`: 53 checks (50 with `--plain`) with the real daemon, real workspaces, the real
+`python3 -I gnome-extension/tests/run_real.py [--plain] [--media DIR]`: 53 checks (50 with `--plain`) with the real daemon, real workspaces, the real
 viewer and the developer's extension set in a private headless GNOME Shell; `demo_video.py` records the demo video;
 `measure_gs.py` prints the numbers in [measurements.md](measurements.md). Details: [gnome-extension.md](gnome-extension.md).
+`python3 -I gnome-extension/tests/run_cube.py --personal N` (N = 2 and 4): 21 checks of the cube-native Ctrl+Alt+Down/Up turn with Desktop Cube, Tiling Shell and the other extensions of the developer's session (copied; their settings are read once with `dconf dump` into a private keyfile), full-screen environment mode and what the turn leaves behind.
 They use the user's systemd manager only to create workspace scopes (as the integration tests do), nothing on the real
 screen, no write to the real dconf (the user's extension settings are only *read* with `dconf dump`).
 
