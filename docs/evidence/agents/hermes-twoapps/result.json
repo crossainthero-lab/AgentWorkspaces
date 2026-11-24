@@ -1,0 +1,36 @@
+{
+  "agent": "hermes",
+  "model": "qwen3.6-35b-a3b",
+  "prompt": "Open the calculator and a text editor. Work out 17 times 23 in the calculator, then type the result into the text editor.",
+  "exit_code": 1,
+  "seconds": 49.8,
+  "workspace": "hermes-twoapps",
+  "run_alongside": [],
+  "workspace_viewers_attached": 0,
+  "workspace_windows": [
+    "Calculator",
+    "391 (Draft) - Text Editor"
+  ],
+  "files_in_workspace_home": [],
+  "file_previews": {},
+  "host_display_variables_seen_in_agent_process_group": [],
+  "host_wayland_sockets_before_after": [
+    {
+      "host_sockets": [
+        "wayland-0"
+      ]
+    },
+    {
+      "host_sockets": [
+        "wayland-0"
+      ]
+    }
+  ],
+  "dbus_calls_through_filtering_proxy": [],
+  "agent_dbus_addresses": [],
+  "agent_peak_pss_mib_incl_mcp_server": 63.9,
+  "agent_cpu_seconds": 0.76,
+  "workspace_memory_mib": 279,
+  "workspace_cpu_seconds": 2.9,
+  "usage": null
+}

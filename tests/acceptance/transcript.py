@@ -100,7 +100,7 @@ def antigravity(lines):
                 if s.get("tool_name") == "call_mcp_tool":
                     out.append(f"  call {p.get('ToolName')} {clean(json.dumps(p.get('Arguments')), 120)} -> {clean(ti.get('output') or '', 110)}")
                 elif s.get("tool_name") != "update_steps":
-                    out.append(f"  [{s.get('tool_name')}] {clean(json.dumps(p), 140)} -> {clean(ti.get('output') or 'denied/none', 80)}")
+                    out.append(f"  [{s.get('tool_name')}] {clean(json.dumps(p), 140)} -> {clean(ti.get('output') or ('ok, no text output (image read)' if s.get('tool_name') == 'read_file' else 'no output (auto-denied in headless mode)'), 80)}")
         elif ev == "result":
             r = m.get("result", {})
             if r.get("response"):

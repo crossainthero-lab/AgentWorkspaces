@@ -1,0 +1,57 @@
+{
+  "agent": "antigravity",
+  "model": "gemini-3.8-flash-low",
+  "prompt": "Open a text editor, write a short paragraph about autumn rain and save it as autumn.txt.",
+  "exit_code": 0,
+  "seconds": 71.9,
+  "workspace": "antigravity-editor",
+  "run_alongside": [],
+  "workspace_viewers_attached": 0,
+  "workspace_windows": [
+    "autumn.txt (~/) - Text Editor"
+  ],
+  "files_in_workspace_home": [
+    "autumn.txt"
+  ],
+  "file_previews": {
+    "autumn.txt": "Autumn rain arrives with a quiet grace, tapping rhythmically against the windowpane and washing the amber foliage with a gentle mist. The crisp chill in the air"
+  },
+  "host_display_variables_seen_in_agent_process_group": [],
+  "host_wayland_sockets_before_after": [
+    {
+      "host_sockets": [
+        "wayland-0"
+      ]
+    },
+    {
+      "host_sockets": [
+        "wayland-0"
+      ]
+    }
+  ],
+  "dbus_calls_through_filtering_proxy": [
+    "org.freedesktop.DBus org.freedesktop.DBus.Hello",
+    "org.freedesktop.secrets org.freedesktop.DBus.Properties.Get",
+    "org.freedesktop.secrets org.freedesktop.Secret.Collection.SearchItems",
+    "org.freedesktop.secrets org.freedesktop.Secret.Item.GetSecret",
+    "org.freedesktop.secrets org.freedesktop.Secret.Service.OpenSession",
+    "org.freedesktop.secrets org.freedesktop.Secret.Service.Unlock",
+    "org.freedesktop.secrets org.freedesktop.Secret.Session.Close"
+  ],
+  "agent_dbus_addresses": [
+    "unix:path=~/.cache/claude-tmp/aw-run-ns7bf8qu/bus"
+  ],
+  "agent_peak_pss_mib_incl_mcp_server": 291.1,
+  "agent_cpu_seconds": 1.26,
+  "workspace_memory_mib": 207,
+  "workspace_cpu_seconds": 3.5,
+  "usage": {
+    "turns": 1,
+    "duration_s": 67.591984033,
+    "input_tokens": 38224,
+    "output_tokens": 1292,
+    "thinking_tokens": 0,
+    "cache_read_tokens": 120268,
+    "total_tokens": 39516
+  }
+}

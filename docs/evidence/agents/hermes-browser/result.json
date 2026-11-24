@@ -1,0 +1,35 @@
+{
+  "agent": "hermes",
+  "model": "qwen3.6-35b-a3b",
+  "prompt": "Open my browser and visit agdc.dev, then tell me what the page's main heading says.",
+  "exit_code": 0,
+  "seconds": 19.7,
+  "workspace": "hermes-browser",
+  "run_alongside": [],
+  "workspace_viewers_attached": 0,
+  "workspace_windows": [
+    "AgentDock Silver \u2014 one workspace, every agent - Google Chrome"
+  ],
+  "files_in_workspace_home": [],
+  "file_previews": {},
+  "host_display_variables_seen_in_agent_process_group": [],
+  "host_wayland_sockets_before_after": [
+    {
+      "host_sockets": [
+        "wayland-0"
+      ]
+    },
+    {
+      "host_sockets": [
+        "wayland-0"
+      ]
+    }
+  ],
+  "dbus_calls_through_filtering_proxy": [],
+  "agent_dbus_addresses": [],
+  "agent_peak_pss_mib_incl_mcp_server": 64.5,
+  "agent_cpu_seconds": 0.64,
+  "workspace_memory_mib": 565,
+  "workspace_cpu_seconds": 6.1,
+  "usage": null
+}

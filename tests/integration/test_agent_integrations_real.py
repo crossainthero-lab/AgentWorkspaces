@@ -46,12 +46,17 @@ class Integrations(unittest.TestCase):
                                       "agent-workspaces", "SKILL.md")
                     self.assertTrue(os.path.exists(sk))
                     self.assertIn("never the user's personal desktop", open(sk).read())
+                if agent == "antigravity":
+                    rf = os.path.join(home, ".gemini", "GEMINI.md")
+                    self.assertIn("agent-workspaces:begin", open(rf).read())
                 u = self.run_cli(home, agent, "uninstall")
                 self.assertEqual(u.returncode, 0, f"{agent} uninstall: {u.stdout} {u.stderr}")
                 st = self.run_cli(home, agent, "status")
                 self.assertIn("not registered", st.stdout, f"{agent}: {st.stdout} {st.stderr}")
                 if agent in ("claude-code", "codex"):
                     self.assertFalse(os.path.exists(sk))
+                if agent == "antigravity":
+                    self.assertFalse(os.path.exists(rf), "the managed block (the only content) must be removed")
                 tried.append(agent)
             finally:
                 shutil.rmtree(home, ignore_errors=True)

@@ -103,6 +103,24 @@ class IntegrateDryRun(unittest.TestCase):
         finally:
             os.environ["HOME"] = old
 
+    def test_rules_block_is_reversible_and_keeps_the_users_text(self):
+        home = tempfile.mkdtemp()
+        os.makedirs(os.path.join(home, ".gemini"))
+        rf = os.path.join(home, ".gemini", "GEMINI.md")
+        open(rf, "w").write("# my own rules\nbe brief\n")
+        old = os.environ.get("HOME")
+        os.environ["HOME"] = home
+        try:
+            integrations._install_rules("antigravity", False)
+            integrations._install_rules("antigravity", False)          # idempotent
+            txt = open(rf).read()
+            self.assertEqual(txt.count("agent-workspaces:begin"), 1)
+            self.assertIn("be brief", txt)
+            integrations._remove_rules("antigravity")
+            self.assertEqual(open(rf).read(), "# my own rules\nbe brief\n")
+        finally:
+            os.environ["HOME"] = old
+
     def test_skill_text_states_the_rule(self):
         self.assertIn("never the user's personal desktop", integrations.SKILL_MD)
         self.assertIn("automatically", integrations.SKILL_MD)

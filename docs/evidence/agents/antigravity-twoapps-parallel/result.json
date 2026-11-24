@@ -1,0 +1,57 @@
+{
+  "agent": "antigravity",
+  "model": "gemini-3.8-flash-low",
+  "prompt": "Open the calculator and a text editor. Work out 17 times 23 in the calculator, then type the result into the text editor.",
+  "exit_code": 0,
+  "seconds": 43.1,
+  "workspace": "antigravity-twoapps",
+  "run_alongside": [
+    "codex:browser"
+  ],
+  "workspace_viewers_attached": 0,
+  "workspace_windows": [
+    "Calculator",
+    "39191 (Draft) - Text Editor",
+    "Calculator"
+  ],
+  "files_in_workspace_home": [],
+  "file_previews": {},
+  "host_display_variables_seen_in_agent_process_group": [],
+  "host_wayland_sockets_before_after": [
+    {
+      "host_sockets": [
+        "wayland-0"
+      ]
+    },
+    {
+      "host_sockets": [
+        "wayland-0"
+      ]
+    }
+  ],
+  "dbus_calls_through_filtering_proxy": [
+    "org.freedesktop.DBus org.freedesktop.DBus.Hello",
+    "org.freedesktop.secrets org.freedesktop.DBus.Properties.Get",
+    "org.freedesktop.secrets org.freedesktop.Secret.Collection.SearchItems",
+    "org.freedesktop.secrets org.freedesktop.Secret.Item.GetSecret",
+    "org.freedesktop.secrets org.freedesktop.Secret.Service.OpenSession",
+    "org.freedesktop.secrets org.freedesktop.Secret.Service.Unlock",
+    "org.freedesktop.secrets org.freedesktop.Secret.Session.Close"
+  ],
+  "agent_dbus_addresses": [
+    "unix:path=~/.cache/claude-tmp/aw-run-fj8v3lnr/bus"
+  ],
+  "agent_peak_pss_mib_incl_mcp_server": 278.3,
+  "agent_cpu_seconds": 2.1,
+  "workspace_memory_mib": 325,
+  "workspace_cpu_seconds": 4.8,
+  "usage": {
+    "turns": 1,
+    "duration_s": 39.332428944,
+    "input_tokens": 22913,
+    "output_tokens": 543,
+    "thinking_tokens": 0,
+    "cache_read_tokens": 51128,
+    "total_tokens": 23456
+  }
+}

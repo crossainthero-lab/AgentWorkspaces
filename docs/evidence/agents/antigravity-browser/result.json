@@ -1,0 +1,54 @@
+{
+  "agent": "antigravity",
+  "model": "gemini-3.8-flash-low",
+  "prompt": "Open my browser and visit agdc.dev, then tell me what the page's main heading says.",
+  "exit_code": 0,
+  "seconds": 33.8,
+  "workspace": "antigravity-browser",
+  "run_alongside": [],
+  "workspace_viewers_attached": 0,
+  "workspace_windows": [
+    "AgentDock Silver \u2014 one workspace, every agent - Google Chrome"
+  ],
+  "files_in_workspace_home": [],
+  "file_previews": {},
+  "host_display_variables_seen_in_agent_process_group": [],
+  "host_wayland_sockets_before_after": [
+    {
+      "host_sockets": [
+        "wayland-0"
+      ]
+    },
+    {
+      "host_sockets": [
+        "wayland-0"
+      ]
+    }
+  ],
+  "dbus_calls_through_filtering_proxy": [
+    "org.freedesktop.DBus org.freedesktop.DBus.Hello",
+    "org.freedesktop.secrets org.freedesktop.DBus.Properties.Get",
+    "org.freedesktop.secrets org.freedesktop.Secret.Collection.CreateItem",
+    "org.freedesktop.secrets org.freedesktop.Secret.Collection.SearchItems",
+    "org.freedesktop.secrets org.freedesktop.Secret.Item.GetSecret",
+    "org.freedesktop.secrets org.freedesktop.Secret.Service.OpenSession",
+    "org.freedesktop.secrets org.freedesktop.Secret.Service.Unlock",
+    "org.freedesktop.secrets org.freedesktop.Secret.Session.Close"
+  ],
+  "agent_dbus_addresses": [
+    "unix:path=~/.cache/claude-tmp/aw-run-_ja2srol/bus"
+  ],
+  "agent_peak_pss_mib_incl_mcp_server": 283.2,
+  "agent_cpu_seconds": 1.05,
+  "workspace_memory_mib": 608,
+  "workspace_cpu_seconds": 10.5,
+  "usage": {
+    "turns": 1,
+    "duration_s": 27.926801387,
+    "input_tokens": 25512,
+    "output_tokens": 488,
+    "thinking_tokens": 0,
+    "cache_read_tokens": 57804,
+    "total_tokens": 26000
+  }
+}

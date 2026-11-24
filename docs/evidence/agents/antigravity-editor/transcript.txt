@@ -1,0 +1,21 @@
+prompt: Open a text editor, write a short paragraph about autumn rain and save it as autumn.txt.
+
+[init] model=gemini-3.8-flash-low tools=60 (incl. its own shell and browser tools; only mcp(agent-workspaces/*) is allowed in headless mode)
+  call launch_app {"app": "text editor"} -> launched Text Editor (app 1, pid 2226875) in workspace antigravity-editor; workspace 'antigravity-editor' scre...
+  [read_file] {"Path": "<tmp>/home/.gemini/antigravity-cli/brain/93bf2982-f512-498a-9eb7-f79299f768d2/.system_generated/steps/3/media_0.png"} -> ok, no text output (image read)
+  call keyboard_type {"text": "Autumn rain arrives with a quiet grace, tapping rhythmically against the windowpane and washing the amber foli... -> ok (pointer at 0.0,0.0)
+  call screenshot {} -> workspace 'antigravity-editor' screen 1280x720 px (captured in 10.5 ms); also saved as <run>/wd0fc97/shots/sho...
+  [read_file] {"Path": "<tmp>/home/.gemini/antigravity-cli/brain/93bf2982-f512-498a-9eb7-f79299f768d2/.system_generated/steps/13/media_0.png"} -> ok, no text output (image read)
+  call keyboard_key {"combo": "Ctrl+s"} -> ok (pointer at 0.0,0.0)
+  call wait {"seconds": 1} -> waited
+  call screenshot {} -> workspace 'antigravity-editor' screen 1280x720 px (captured in 11.0 ms); also saved as <run>/wd0fc97/shots/sho...
+  [read_file] {"Path": "<tmp>/home/.gemini/antigravity-cli/brain/93bf2982-f512-498a-9eb7-f79299f768d2/.system_generated/steps/19/media_0.png"} -> ok, no text output (image read)
+  call keyboard_key {"combo": "Ctrl+a"} -> ok (pointer at 0.0,0.0)
+  call keyboard_type {"text": "autumn.txt"} -> ok (pointer at 0.0,0.0)
+  call keyboard_key {"combo": "Return"} -> ok (pointer at 0.0,0.0)
+  call wait {"seconds": 1} -> waited
+  call screenshot {} -> workspace 'antigravity-editor' screen 1280x720 px (captured in 24.6 ms); also saved as <run>/wd0fc97/shots/sho...
+  [read_file] {"Path": "<tmp>/home/.gemini/antigravity-cli/brain/93bf2982-f512-498a-9eb7-f79299f768d2/.system_generated/steps/28/media_0.png"} -> ok, no text output (image read)
+agent: I have opened the text editor, written a short paragraph about autumn rain, and saved the file as `autumn.txt`.  **Paragraph text:** > Autumn rain arrives with a quiet grace, tapping rhythmically against the windowpane a...
+
+USAGE {"turns": 1, "duration_s": 67.591984033, "input_tokens": 38224, "output_tokens": 1292, "thinking_tokens": 0, "cache_read_tokens": 120268, "total_tokens": 39516}

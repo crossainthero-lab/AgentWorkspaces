@@ -1,0 +1,33 @@
+prompt: Open the calculator and a text editor. Work out 17 times 23 in the calculator, then type the result into the text editor.
+
+[init] model=gemini-3.8-flash-low tools=60 (incl. its own shell and browser tools; only mcp(agent-workspaces/*) is allowed in headless mode)
+  call launch_app {"app": "calculator"} -> launched Calculator (app 1, pid 3317729) in workspace antigravity-twoapps; workspace 'antigravity-twoapps' scr...
+  call launch_app {"app": "text editor"} -> launched Text Editor (app 2, pid 3317829) in workspace antigravity-twoapps; workspace 'antigravity-twoapps' sc...
+  [read_file] {"Path": "<tmp>/home/.gemini/antigravity-cli/brain/8ce60093-c5b5-4024-8343-3086df220110/.system_generated/steps/4/media_0.png"} -> ok, no text output (image read)
+  call list_windows {} -> [   {     "id": 1,     "title": "Calculator",     "app_id": "org.gnome.Calculator",     "focused": false,     ...
+  call window_action {"action": "focus", "window": 1} -> ok
+  call screenshot {} -> workspace 'antigravity-twoapps' screen 1280x720 px (captured in 8.4 ms); also saved as <run>/wa094b7/shots/sho...
+  [read_file] {"Path": "<tmp>/home/.gemini/antigravity-cli/brain/8ce60093-c5b5-4024-8343-3086df220110/.system_generated/steps/15/media_0.png"} -> ok, no text output (image read)
+  call keyboard_type {"text": "17*23"} -> ok (pointer at 0.0,0.0)
+  call keyboard_key {"combo": "Return"} -> ok (pointer at 0.0,0.0)
+  call screenshot {} -> workspace 'antigravity-twoapps' screen 1280x720 px (captured in 18.1 ms); also saved as <run>/wa094b7/shots/sh...
+  [read_file] {"Path": "<tmp>/home/.gemini/antigravity-cli/brain/8ce60093-c5b5-4024-8343-3086df220110/.system_generated/steps/24/media_0.png"} -> ok, no text output (image read)
+  call mouse_click {"button": "left", "x": 712, "y": 920} -> ok (pointer at 712,719)
+  call mouse_click {"button": "left", "x": 712, "y": 670} -> ok (pointer at 712,670)
+  call screenshot {} -> workspace 'antigravity-twoapps' screen 1280x720 px (captured in 9.3 ms); also saved as <run>/wa094b7/shots/sho...
+  [read_file] {"Path": "<tmp>/home/.gemini/antigravity-cli/brain/8ce60093-c5b5-4024-8343-3086df220110/.system_generated/steps/32/media_0.png"} -> ok, no text output (image read)
+  call window_action {"action": "focus", "window": 2} -> ok
+  call keyboard_type {"text": "391"} -> ok (pointer at 712,670)
+  call screenshot {} -> workspace 'antigravity-twoapps' screen 1280x720 px (captured in 8.2 ms); also saved as <run>/wa094b7/shots/sho...
+  [read_file] {"Path": "<tmp>/home/.gemini/antigravity-cli/brain/8ce60093-c5b5-4024-8343-3086df220110/.system_generated/steps/39/media_0.png"} -> ok, no text output (image read)
+  call keyboard_key {"combo": "Escape"} -> ok (pointer at 712,670)
+  call mouse_click {"button": "left", "x": 300, "y": 300} -> ok (pointer at 300,300)
+  call keyboard_type {"text": "391"} -> ok (pointer at 300,300)
+  call screenshot {} -> workspace 'antigravity-twoapps' screen 1280x720 px (captured in 12.0 ms); also saved as <run>/wa094b7/shots/sh...
+  [read_file] {"Path": "<tmp>/home/.gemini/antigravity-cli/brain/8ce60093-c5b5-4024-8343-3086df220110/.system_generated/steps/46/media_0.png"} -> ok, no text output (image read)
+  call keyboard_type {"text": "91"} -> ok (pointer at 300,300)
+  call screenshot {} -> workspace 'antigravity-twoapps' screen 1280x720 px (captured in 10.7 ms); also saved as <run>/wa094b7/shots/sh...
+  [read_file] {"Path": "<tmp>/home/.gemini/antigravity-cli/brain/8ce60093-c5b5-4024-8343-3086df220110/.system_generated/steps/52/media_0.png"} -> ok, no text output (image read)
+agent: I have completed the tasks:  1. **Launched Applications**: Opened both **Calculator** and **Text Editor**. 2. **Calculated in Calculator**: Evaluated `17 × 23`, yielding **`391`**. 3. **Typed into Text Editor**: Focused ...
+
+USAGE {"turns": 1, "duration_s": 76.524103401, "input_tokens": 62108, "output_tokens": 1990, "thinking_tokens": 0, "cache_read_tokens": 284154, "total_tokens": 64098}

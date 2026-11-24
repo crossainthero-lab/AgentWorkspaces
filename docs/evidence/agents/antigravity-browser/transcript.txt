@@ -1,0 +1,10 @@
+prompt: Open my browser and visit agdc.dev, then tell me what the page's main heading says.
+
+[init] model=gemini-3.8-flash-low tools=60 (incl. its own shell and browser tools; only mcp(agent-workspaces/*) is allowed in headless mode)
+  call list_browsers {} -> {   "browsers": [     {       "id": "google-chrome",       "label": "Google Chrome",       "family": "chromium...
+  call launch_browser {"browser": "google-chrome", "url": "https://agdc.dev"} -> launched google-chrome (app 1, pid 3344615), profile throwaway. Take a screenshot to see it.
+  call screenshot {} -> workspace 'antigravity-browser' screen 1280x720 px (captured in 21.1 ms); also saved as <run>/wca349c/shots/sh...
+  [read_file] {"Path": "<tmp>/home/.gemini/antigravity-cli/brain/5792e8f1-78a1-4d22-9ad5-9cdad5dcdefe/.system_generated/steps/11/media_0.png"} -> ok, no text output (image read)
+agent: The main heading on the [agdc.dev](https://agdc.dev) page says:  # **One workspace. Every agent.**  *(with the subheading: "Claude Code, Codex, and Antigravity. All in one place.")* 
+
+USAGE {"turns": 1, "duration_s": 27.926801387, "input_tokens": 25512, "output_tokens": 488, "thinking_tokens": 0, "cache_read_tokens": 57804, "total_tokens": 26000}

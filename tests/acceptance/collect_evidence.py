@@ -58,6 +58,8 @@ def main(pairs):
                "files_in_workspace_home": r.get("home_files"), "file_previews": r.get("home_previews"),
                "host_display_variables_seen_in_agent_process_group": r.get("agent_env_host_display_vars"),
                "host_wayland_sockets_before_after": [r.get("host_before"), r.get("host_after")],
+               "dbus_calls_through_filtering_proxy": r.get("dbus_proxy_calls"),
+               "agent_dbus_addresses": r.get("agent_dbus_addresses"),
                "agent_peak_pss_mib_incl_mcp_server": r.get("agent_peak_pss_mib_incl_mcp_server"),
                "agent_cpu_seconds": r.get("agent_cpu_seconds_children"),
                "workspace_memory_mib": round(u.get("memory_bytes", 0) / 2 ** 20) if u else None,

@@ -35,7 +35,9 @@ Credentials (API v2, see [api.md](api.md)): all input, screenshot and launch cal
 | `mouse_move`, `mouse_click` (button, count), `double_click`, `mouse_drag`, `scroll` | pointer |
 | `keyboard_type`, `keyboard_key` | text and shortcuts (`ctrl+s`, `alt+F4`, `Return`) |
 | `list_windows`, `window_action` | focus (to switch between apps), close, maximize, minimize, fullscreen |
-| `window_move`, `window_resize` | call `window.move` / `window.resize` of the daemon; until the daemon has them the tool says `E_UNSUPPORTED` and suggests a drag (**not available yet**) |
+| `window_move`, `window_resize`, `window_set_geometry` | the daemon's `window.move` / `window.resize` / `window.set_geometry` (content rectangle in workspace pixels; exact for X11 windows, tracked for Wayland ones, see [windows.md](windows.md)); tested with a pixel and geometry check |
+| `list_browsers`, `launch_browser`, `request_browser_profile` | installed browsers; start one in the workspace with a throwaway profile (default), a persistent `agent:NAME` profile, or `authorized:ID` after the human approved a copy of one of their profiles. The agent can only ASK for the last one (see [browsers.md](browsers.md)). `launch_app app=browser` is routed through the same path |
+| `audio_info`, `audio_record` | the workspace's private audio (see [audio.md](audio.md)) |
 | `get_clipboard`, `set_clipboard` | the **workspace's own** clipboard only |
 | `request_permission` | ask the human for `host_clipboard` or `browser_profile`; the agent only asks, the human grants (see [security-model.md](security-model.md)) |
 | `display_info`, `configure_display` | screen size/scale |
@@ -54,8 +56,8 @@ The full text is `aw/mcp.py: INSTRUCTIONS` and is printed by `agent-workspaces i
 |---|---|---|---|
 | Claude Code | `claude mcp add --scope user agent-workspaces -e AW_AGENT_KIND=claude-code -- <server>` and writes `~/.claude/skills/agent-workspaces/SKILL.md` (removed by `uninstall` only if unchanged) | `--mcp-config <file> --strict-mcp-config --tools "" --allowedTools mcp__agent-workspaces --setting-sources ""` | real model-driven runs (matrix); install/status/uninstall in a throw-away HOME |
 | OpenAI Codex | `codex mcp add --env ... agent-workspaces -- <server>` and `~/.codex/skills/agent-workspaces/SKILL.md` | `-c mcp_servers.agent-workspaces.*` overrides, `--ignore-user-config --ephemeral -s read-only`, no config file written | real runs; in a run **without** any instruction text the model still used the tools (tool descriptions were enough), so the skill is belt and braces |
-| Google Antigravity (`agy`) | `agy mcp add --env ... agent-workspaces -- <server>` | not available: no per-invocation MCP flag was found (`agy --settings` rejects `mcpServers`), and `agy mcp add` writes `~/.gemini/config/mcp_config.json`, which is the user's real config | install/status/uninstall in a throw-away HOME only. **No model-driven run: blocked**, see the matrix |
-| Hermes Agent | `hermes mcp add agent-workspaces --command ... --env ... --args ...` (its "enable all tools" prompt is answered yes) | not implemented (needs a throw-away `HERMES_HOME` with its own dependency environment, about 440 MB, and a loaded model) | install/status/uninstall in a throw-away HOME; `hermes mcp test` against a throw-away `HERMES_HOME` connected and listed 25 tools. **No model-driven run: no model is loaded on the Spark router** |
+| Google Antigravity (`agy`) | `agy mcp add --env ... agent-workspaces -- <server>`, plus a managed block with the rule text in `~/.gemini/GEMINI.md` (removed again by `uninstall`, the rest of the file untouched) | throw-away `HOME` (agy writes its own MCP config there), `--settings` allowing only `mcp(agent-workspaces/*)`, and the login read from the desktop keyring through `xdg-dbus-proxy --filter --talk=org.freedesktop.secrets` (needs `xdg-dbus-proxy`) | real runs with `gemini-3.8-flash-low`: single-app tasks pass, the two-app task failed twice. The rule text in `GEMINI.md` was **necessary** (without it the model went for its shell) |
+| Hermes Agent | `hermes mcp add agent-workspaces --command ... --env ... --args ...` (its "enable all tools" prompt is answered yes) | throw-away `HERMES_HOME` with a generated config (MCP server, the provider's non-secret settings, `model.supports_vision` when the router says the model takes images), toolset limited to the MCP server | real runs with `qwen3.6-35b-a3b` on the Spark router: all five tasks passed. Needs `model.supports_vision: true` (or an equivalent route) or Hermes hides the images from the model |
 
 "Throw-away HOME" means `env -i`, no display or browser variables, and the real configuration files were byte-identical afterwards (`tests/integration/test_agent_integrations_real.py`).
 
@@ -63,7 +65,7 @@ The full text is `aw/mcp.py: INSTRUCTIONS` and is printed by `agent-workspaces i
 
 ### Images
 
-Tool results contain an MCP `image` block. Verified consumed by a real model: Claude Haiku 5.5 through Claude Code and GPT-6-Luna through Codex. Hermes converts MCP images to native `image_url` parts only when the active route accepts images in tool results, otherwise it hands the model a file path (read from its source, not run). If an agent or model cannot use images, `describe_screen` sends the screenshot to a vision model you configure and returns text. It has been tested against a stand-in HTTP server only (`tests/unit/test_vision.py`); no real vision backend was available to test it.
+Tool results contain an MCP `image` block. Verified consumed by a real model: Claude Haiku 5.5 through Claude Code and GPT-6-Luna through Codex. Antigravity stores them as a file that the model must open (the rule text says so; verified, and a failure without it is in the matrix). Hermes attaches them natively only for routes it knows can see (`model.supports_vision: true` or a catalog entry); otherwise it hands the model a file path and the model then cannot see them (observed). Verified consumed by real models: Claude Haiku 5.5, GPT-6-Luna, Gemini 3.8 Flash (low) and Qwen3.6-35B-A3B. If an agent or model cannot use images, `describe_screen` sends the screenshot to a vision model you configure and returns text. It has been tested against a stand-in HTTP server only (`tests/unit/test_vision.py`); no real vision backend was configured.
 
 ## Environment of the MCP server process
 
@@ -74,3 +76,7 @@ Tool results contain an MCP `image` block. Verified consumed by a real model: Cl
 ## Other agents
 
 Any MCP client can run `python3 ~/.local/share/agent-workspaces/bin/agent-workspaces mcp` over stdio. Agents without MCP support can use the CLI (`agent-workspaces screenshot NAME`, `click`, `type`, ...) following the same instruction text.
+
+## Auth policy the integration relies on (API v2)
+
+Agent calls (workspace credential): `workspace.get`, `workspace.list`, `workspace.launch`, `screen.*`, `input.*`, `window.list`, `window.action`, `window.move|resize|set_geometry`, `clipboard.*`, `approval.request`, `grant.request`, `browser.list|launch|profile.request`, `audio.info|record`: all already in `aw/auth.py: POLICY` / `aw/policy_ext.py`. Calls that need the admin credential and are made only by the MCP server for its own workspace: `workspace.create`, `workspace.start`, `workspace.stop`, `workspace.configure`, `workspace.list` (to find an existing workspace by name). A narrower design would be a dedicated provisioning scope (for example a `workspace.ensure` method that can only create or start the workspace named after the caller's agent kind and project, with default settings); that is a decision for the auth owner.

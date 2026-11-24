@@ -1,0 +1,42 @@
+prompt: Open the calculator and a text editor. Work out 17 times 23 in the calculator, then type the result into the text editor.
+
+[init] model=qwen3.6-35b-a3b
+  call list_apps {}
+  ->  Defaults (launch_app app=<role or id>): browser: google-chrome (Google Chrome) text editor: org.gnome.TextEdit...
+  call list_workspaces {}
+  ->  - hermes-twoapps: running, 1280x720, agent=Hermes Agent, input=agent, windows=0  <- yours - hermes-editor: run...
+  call launch_app {"app": "calculator"}
+  -> <image as file path: MEDIA tag> {"_multimodal": true, "content": [{"type": "text", "text": "{\"result\": \" Calculator (app 1, pid 3337402) in...
+  call launch_app {"app": "text editor"}
+  -> <image as file path: MEDIA tag> {"_multimodal": true, "content": [{"type": "text", "text": "{\"result\": \" Text Editor (app 2, pid 3337470) i...
+  call list_windows {}
+  ->  [   {     "id": 1,     "title": "Calculator",     "app_id": "org.gnome.Calculator",     "focused": false,     ...
+  call window_action {"window": 1, "action": "focus"}
+  ->  ok
+  call screenshot {}
+  -> <image as file path: MEDIA tag> {"_multimodal": true, "content": [{"type": "text", "text": "{\"result\": \" 'hermes-twoapps' screen 1280x720 p...
+  call mouse_click {"x": 380, "y": 520}
+  ->  ok (pointer at 380,520)
+  call mouse_click {"x": 380, "y": 370}
+  ->  ok (pointer at 380,370)
+  call mouse_click {"x": 740, "y": 370}
+  ->  ok (pointer at 740,370)
+  call mouse_click {"x": 500, "y": 520}
+  ->  ok (pointer at 500,520)
+  call mouse_click {"x": 620, "y": 520}
+  ->  ok (pointer at 620,520)
+  call mouse_click {"x": 860, "y": 520}
+  ->  ok (pointer at 860,520)
+  call screenshot {}
+  -> <image as file path: MEDIA tag> {"_multimodal": true, "content": [{"type": "text", "text": "{\"result\": \" 'hermes-twoapps' screen 1280x720 p...
+  call keyboard_type {"text": "17\u00d723="}
+  ->  ok (pointer at 860,520)
+  call screenshot {}
+  -> <image as file path: MEDIA tag> {"_multimodal": true, "content": [{"type": "text", "text": "{\"result\": \" 'hermes-twoapps' screen 1280x720 p...
+  call window_action {"window": 2, "action": "focus"}
+  ->  ok
+  call keyboard_type {"text": "391"}
+  ->  ok (pointer at 860,520)
+agent: Done. Here's what I accomplished:  1. **Opened both apps** — GNOME Calculator and GNOME Text Editor in the `hermes-twoapps` workspace. 2. **Calculated 17 × 23** in the calculator — entered `17×23=` via keyboard. The calculator returned **391**. 3. **Typed the result** into the text editor — focused the Text Editor window and typed `391` into the blank document.  The result (391) is now in the text...
+
+USAGE null
