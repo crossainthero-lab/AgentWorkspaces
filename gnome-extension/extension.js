@@ -19,6 +19,17 @@ const VIEWER_TITLE_PREFIX = 'AgentWorkspaces:';
 const GNOME_WM = 'org.gnome.desktop.wm.keybindings';
 const TAKEOVER_KEYS = ['switch-to-workspace-up', 'switch-to-workspace-down'];
 const SLIDE_MS = 250; // same as GNOME Shell's own workspace switch
+// Small public interface so the viewer's "Back to desktop" button (and any other program) can do what the
+// shortcuts do. Same-user session bus only; it can only switch workspace.
+const PUBLIC_NAME = 'dev.agentworkspaces.ShellExtension';
+const PUBLIC_PATH = '/dev/agentworkspaces/ShellExtension';
+const PUBLIC_IFACE = `
+<node>
+  <interface name="dev.agentworkspaces.ShellExtension1">
+    <method name="Enter"/>
+    <method name="Return"/>
+  </interface>
+</node>`;
 const TEST_IFACE = `
 <node>
   <interface name="dev.agentworkspaces.ShellExtension.Test">
@@ -85,9 +96,11 @@ export default class AgentWorkspacesExtension extends Extension {
             this._settings.connect('changed::test-hooks', () => this._syncTestHooks()),
         ];
         this._syncTestHooks();
+        this._exportPublic(true);
     }
 
     disable() {
+        this._exportPublic(false);
         for (const id of this._handlers ?? [])
             this._settings.disconnect(id);
         this._handlers = null;
@@ -532,10 +545,10 @@ export default class AgentWorkspacesExtension extends Extension {
             }
             running.sort((a, b) => (b.activity?.last_action_at ?? 0) - (a.activity?.last_action_at ?? 0));
             const env = {};
-            for (const k of ['WAYLAND_DISPLAY', 'DISPLAY', 'XDG_RUNTIME_DIR'])
+            for (const k of ['WAYLAND_DISPLAY', 'DISPLAY', 'XDG_RUNTIME_DIR', 'DBUS_SESSION_BUS_ADDRESS'])
                 if (GLib.getenv(k))
                     env[k] = GLib.getenv(k);
-            await this._daemonCall('workspace.enter', {workspace: running[0].name, display_env: env});
+            await this._daemonCall('workspace.enter', {workspace: running[0].name, display_env: env, maximized: true});
         } catch (e) {
             if (String(e.message).includes('daemon-unavailable'))
                 Main.notify('AgentWorkspaces', 'The AgentWorkspaces service is not running. Start it with: agent-workspaces daemon');
@@ -544,6 +557,24 @@ export default class AgentWorkspacesExtension extends Extension {
         } finally {
             this._pendingViewer = false;
         }
+    }
+
+    _exportPublic(on) {
+        if (!on) {
+            this._pubDbus?.unexport();
+            this._pubDbus = null;
+            if (this._pubOwner) {
+                Gio.bus_unown_name(this._pubOwner);
+                this._pubOwner = null;
+            }
+            return;
+        }
+        if (this._pubDbus)
+            return;
+        this._pubDbus = Gio.DBusExportedObject.wrapJSObject(PUBLIC_IFACE, this);
+        this._pubDbus.export(Gio.DBus.session, PUBLIC_PATH);
+        this._pubOwner = Gio.bus_own_name_on_connection(Gio.DBus.session, PUBLIC_NAME,
+            Gio.BusNameOwnerFlags.NONE, null, null);
     }
 
     // ---- test-only D-Bus interface (off unless the `test-hooks` setting is on) --------------------

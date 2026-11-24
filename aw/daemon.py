@@ -448,7 +448,8 @@ class Daemon:
             w, h, rgb = _downscale(w, h, rgb, max_w)
         from .session import encode_png
         png = encode_png(w, h, rgb)
-        self.mgr.note_action(ws, "screenshot", self._actor(p, pr))
+        if not p.get("quiet"):   # quiet: a viewer thumbnail, not an action (keeps "activity" honest)
+            self.mgr.note_action(ws, "screenshot", self._actor(p, pr))
         out: Dict[str, Any] = {"width": w, "height": h, "bytes": len(png), "format": "png",
                                "capture_ms": round((time.perf_counter() - t0) * 1000, 1),
                                "workspace": ws.name, "workspace_id": ws.id}
@@ -501,9 +502,13 @@ class Daemon:
             return {"launched": False, "reason": "no host display known; run `agent-workspaces enter` "
                     "from a session terminal or pass display_env"}
         e = {k: v for k, v in os.environ.items()}
+        if env.get("XDG_RUNTIME_DIR") and env["XDG_RUNTIME_DIR"] != os.environ.get("XDG_RUNTIME_DIR"):
+            # the desktop that asked lives in another runtime dir (another session): never hand it this
+            # daemon's session bus
+            e.pop("DBUS_SESSION_BUS_ADDRESS", None)
         e.update({k: v for k, v in env.items() if k in ("WAYLAND_DISPLAY", "DISPLAY", "XDG_RUNTIME_DIR",
                                                        "DBUS_SESSION_BUS_ADDRESS")})
-        viewer = [sys.executable, "-m", "aw.viewer", ws.name]
+        viewer = [sys.executable, "-m", "aw.viewer", ws.name] + (["--maximized"] if p.get("maximized") else [])
         proc = subprocess.Popen(viewer, env=e, cwd=os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
                                 stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
                                 stderr=open(os.path.join(ws.dir, "viewer.log"), "ab"), start_new_session=True)
