@@ -156,6 +156,7 @@ def build_parser() -> argparse.ArgumentParser:
     ig.add_argument("agent", choices=["claude-code", "codex", "antigravity", "hermes"])
     ig.add_argument("action", choices=["status", "install", "uninstall", "show", "run"])
     ig.add_argument("prompt", nargs="?", help="with 'run': the one-off prompt")
+    ig.add_argument("--no-guard", action="store_true", help="do not install the graphical-isolation guard (Claude Code, Hermes)")
     ig.add_argument("--dry-run", action="store_true", help="print what install/uninstall would do")
     ig.add_argument("--model", help="with 'run': model name (default: the cheapest suitable one)")
     ig.add_argument("--project", help="with 'run': project name used in the workspace name")

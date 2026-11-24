@@ -286,8 +286,8 @@ class Manager:
     def _host_bus_env(self) -> Dict[str, str]:
         rt = paths.host_runtime_dir()
         return {"PATH": os.environ.get("PATH", "/usr/bin:/bin"), "XDG_RUNTIME_DIR": rt,
-                "DBUS_SESSION_BUS_ADDRESS": os.environ.get("DBUS_SESSION_BUS_ADDRESS",
-                                                           f"unix:path={rt}/bus"),
+                "DBUS_SESSION_BUS_ADDRESS": os.environ.get("DBUS_SESSION_BUS_ADDRESS")
+                or f"unix:path={rt}/bus",
                 "HOME": os.path.expanduser("~")}
 
     def _wrap(self, ws: Workspace, unit: str, inner_env: Dict[str, str], argv: List[str],

@@ -17,6 +17,8 @@ import subprocess
 import sys
 from typing import List, Optional
 
+from . import guard_install, paths
+
 NAME = "agent-workspaces"
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -45,7 +47,9 @@ def server_command() -> List[str]:
 
 def add_command(agent: str, workspace: Optional[str]) -> List[str]:
     kind = AGENTS[agent]["kind"]
-    envs = [f"AW_AGENT_KIND={kind}"] + ([f"AW_WORKSPACE={workspace}"] if workspace else [])
+    # AW_BASE_DIR is explicit so that the MCP server finds the daemon even when the agent's shell guard points
+    # XDG_RUNTIME_DIR at <runtime dir>/aw-guard (aw/guard.py)
+    envs = [f"AW_AGENT_KIND={kind}", f"AW_BASE_DIR={paths.base_dir()}"] + ([f"AW_WORKSPACE={workspace}"] if workspace else [])
     exe = AGENTS[agent]["bin"]
     cmd = server_command()
     if agent == "claude-code":
@@ -163,6 +167,13 @@ def run(args) -> int:
         sp = skill_path(agent)
         if sp:
             print(f"{agent}: instruction skill is {'present' if os.path.exists(sp) else 'absent'} ({sp})")
+        if agent in guard_install.SUPPORTED:
+            st = guard_install.status(agent)
+            print(f"{agent}: graphical-isolation guard is {'ON' if st['on'] else 'OFF'} "
+                  f"(hook {'present' if st['hook'] else 'absent'}, "
+                  f"{'environment' if agent == 'claude-code' else 'consent'} "
+                  f"{'set' if st.get('env', st.get('consent')) else 'missing'}, "
+                  f"script {'present' if st['script'] else 'MISSING'})")
         return 0
     if action == "install":
         cmd = add_command(agent, args.workspace)
@@ -172,6 +183,8 @@ def run(args) -> int:
             rn = _install_rules(agent, True)
             if rn:
                 print(rn)
+            if agent in guard_install.SUPPORTED and not getattr(args, "no_guard", False):
+                print("\n".join(guard_install.install(agent, True)))
             return 0
         # hermes asks "Enable all tools? [Y/n/select]" after probing the server: answer yes for all of them
         r = subprocess.run(cmd, capture_output=True, text=True, timeout=90,
@@ -185,13 +198,22 @@ def run(args) -> int:
         rn = _install_rules(agent, False)
         if rn:
             print(rn)
+        if agent in guard_install.SUPPORTED:
+            if getattr(args, "no_guard", False):
+                print(f"{agent}: graphical-isolation guard NOT installed (--no-guard)")
+            else:
+                print("\n".join(guard_install.install(agent, False)))
         print("Nothing else to do: on its first graphical request the agent gets (or re-attaches to) its own "
               f"workspace named {AGENTS[agent]['kind']}-<project>. Undo with: agent-workspaces integrate {agent} uninstall")
         return 0
     if action == "uninstall":
         if dry:
             print("would run: " + " ".join(remove_command(agent)))
+            if agent in guard_install.SUPPORTED:
+                print("\n".join(guard_install.uninstall(agent, True)))
             return 0
+        if agent in guard_install.SUPPORTED:
+            print("\n".join(guard_install.uninstall(agent, False)))
         r = subprocess.run(remove_command(agent), capture_output=True, text=True, timeout=60,
                            input="y\n" if agent == "hermes" else "")
         if r.returncode != 0:
