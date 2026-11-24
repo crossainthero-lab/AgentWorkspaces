@@ -72,7 +72,7 @@ def mcp_env(kind: str, base_dir: Optional[str], extra: Optional[Dict[str, str]] 
 
 def plan(agent: str, prompt: str, model: Optional[str] = None, project: str = "demo", base_dir: Optional[str] = None,
          cwd: Optional[str] = None, max_turns: int = 12, extra_env: Optional[Dict[str, str]] = None,
-         instructions: bool = True) -> Plan:
+         instructions: bool = True, structured: bool = True) -> Plan:
     kind = ig.AGENTS[agent]["kind"]
     tmp = tempfile.mkdtemp(prefix="aw-run-")
     rt = os.path.join(tmp, "rt")
@@ -90,8 +90,9 @@ def plan(agent: str, prompt: str, model: Optional[str] = None, project: str = "d
             json.dump({"mcpServers": {ig.NAME: {"command": server[0], "args": server[1:], "env": menv}}}, f)
         argv = ["claude", "-p", prompt, "--mcp-config", cfg, "--strict-mcp-config", "--tools", "",
                 "--allowedTools", f"mcp__{ig.NAME}", "--permission-mode", "dontAsk",
-                "--setting-sources", "", "--disable-slash-commands", "--output-format", "stream-json", "--verbose",
-                "--no-session-persistence"]
+                "--setting-sources", "", "--disable-slash-commands", "--no-session-persistence"]
+        if structured:
+            argv += ["--output-format", "stream-json", "--verbose"]
         if model:
             argv += ["--model", model]
         notes.append("built-in tools removed (--tools \"\"): only the MCP tools exist")
@@ -99,7 +100,7 @@ def plan(agent: str, prompt: str, model: Optional[str] = None, project: str = "d
         def toml(v):
             return json.dumps(v)
         argv = ["codex", "exec", "--skip-git-repo-check", "--ephemeral", "--ignore-user-config",
-                "--ignore-rules", "--json", "-s", "read-only",
+                "--ignore-rules", *(["--json"] if structured else []), "-s", "read-only",
                 "-c", 'approval_policy="never"',
                 "-c", f"mcp_servers.{ig.NAME}.command={toml(server[0])}",
                 "-c", f"mcp_servers.{ig.NAME}.args={toml(server[1:])}",
@@ -118,7 +119,8 @@ def plan(agent: str, prompt: str, model: Optional[str] = None, project: str = "d
 def run(args) -> int:
     import subprocess
     p = plan(args.agent, args.prompt, model=args.model, project=args.project or "demo",
-             base_dir=os.environ.get("AW_BASE_DIR"), cwd=None if args.project else os.getcwd())
+             base_dir=os.environ.get("AW_BASE_DIR"), cwd=None if args.project else os.getcwd(),
+             structured=False)
     try:
         print("+", " ".join(shlex.quote(a) for a in p.argv[:4]), "...", file=sys.stderr)
         return subprocess.run(p.argv, env=p.env, cwd=p.cwd, stdin=subprocess.DEVNULL).returncode

@@ -116,6 +116,11 @@ TOOLS = [
        {"text": {"type": "string"}}, ["text"]),
     _t("wait", "Wait for the UI to settle.", {"seconds": {"type": "number", "minimum": 0, "maximum": 30}},
        ["seconds"], ws=False),
+    _t("request_permission", "Ask the human for a sensitive permission for this workspace: 'host_clipboard' (share "
+       "their real clipboard) or 'browser_profile' (use a copy of a signed-in browser profile; resource = profile "
+       "name). Only the human can grant it; returns the current status. Never assume it was granted.",
+       {"kind": {"type": "string", "enum": ["host_clipboard", "browser_profile"]}, "resource": {"type": "string"},
+        "detail": {"type": "string", "description": "Why you need it."}}, ["kind"]),
     _t("request_human_input", "Ask the human (shown in their notch/panel) to approve or provide something for "
        "this workspace. Returns an id; poll with workspace_status.", {
            "title": {"type": "string"}, "detail": {"type": "string"}}, ["title"]),
@@ -334,7 +339,7 @@ class Server:
             try:
                 c.call(method, workspace=ws, window=int(a["window"]), **{k: int(a[k]) for k in keys}, **ck)
             except ApiError as e:
-                if e.code == "E_UNKNOWN_METHOD":
+                if e.code == "E_UNKNOWN_METHOD" or (e.code == "E_FORBIDDEN" and "is not available" in e.message):
                     raise ApiError("E_UNSUPPORTED", f"{name} is not available in this AgentWorkspaces daemon yet. "
                                    "Workaround: drag the window's title bar / edge with mouse_drag (only in a "
                                    "workspace created with window_policy=floating).")
@@ -357,6 +362,11 @@ class Server:
         if name == "set_clipboard":
             c.call("clipboard.set", workspace=ws, text=a["text"], **ck)
             return self._text("ok")
+        if name == "request_permission":
+            r = c.call("grant.request", workspace=ws, kind=a["kind"], resource=a.get("resource", ""),
+                       detail=a.get("detail", ""))
+            return self._text(f"permission request {r.get('id')} for {a['kind']}: status {r.get('status')}. "
+                              "Only the user can grant it; do not proceed as if it were granted.")
         if name == "request_human_input":
             r = c.call("approval.request", workspace=ws, title=a["title"], detail=a.get("detail", ""), **ck)
             return self._text(f"request {r['id']} sent to the user (status: {r['status']})")

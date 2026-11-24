@@ -70,9 +70,9 @@ def list_command(agent: str) -> List[str]:
     return [AGENTS[agent]["bin"], "mcp", "list"]
 
 
-# Where each agent keeps user-level skills (SKILL.md folders). Hermes is not listed: its skill layout was not
-# verified, so only its MCP server is registered.
-SKILL_ROOT = {"claude-code": ".claude/skills", "codex": ".codex/skills", "antigravity": ".gemini/skills"}
+# Where each agent keeps user-level skills (SKILL.md folders). Antigravity and Hermes are not listed: which of their
+# several skill folders the agent reads was not verified, so only their MCP server is registered.
+SKILL_ROOT = {"claude-code": ".claude/skills", "codex": ".codex/skills"}
 
 
 def skill_path(agent: str = "claude-code", home: Optional[str] = None) -> Optional[str]:
@@ -84,9 +84,6 @@ def _write_skill(agent: str, dry: bool) -> Optional[str]:
     sp = skill_path(agent)
     if not sp:
         return None
-    root = os.path.dirname(os.path.dirname(sp))
-    if not os.path.isdir(root):
-        return f"{agent}: no skills folder at {root}; skipped the instruction skill (the MCP server still sends its instructions)"
     if os.path.exists(sp):
         return f"{sp} already exists; left untouched"
     if dry:

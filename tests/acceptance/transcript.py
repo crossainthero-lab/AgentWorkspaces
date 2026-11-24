@@ -12,7 +12,9 @@ HOME = os.path.expanduser("~")
 
 
 def clean(s, n=220):
-    s = str(s).replace(HOME, "~")
+    s = re.sub(re.escape(HOME) + r"/\.cache/claude-tmp/[A-Za-z0-9_\-]+", "<tmp>", str(s))
+    s = re.sub(r"[A-Za-z0-9_./\-]*/\.scratch/runs/[^ \"')]+", "<runs>", s)
+    s = s.replace(HOME, "~")
     s = re.sub(r"(sk-|ghp_|AIza|Bearer )[A-Za-z0-9_\-\.]{8,}", r"\1<masked>", s)
     s = re.sub(r"/run/user/\d+/awt-[A-Za-z0-9\-]+", "<run>", s)
     s = s.replace("\n", " ")

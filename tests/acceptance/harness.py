@@ -59,6 +59,7 @@ def run_agent(agent: str, prompt: str, base: str, project: str, run_dir: str, mo
     out_f = open(os.path.join(run_dir, "agent.stdout"), "wb")
     err_f = open(os.path.join(run_dir, "agent.stderr"), "wb")
     t0 = time.time()
+    cpu0 = os.times()
     proc = subprocess.Popen(plan.argv, env=plan.env, cwd=plan.cwd, stdin=subprocess.DEVNULL, stdout=out_f,
                             stderr=err_f, start_new_session=True)
     stop = threading.Event()
@@ -83,9 +84,34 @@ def run_agent(agent: str, prompt: str, base: str, project: str, run_dir: str, mo
             except (OSError, ProcessLookupError):
                 continue
 
+    peak = {"pss_mib": 0.0, "procs": 0}
+
+    def sample_mem():
+        tot, cnt = 0.0, 0
+        for d in os.listdir("/proc"):
+            if not d.isdigit():
+                continue
+            try:
+                if os.getpgid(int(d)) != proc.pid:
+                    continue
+                for line in open(f"/proc/{d}/smaps_rollup"):
+                    if line.startswith("Pss:"):
+                        tot += int(line.split()[1]) / 1024
+                        cnt += 1
+                        break
+            except (OSError, ProcessLookupError):
+                continue
+        if tot > peak["pss_mib"]:
+            peak["pss_mib"], peak["procs"] = round(tot, 1), cnt
+
     def sampler():
         n = 0
-        while not stop.wait(shots_every):
+        last = time.time()
+        while not stop.wait(0.5):
+            sample_mem()
+            if time.time() - last < shots_every:
+                continue
+            last = time.time()
             audit_env()
             try:
                 r = cl.call("screen.screenshot", workspace=name, agent_kind="human", path=os.path.join(
@@ -113,11 +139,14 @@ def run_agent(agent: str, prompt: str, base: str, project: str, run_dir: str, mo
     th.join(timeout=10)
     HOST_VARS = {"DISPLAY", "WAYLAND_DISPLAY", "WAYLAND_SOCKET", "XAUTHORITY", "DBUS_SESSION_BUS_ADDRESS"}
     dur = time.time() - t0
+    cpu1 = os.times()
     res: Dict[str, Any] = {"agent": agent, "model": model or agentrun.CHEAP_MODEL.get(agent), "prompt": prompt,
-                           "exit_code": proc.returncode, "timed_out": timed_out, "seconds": round(dur, 1),
+                           "exit_code": proc.returncode,
+                           "agent_cpu_seconds_children": round((cpu1.children_user + cpu1.children_system) - (cpu0.children_user + cpu0.children_system), 2), "timed_out": timed_out, "seconds": round(dur, 1),
                            "workspace": name, "run_dir": run_dir, "shots": shots,
                            "agent_env_host_display_vars": sorted(env_names & HOST_VARS),
-                           "agent_env_names_seen": len(env_names)}
+                           "agent_env_names_seen": len(env_names),
+                           "agent_peak_pss_mib_incl_mcp_server": peak["pss_mib"], "agent_peak_processes": peak["procs"]}
     try:
         w = cl.call("workspace.get", workspace=name)
         res["workspace_state"] = {"id": w["id"], "created_at": w.get("created_at"), "state": w["state"], "agent": w["agent"]["kind"], "viewers": w["viewers"],
