@@ -62,8 +62,9 @@ Read from its source (`desktop-cube@schneegans.github.com` v35) and checked in t
   Ctrl+Alt+Left; afterwards no switch is in flight (`_switchData` empty) and the window group is untransformed
   (`translation_y = 0`, `rotation_angle_y = 0`, opacity 255). The skybox option was off in the developer's settings, so
   the skybox re-parenting itself was **not** exercised.
-* Visible result (frames in `gnome-extension/media/cube-left-right-frames.png` and `slide-enter-frames.png`):
-  Ctrl+Alt+Left/Right turn the cube; Ctrl+Alt+Down/Up slide vertically.
+* Visible result (frames in `gnome-extension/media/cube-left-right-frames.png` and `cube-down-frames.png`):
+  Ctrl+Alt+Left/Right turn the cube (Desktop Cube's own code); Ctrl+Alt+Down/Up turn it down and up onto the agent
+  workspace (this extension's own turn, see "The cube-native turn").
 
 ### V-Shell (vertical-workspaces)
 
@@ -78,7 +79,7 @@ Consequences for the design:
 * No default accelerator conflict with Tiling Shell or desktop-cube.
 * desktop-cube makes any use of GNOME's own animation look like a cube. The extension therefore **skips** GNOME's
   animation for its own enter/return switch (one-shot instance override of `animateSwitch`, restored immediately)
-  and plays its own vertical slide. Left/Right keep GNOME's (cube) animation.
+  and plays its own turn (a cube turn about the horizontal axis when Desktop Cube is on, else a vertical slide). Left/Right keep GNOME's (cube) animation.
 * With V-Shell's vertical layout the keys are passed through to the neighbour switch instead of entering.
 
 ## 3. Design
@@ -87,6 +88,9 @@ Consequences for the design:
   title prefix `AgentWorkspaces:`), else created: the trailing empty workspace GNOME keeps (dynamic workspaces) or
   a new one. Entering with no viewer asks the daemon (`workspace.enter`, `docs/api.md`) to open it. The extension
   does not need the daemon to load; without it, Enter still switches and shows a notice.
+* **Cube-native turn (when Desktop Cube is enabled)**: Ctrl+Alt+Down turns the cube DOWN about a horizontal axis onto
+  the agent workspace and Ctrl+Alt+Up turns it back up. See "The cube-native turn" below. Without Desktop Cube (or with
+  the `use-cube-transition` setting off) the slide below is used.
 * **Slide**: snapshot the old windows as Clutter clones (they keep painting after GNOME hides the real actors),
   switch with GNOME's animation suppressed, then ease the clones out and the live `window_group` in along Y over
   250 ms (GNOME's own duration), `EASE_OUT_CUBIC`. Skipped if animations are off or the Overview is open. The top
@@ -113,6 +117,51 @@ Consequences for the design:
   calls; the button is shown only while that bus name exists. Without the extension everything else works.
 * The viewer window is marked suspended by GNOME while you are on another workspace; the viewer then stops capturing and
   painting (docs/viewer.md).
+
+### The cube-native turn
+
+How Desktop Cube builds its cube (read from its source): GNOME's own `WorkspaceAnimationController` makes one group
+per workspace (wallpaper plus window clones); the extension patches `_prepareWorkspaceSwitch` and rotates each group
+about a pivot `centerDepth` behind it (`pivot_point_z`, `rotation_angle_y`), pushes the whole cube back while it turns
+(`window-parallax`, strongest half way), sorts faces back to front, and uses the shell's own stage perspective. Its
+vertical rotation is only a mouse-drag "pitch" of the whole cube, never a key-driven face change, and it has no notion
+of a face that is not a workspace.
+
+So the agent face is not a workspace group of Desktop Cube's (patching that would tie the extension to Desktop Cube's
+private state). The extension builds the same picture itself, with the same ingredients, when Desktop Cube is loaded in
+this shell:
+
+* two faces of a cube that turns about a horizontal axis, 90 degrees apart, pivot `H/2` behind them: the face you leave
+  (a snapshot of its windows, its own wallpaper from a fresh `BackgroundManager`, and clones of the top bar and the
+  dock, which belong to your personal world and turn away with it) and the face you arrive on (the live window group,
+  which already carries the real wallpaper because the shell keeps its background group inside it);
+* the cube is pushed back by `corner - centerDepth` (the edge that swings towards you stays on the screen plane) with the
+  triangular profile Desktop Cube uses, painter's order by depth, ease-out-cubic, 450 ms (a quarter turn is further than
+  Desktop Cube's neighbouring-face 250 ms; the 450 ms are a choice, not copied);
+* a dark backdrop behind the cube; at the start and end the two pictures are identical to the live desktop, so there is
+  no flash or jump. Frames: `gnome-extension/media/cube-down-frames.png` and `cube-up-frames.png`;
+* the viewer is the agent face, full screen (see "Environment" below), so the face is full-bleed: no black gap, no window
+  chrome;
+* from the Super overview the overview closes first; pressing the key again while a turn runs queues it (only the last
+  request counts) instead of cancelling, which would make the cube jump;
+* afterwards nothing is left: window group untransformed (`rotation_angle_x`, `translation_z`, pivot), no extra actors,
+  the bar and dock back to opacity 255 (they fade in over 160 ms on arriving at a personal workspace), no switch in
+  flight. If the turn throws, it is cleaned up and the workspace switch happens without animation.
+
+Settings (`org.gnome.shell.extensions.agent-workspaces`): `use-cube-transition` (default on) and `environment-mode`
+(default on; off opens the viewer as an ordinary maximized window with title bar and workspace list).
+
+Known limits: the cube uses the whole stage (multi-monitor layouts were not tried); on the very first Ctrl+Alt+Down of a
+session the viewer process starts while the cube turns, so the agent face shows the wallpaper until the viewer window
+appears (about 0.4 s in the isolated run; later visits turn onto the already open viewer).
+
+### Environment (the viewer as part of the desktop)
+
+Started by the extension the viewer opens full screen without window chrome (`--environment`): the header (workspace,
+Agent | Paused | You, clipboard, menu, a "back to desktop" button) is an overlay that appears when the mouse moves and goes
+away again (while you are in control it only appears at the very top edge, so it never covers the workspace you work in);
+the agent taskbar stays at the bottom; the workspace list is hidden until you open it. GNOME hides its own bar and dock for
+a full-screen window, so the agent environment has its own taskbar and your personal dock stays in your world.
 
 ## 4. Test evidence
 
@@ -144,7 +193,22 @@ Last run, full suite: **29/29 PASS**. `--coexist` (desktop-cube + Tiling Shell l
 | with desktop-cube + Tiling Shell enabled: enter/return still slide vertically (not the cube), Right still switches; a Tiling Shell key set to Ctrl+Alt+Down is reported as `org.gnome.shell.extensions.tilingshell.move-window-up (not modified)` and left unchanged | PASS |
 | changing `enter-shortcut` (the write the prefs window makes) re-binds live: Ctrl+Alt+E enters, GNOME's Ctrl+Alt+Down is restored; setting it back takes it over again | PASS |
 
-### Real-stack run (`gnome-extension/tests/run_real.py`): 53/53 PASS
+### Cube-native turn (`gnome-extension/tests/run_cube.py --personal N`): 21/21 PASS for N = 2 and for N = 4
+
+With the developer's own extensions loaded (Desktop Cube, Tiling Shell, Blur my Shell, Just Perfection, User Themes,
+Ubuntu Dock, settings read once into the private keyfile), the real daemon and the real viewer, N personal workspaces
+with a window each. Checks: both extensions ACTIVE; the cube-native turn is selected; the first Ctrl+Alt+Down starts the
+viewer on the agent workspace (which is not a personal one) and it is full screen; the environment header is hidden at
+rest, appears on mouse movement and hides again; the turn down runs from 90 degrees to 0 over at least 8 frames, monotone,
+the turn up the other way (29 frames each in the run); after each turn the window group is untransformed, no overlay actor
+is left, nothing is in flight, bar and dock are back at full opacity; Super then Ctrl+Alt+Down (overview closes, cube
+turns) and Super then Ctrl+Alt+Up (back to the previous personal workspace, overview closed); Down, Up, Down, Up pressed
+during a turn ends on the personal workspace with nothing stuck, and Down pressed twice during a turn arrives once;
+Ctrl+Alt+Right/Left walk through all N personal workspaces with Desktop Cube's own turn (its patched method is called
+2(N-1) times and never by our turns); with `use-cube-transition` off the slide is used; no JS error or failed turn in the
+log; disable restores GNOME's Ctrl+Alt+Up/Down exactly and leaves no actor of ours.
+
+### Real-stack run (`gnome-extension/tests/run_real.py`): 53/53 PASS (viewer as an ordinary window, `environment-mode` off)
 
 Same isolation, but **no stand-ins**: the real daemon (with SA3's auth layer), two real workspaces (headless labwc, each
 running the GTK4 test app `tests/apps/gtk_probe.py`, whose own event log is the oracle), and the real viewer started by
@@ -173,15 +237,16 @@ window.
 
 Demo video of the same stack: `docs/media/demo-enter-leave-agent-workspace.mp4` (36 s, made by
 `gnome-extension/tests/demo_video.py`): personal desktop with two windows; Ctrl+Alt+Right/Left turn the Desktop Cube;
-Super opens the Activities overview; Ctrl+Alt+Down from inside it slides vertically into the viewer; there the agent
-focuses the calculator and the editor, glides its (orange) pointer to buttons, clicks 7 x 6 = and types the result,
-while the taskbar highlight follows the focus; Ctrl+Alt+Up returns; the work has progressed on the second visit; the cube
-still turns. The "agent" in it is a **scripted AgentWorkspaces client** (the same daemon API an MCP agent uses, with the
-workspace credential), **not a model-driven agent**. A real model run through the agent integration
-(`agent-workspaces integrate claude-code run ...`) needs the developer's signed-in agent CLI and network, and an earlier
-signed-out CLI opened browser login tabs on the real screen, so it was deliberately not driven from this harness.
-Frames: `gnome-extension/media/overview-animation-frames.png`, `slide-enter-frames.png`, `slide-return-frames.png`,
-`cube-left-right-frames.png`.
+Super opens the Activities overview; Ctrl+Alt+Down from inside it closes the overview and turns the cube down onto the
+agent workspace, a full-screen environment with its own orange-lined taskbar; the agent focuses the calculator and the
+editor and glides its chunky orange pointer to buttons, clicks 7 x 6 = and types the result; Ctrl+Alt+Up turns the cube
+back up; the work has progressed on the second visit; the cube still turns. The "agent" in it is a **scripted
+AgentWorkspaces client** (the same daemon API an MCP agent uses, with the workspace credential), **not a model-driven
+agent**. A real model run through the agent integration (`agent-workspaces integrate claude-code run ...`) needs the
+developer's signed-in agent CLI and network, and an earlier signed-out CLI opened browser login tabs on the real screen,
+so it was deliberately not driven from this harness.
+Frames: `gnome-extension/media/overview-animation-frames.png`, `cube-down-frames.png`, `cube-up-frames.png`,
+`agent-cursor-glide-frames.png`, `cube-left-right-frames.png`.
 
 Screenshots (from the isolated shell): `gnome-extension/media/shell-enter.png` (agent workspace with the stand-in
 viewer, workspace indicator showing three workspaces) and `gnome-extension/media/prefs.png` (preferences window; the

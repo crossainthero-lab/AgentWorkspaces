@@ -19,8 +19,11 @@ of your desktop; it needs no extension and uses the daemon API with the admin cr
 * **Agent | Paused | You**: one setting, who has input. *Paused* rejects the agent's input (`E_PAUSED`) and you only watch.
   *You* rejects it too and forwards your mouse and keyboard; a white frame marks it. *Agent* gives control back and a
   waiting agent continues. Keys and buttons held when you leave *You* or lose focus are released inside the workspace.
+* **Environment mode** (`--environment`, what the GNOME extension starts): full screen, no window chrome. The header
+  is an overlay that appears when the mouse moves and hides again; the taskbar stays; the workspace list opens on demand.
+  Without the flag the viewer is an ordinary window with title bar and sidebar.
 * **The agent's pointer** (orange): the agent has full mouse and keyboard control of its workspace, so while it works the
-  viewer draws a small orange arrow where *its* pointer is, with a ring when it clicks, and a quiet "Agent typing" note in
+  viewer draws a chunky orange arrow (about 2.7 times an ordinary cursor, solid orange with a dark edge and a white halo so it reads on light and dark content) where *its* pointer is, with a ring when it clicks, and a quiet "Agent typing" note in
   the corner while it types. Positions are the real pointer positions the daemon reports with each pointer action
   (`workspace.activity` `x`,`y`); only the frames in between are interpolated (about 55 ms ease). It fades out after 4 s
   without movement and is hidden while the workspace is Paused or You control it. It is drawn by the viewer on top of the

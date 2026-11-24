@@ -45,7 +45,8 @@ shortcut, press a new one with Ctrl, Alt or Super; the arrow button restores the
 AgentWorkspaces workspace on demand*.
 
 GSettings schema `org.gnome.shell.extensions.agent-workspaces`: `enter-shortcut`, `return-shortcut` (`as`),
-`create-on-demand` (`b`). The keys `backup`, `conflicts`, `test-hooks` are state, not options.
+`create-on-demand` (`b`), `use-cube-transition` (`b`, turn the Desktop Cube when it is enabled, else slide),
+`environment-mode` (`b`, open the viewer full screen). The keys `backup`, `conflicts`, `test-hooks` are state, not options.
 
 ## How it behaves
 

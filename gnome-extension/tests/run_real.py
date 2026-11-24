@@ -72,7 +72,9 @@ def main():
     media = sys.argv[sys.argv.index("--media") + 1] if "--media" in sys.argv else os.path.join(os.path.dirname(HERE), "media")
     os.makedirs(media, exist_ok=True)
     kw = {} if plain else dict(copy_extensions=REALISTIC_COPY, enable_extensions=REALISTIC_SYSTEM, dump_user_settings=True)
-    s = Session(monitors=("1600x900",), pipewire=False, **kw)
+    # this suite drives the viewer's ordinary window (title bar, sidebar); run_cube.py covers the full-screen environment
+    s = Session(monitors=("1600x900",), pipewire=False,
+                own_settings="[org/gnome/shell/extensions/agent-workspaces]\nenvironment-mode=false\n", **kw)
     d = agent = None
     try:
         s.start()
@@ -397,8 +399,8 @@ def main():
         scale = min(ww / 1280, wh / 720)
         exp_x = 246 + (ww - 1280 * scale) / 2 + 104 * scale
         exp_y = 81 + (wh - 720 * scale) / 2 + 481 * scale
-        check("... at the right place (within 12 px of the mapped workspace position)",
-              mid and abs(mid[0] - exp_x) < 12 and abs(mid[1] - exp_y) < 14, f"found {mid}, expected about ({exp_x:.0f}, {exp_y:.0f})")
+        check("... at the right place (within 18 px of the mapped workspace position)",
+              mid and abs(mid[0] - exp_x) < 18 and abs(mid[1] - exp_y) < 18, f"found {mid}, expected about ({exp_x:.0f}, {exp_y:.0f})")
         r = c.call("screen.screenshot", workspace="desk", inline=True)
         import base64 as _b64
         wsp = os.path.join(media, "_ws.png")

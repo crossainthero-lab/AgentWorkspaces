@@ -118,6 +118,7 @@ def main():
 
         # ---- the recording
         marks = {}
+        s.move(1585, 440)                                     # park your own pointer at the right edge, out of the way
         agent = DemoAgent("research")
         with record(s, out, fps=30) as rec:
             time.sleep(2.0)                                   # personal desktop, ordinary windows
@@ -161,12 +162,17 @@ def main():
         RES["video"] = rec.info
         print("marks (s after recording start; the video starts ~0.4 s earlier):", json.dumps(marks))
         if strips:
-            for name in ("cube", "super", "down", "up"):
-                t0 = marks[name] + 0.4
-                step = 0.1 if name == "super" else 0.06
-                frames = extract_frames(out, os.path.join(strips, name), [round(t0 + step * i, 3) for i in range(0, 14)])
+            def strip(name, t0, step, count, cols=4):
+                extract_frames(out, os.path.join(strips, name), [round(t0 + step * i, 3) for i in range(count)])
+                rows = -(-count // cols)
                 subprocess.run(["ffmpeg", "-v", "error", "-y", "-pattern_type", "glob", "-i", os.path.join(strips, name, "frame-*.png"),
-                                "-vf", "scale=400:-1,tile=4x2", "-frames:v", "1", os.path.join(strips, f"strip-{name}.png")], check=True)
+                                "-vf", f"scale=400:-1,tile={cols}x{rows}", "-frames:v", "1", os.path.join(strips, f"strip-{name}.png")], check=True)
+            off = 0.4                                        # the video starts ~0.4 s before the marks
+            strip("cube", marks["cube"] + off, 0.06, 8)
+            strip("super", marks["super"] + off, 0.1, 8)
+            strip("down", marks["down"] + off - 0.05, 1 / 30, 20, cols=5)
+            strip("glide", marks["down"] + off + 2.0, 0.12, 8)
+            strip("up", marks["up"] + off - 0.05, 1 / 30, 20, cols=5)
         # ---- cube state is intact
         info = s.eval(f"""
           const ext = Main.extensionManager.lookup('{CUBE}');

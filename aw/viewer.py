@@ -80,6 +80,7 @@ headerbar togglebutton:checked { background: alpha(white, 0.2); }
 .aw-thumb { background: #050505; border-radius: 11px 11px 0 0; }
 .aw-approvals { background: #161616; border-bottom: 1px solid alpha(white, 0.12); padding: 8px 12px; }
 .aw-error { color: #ff8a80; }
+.aw-overlay-top { background: alpha(#0d0d0d, 0.94); border-bottom: 1px solid alpha(white, 0.12); }
 .aw-taskbar { background: #140e08; border-top: 2px solid #ff7a00; padding: 3px 8px; min-height: 34px; }
 .aw-taskbar button { padding: 2px 10px; border-radius: 6px; min-height: 26px; background: transparent; box-shadow: none; }
 .aw-taskbar button:hover { background: alpha(white, 0.08); }
@@ -234,7 +235,11 @@ MARKER_FADE_S = 0.6
 TYPING_HOLD_S = 1.2
 
 
-MSIZE, MPAD = 64, 32      # the marker is a small widget (arrow tip at MPAD, MPAD) that the overlay moves around
+MSIZE, MPAD = 170, 85     # the marker is a small widget (arrow tip at MPAD, MPAD) that the overlay moves around
+# A chunky arrow, about 2.7 times an ordinary cursor, so that the agent's pointer cannot be mistaken for yours or
+# for anything drawn by the workspace: solid orange, dark edge, white halo (readable on light and dark content).
+ARROW = [(0, 0), (0, 17), (4.6, 13.2), (8.0, 21), (11.8, 19.4), (8.3, 11.8), (13.6, 11.8)]
+ARROW_SCALE = 2.7
 
 
 class AgentMarker(Gtk.DrawingArea):
@@ -294,7 +299,7 @@ class AgentMarker(Gtk.DrawingArea):
         dt, self.last_t = now - self.last_t, now
         busy = False
         if self.target and self.shown:
-            k = 1 - pow(2.718281828, -dt / 0.055)       # exponential ease towards the real position
+            k = 1 - pow(2.718281828, -dt / 0.04)       # exponential ease towards the real position
             dx, dy = self.target[0] - self.shown[0], self.target[1] - self.shown[1]
             if abs(dx) + abs(dy) > 0.3:
                 self.shown = (self.shown[0] + dx * k, self.shown[1] + dy * k)
@@ -308,7 +313,7 @@ class AgentMarker(Gtk.DrawingArea):
                 busy = busy or self.alpha > 0
             if self.alpha <= 0:
                 self.target = self.shown = None
-        busy = busy or (now - self.last_click < 0.4)
+        busy = busy or (now - self.last_click < 0.5)
         self.v.live_overlay.queue_allocate()          # the overlay places the marker from `shown`
         self.queue_draw()
         if not busy:
@@ -324,22 +329,32 @@ class AgentMarker(Gtk.DrawingArea):
         now = time.monotonic()
         x = y = MPAD
         r = now - self.last_click
-        if r < 0.4:                      # a click: one expanding ring, then gone
-            t = r / 0.4
-            cr.set_source_rgba(*ORANGE, 0.8 * (1 - t) * self.alpha)
-            cr.set_line_width(1.5)
-            cr.arc(x, y, 5 + 16 * t, 0, 6.2832)
+        if r < 0.45:                     # a click: one expanding ring, then gone
+            t = r / 0.45
+            rad = 14 + 42 * t
+            cr.set_source_rgba(1, 1, 1, 0.85 * (1 - t) * self.alpha)
+            cr.set_line_width(8)
+            cr.arc(x, y, rad, 0, 6.2832)
+            cr.stroke()
+            cr.set_source_rgba(*ORANGE, (1 - t * 0.6) * self.alpha)
+            cr.set_line_width(4.5)
+            cr.arc(x, y, rad, 0, 6.2832)
             cr.stroke()
         cr.translate(x, y)
-        cr.move_to(0, 0)
-        for px, py in ((0, 16.5), (4.2, 12.6), (7.2, 19.5), (9.9, 18.4), (7.0, 11.8), (12.2, 11.8)):
+        cr.scale(ARROW_SCALE, ARROW_SCALE)
+        cr.move_to(*ARROW[0])
+        for px, py in ARROW[1:]:
             cr.line_to(px, py)
         cr.close_path()
-        cr.set_source_rgba(*ORANGE, self.alpha)
-        cr.fill_preserve()
-        cr.set_source_rgba(0, 0, 0, 0.55 * self.alpha)
-        cr.set_line_width(1.0)
-        cr.stroke()
+        cr.set_line_join(cairo.LINE_JOIN_ROUND)
+        cr.set_source_rgba(1, 1, 1, 0.92 * self.alpha)          # white halo
+        cr.set_line_width(11 / ARROW_SCALE)
+        cr.stroke_preserve()
+        cr.set_source_rgba(0.05, 0.05, 0.05, self.alpha)        # dark edge
+        cr.set_line_width(6 / ARROW_SCALE)
+        cr.stroke_preserve()
+        cr.set_source_rgba(*ORANGE, self.alpha)                 # solid body
+        cr.fill()
 
 
 class Taskbar(Gtk.Box):
@@ -506,6 +521,10 @@ class Viewer(Gtk.Application):
         self.want_takeover = False
         self.want_name: Optional[str] = None
         self.want_maximized = False
+        self.want_env = False
+        self.env_mode = False          # "environment": full screen, the header is an overlay that shows on mouse movement
+        self._top_src = 0
+        self._over_top = False
         self.down_keys: set = set()
         self.down_buttons: set = set()
         self._syncing = False
@@ -545,6 +564,7 @@ class Viewer(Gtk.Application):
         names = [a for a in args if not a.startswith("--")]
         self.want_takeover = takeover
         self.want_maximized = "--maximized" in args
+        self.want_env = "--environment" in args
         self.want_name = names[0] if names else None
         self.activate()
         if self.ws and self.want_name:
@@ -560,8 +580,13 @@ class Viewer(Gtk.Application):
         css = Gtk.CssProvider()
         css.load_from_data(CSS)
         Gtk.StyleContext.add_provider_for_display(Gdk.Display.get_default(), css, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
+        self.env_mode = self.want_env
+        if self.env_mode:
+            self.collapsed = False
         self.build_window()
-        if self.want_maximized:
+        if self.env_mode:
+            self.win.fullscreen()
+        elif self.want_maximized:
             self.win.maximize()
         self.win.present()
         Gio.bus_watch_name(Gio.BusType.SESSION, SHELL_EXT_NAME, Gio.BusNameWatcherFlags.NONE,
@@ -581,9 +606,17 @@ class Viewer(Gtk.Application):
         self.win = win
 
         hb = Gtk.HeaderBar()
-        win.set_titlebar(hb)
+        if self.env_mode:
+            hb.set_show_title_buttons(False)       # no window chrome: this window IS the agent environment
+            hb.add_css_class("aw-overlay-top")
+        else:
+            win.set_titlebar(hb)
+        self.hb_back = Gtk.Button(icon_name="go-up-symbolic", tooltip_text="Back to your desktop (Ctrl+Alt+Up)",
+                                  visible=False)
+        self.hb_back.connect("clicked", lambda b: self.return_to_desktop())
+        hb.pack_start(self.hb_back)
         self.sb_btn = Gtk.ToggleButton(icon_name="sidebar-show-symbolic", tooltip_text="Workspace list")
-        self.sb_btn.set_active(not self.collapsed)
+        self.sb_btn.set_active(not self.collapsed and not self.env_mode)
         self.sb_btn.connect("toggled", self.on_sidebar_toggle)
         hb.pack_start(self.sb_btn)
         self.ov_btn = Gtk.ToggleButton(icon_name="view-grid-symbolic", tooltip_text="All workspaces")
@@ -657,9 +690,28 @@ class Viewer(Gtk.Application):
 
         # body
         body = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL)
-        win.set_child(body)
+        if self.env_mode:
+            root = Gtk.Overlay()
+            root.set_child(body)
+            self.top_rev = Gtk.Revealer(valign=Gtk.Align.START, halign=Gtk.Align.FILL,
+                                        transition_type=Gtk.RevealerTransitionType.SLIDE_DOWN, transition_duration=160)
+            self.top_rev.set_child(hb)
+            root.add_overlay(self.top_rev)
+            win.set_child(root)
+            hover = Gtk.EventControllerMotion()
+            hover.connect("enter", lambda *a: setattr(self, "_over_top", True))
+            hover.connect("leave", lambda *a: setattr(self, "_over_top", False))
+            hb.add_controller(hover)
+            mc = Gtk.EventControllerMotion()
+            mc.set_propagation_phase(Gtk.PropagationPhase.CAPTURE)
+            mc.connect("motion", self.on_env_motion)
+            win.add_controller(mc)
+        else:
+            win.set_child(body)
         self.sidebar = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
         self.sidebar.add_css_class("aw-sidebar")
+        if self.env_mode:
+            self.sidebar.set_visible(False)
         self.list = Gtk.ListBox(selection_mode=Gtk.SelectionMode.SINGLE)
         self.list.set_activate_on_single_click(True)
         self.list.connect("row-activated", self.on_row_activated)
@@ -789,7 +841,8 @@ class Viewer(Gtk.Application):
     # ---- optional GNOME Shell extension ------------------------------------------------------------------
     def set_shell_ext(self, present: bool):
         self.shell_ext = present
-        self.back_btn.set_visible(present)
+        self.back_btn.set_visible(present and not self.env_mode)
+        self.hb_back.set_visible(present and self.env_mode)
 
     def return_to_desktop(self):
         """Ask the optional extension to slide back to the personal workspace (same as Ctrl+Alt+Up)."""
@@ -801,7 +854,37 @@ class Viewer(Gtk.Application):
             self.flash(f"Could not reach the desktop extension: {e.message}")
 
     # ---- sidebar / overview ----------------------------------------------------------------------------------
+    def on_env_motion(self, c, x, y):
+        """Environment mode: the header appears when the mouse moves (only at the very top edge while you are in
+        control, so it never covers the workspace you are working in) and goes away again."""
+        last = self._last_xy
+        self._last_xy = (x, y)
+        if os.environ.get("AW_VIEWER_DEBUG"):
+            print(f"env motion {x:.0f},{y:.0f} last={last}", file=sys.stderr, flush=True)
+        if last is None or abs(x - last[0]) + abs(y - last[1]) < 3:
+            return      # GTK repeats the last motion when something under the pointer changes; only real movement counts
+        if self.control_state() == "you" and y > 6 and not self.top_rev.get_reveal_child():
+            return
+        self.top_rev.set_reveal_child(True)
+        if not self._top_src:
+            self._top_src = GLib.timeout_add(2200, self.hide_top)
+        self._top_idle = time.monotonic()
+
+    _top_idle = 0.0
+    _last_xy = None
+
+    def hide_top(self):
+        busy = self._over_top or self.menu_btn.get_active() or self.clip_btn.get_active()
+        if busy or time.monotonic() - self._top_idle < 2.0:
+            return True
+        self._top_src = 0
+        self.top_rev.set_reveal_child(False)
+        return False
+
     def on_sidebar_toggle(self, btn):
+        if self.env_mode:
+            self.sidebar.set_visible(btn.get_active())
+            return
         self.collapsed = not btn.get_active()
         self.apply_collapsed()
         self.save_state()
