@@ -21,7 +21,7 @@ import sys
 import time
 from typing import Any, Dict, List, Optional
 
-from . import __version__, apps as appsmod, paths, vision
+from . import __version__, apps as appsmod, mcp_ext, paths, vision
 from .client import ApiError, Client
 
 PROTOCOL_VERSIONS = ("2025-06-18", "2025-03-26", "2024-11-05")
@@ -97,10 +97,6 @@ TOOLS = [
        {"window": {"type": "integer"}, "action": {"type": "string", "enum": [
            "focus", "close", "maximize", "unmaximize", "minimize", "unminimize", "fullscreen",
            "unfullscreen"]}}, ["window", "action"]),
-    _t("window_move", "Move a floating window so its top-left corner is at x,y.",
-       {"window": {"type": "integer"}, "x": NUM, "y": NUM}, ["window", "x", "y"]),
-    _t("window_resize", "Resize a floating window to width x height pixels.",
-       {"window": {"type": "integer"}, "width": NUM, "height": NUM}, ["window", "width", "height"]),
     _t("mouse_move", "Move the workspace pointer.", {"x": NUM, "y": NUM}, ["x", "y"]),
     _t("mouse_click", "Click in the workspace (moves the pointer first when x,y are given).", {
         "x": NUM, "y": NUM, "button": BTN, "count": {"type": "integer", "description": "2 = double click"}}),
@@ -128,6 +124,7 @@ TOOLS = [
        "this workspace. Returns an id; poll with workspace_status.", {
            "title": {"type": "string"}, "detail": {"type": "string"}}, ["title"]),
 ]
+TOOLS = TOOLS + mcp_ext.TOOLS
 TOOL_NAMES = {t["name"] for t in TOOLS}
 NO_WORKSPACE_TOOLS = {"list_workspaces", "ensure_workspace", "wait"}
 
@@ -354,18 +351,8 @@ class Server:
         if name == "window_action":
             c.call("window.action", workspace=ws, window=int(a["window"]), action=a["action"], **ck)
             return self._text("ok")
-        if name in ("window_move", "window_resize"):
-            method = "window.move" if name == "window_move" else "window.resize"
-            keys = ("x", "y") if name == "window_move" else ("width", "height")
-            try:
-                c.call(method, workspace=ws, window=int(a["window"]), **{k: int(a[k]) for k in keys}, **ck)
-            except ApiError as e:
-                if e.code == "E_UNKNOWN_METHOD" or (e.code == "E_FORBIDDEN" and "is not available" in e.message):
-                    raise ApiError("E_UNSUPPORTED", f"{name} is not available in this AgentWorkspaces daemon yet. "
-                                   "Workaround: drag the window's title bar / edge with mouse_drag (only in a "
-                                   "workspace created with window_policy=floating).")
-                raise
-            return self._text("ok")
+        if name in mcp_ext.NAMES:                 # windows (move/resize/geometry), browsers, audio: aw/mcp_ext.py
+            return mcp_ext.call(c, name, a, ws)
         if name == "launch_app":
             return self._launch(ws, a)
         if name == "double_click":
@@ -406,6 +393,10 @@ class Server:
             label = argv[0] if argv else ""
         else:
             raise ApiError("E_BAD_ARGS", "give 'app' or 'command'")
+        if a.get("app") and "WebBrowser" in found["categories"]:
+            routed = self._launch_browser(ws, found, [str(x) for x in (a.get("args") or [])], a)
+            if routed is not None:
+                return routed
         argv += [str(x) for x in (a.get("args") or [])]
         if not argv:
             raise ApiError("E_BAD_ARGS", "empty command")
@@ -415,6 +406,29 @@ class Server:
             before = 0
         r = self.client.call("workspace.launch", workspace=ws, argv=argv, cwd=a.get("cwd"), **self._ck())
         head = f"launched {label} (app {r['app']}, pid {r['pid']}) in workspace {ws}"
+        if a.get("screenshot") is False:
+            return self._text(head)
+        self._wait_first_window(ws, before)
+        return self._shot_parts(self._shot(ws, {}), prefix=head + "; ")
+
+    def _launch_browser(self, ws: str, app: Dict[str, Any], args: List[str], a: Dict[str, Any]):
+        """Browsers go through browser.launch: a THROWAWAY profile (deleted with the workspace), no automation
+        flags. Returns None when the daemon cannot launch this browser (snap, unknown id): the caller then starts
+        it as an ordinary app."""
+        url = next((x for x in args if re.match(r"^(https?://|about:|file:///)", x)), None)
+        rest = [x for x in args if x != url]
+        try:
+            before = len(self.client.call("window.list", workspace=ws, **self._ck())["windows"])
+        except ApiError:
+            before = 0
+        try:
+            r = self.client.call("browser.launch", workspace=ws, browser=app["id"], profile="throwaway",
+                                 **({"url": url} if url else {}), **({"args": rest} if rest else {}))
+        except ApiError as e:
+            if e.code in ("E_BROWSER_UNSUPPORTED", "E_NOT_FOUND", "E_UNKNOWN_METHOD", "E_FORBIDDEN", "E_BAD_BROWSER"):
+                return None
+            raise
+        head = f"launched {r.get('browser', app['name'])} with a throwaway profile (app {r['app']}, pid {r['pid']}) in workspace {ws}"
         if a.get("screenshot") is False:
             return self._text(head)
         self._wait_first_window(ws, before)

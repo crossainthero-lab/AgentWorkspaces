@@ -55,7 +55,7 @@ class Plans(unittest.TestCase):
             p.close()
 
     def test_unknown_agent_not_implemented(self):
-        with self.assertRaises(NotImplementedError):
+        with self.assertRaises(KeyError):
             agentrun.plan("other", "x")
 
 

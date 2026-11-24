@@ -42,8 +42,6 @@ class FakeClient:
             return {"windows": []}
         if method == "workspace.launch":
             return {"app": 1, "pid": 42}
-        if method in ("window.move", "window.resize"):
-            raise ApiError("E_UNKNOWN_METHOD", "unknown")
         if method == "screen.screenshot":
             return {"base64": "AAAA", "width": 10, "height": 5, "capture_ms": 1.0, "workspace": p["workspace"]}
         if method.startswith("input."):
@@ -196,11 +194,34 @@ class McpTests(unittest.TestCase):
         self.assertEqual([c for c in s.client.calls if c[0] == "workspace.launch"][0][1]["argv"], ["gnome-text-editor"])
         self.assertEqual(r["content"][0]["type"], "image")
 
-    def test_window_move_degrades_gracefully_on_old_daemon(self):
+    def test_window_and_browser_tools_call_the_daemon_methods(self):
         s = server([ws("mine", "claude-code")], default="mine")
         r = self.rpc(s, "tools/call", {"name": "window_move", "arguments": {"window": 1, "x": 1, "y": 2}})["result"]
-        self.assertTrue(r["isError"])
-        self.assertIn("E_UNSUPPORTED", r["content"][0]["text"])
+        self.assertFalse(r["isError"])
+        self.assertIn("window.move", [c[0] for c in s.client.calls])
+        names = {t["name"] for t in self.rpc(s, "tools/list")["result"]["tools"]}
+        for n in ("window_resize", "window_set_geometry", "list_browsers", "launch_browser", "request_browser_profile"):
+            self.assertIn(n, names)
+
+    def test_browser_role_goes_through_browser_launch_with_a_throwaway_profile(self):
+        s = server([ws("mine", "claude-code")], default="mine")
+        import aw.apps as apps
+        apps.list_apps = lambda *a, **k: [{"id": "google-chrome", "name": "Google Chrome",
+                                           "argv": ["/usr/bin/google-chrome-stable"], "categories": ["WebBrowser"],
+                                           "comment": "", "mime": []}]
+        s._wait_first_window = lambda *a, **k: None
+        real = s.client.call
+        def call(m, **p):
+            if m == "browser.launch":
+                s.client.calls.append((m, p))
+                return {"browser": "google-chrome", "app": 1, "pid": 5, "profile": {"mode": "throwaway", "name": ""}}
+            return real(m, **p)
+        s.client.call = call
+        r = self.rpc(s, "tools/call", {"name": "launch_app", "arguments": {"app": "browser", "args": ["https://example.org"]}})["result"]
+        self.assertFalse(r["isError"], r)
+        bl = [c for c in s.client.calls if c[0] == "browser.launch"][0][1]
+        self.assertEqual((bl["profile"], bl["url"], bl["browser"]), ("throwaway", "https://example.org", "google-chrome"))
+        self.assertFalse([c for c in s.client.calls if c[0] == "workspace.launch"])
 
     def test_describe_screen_without_backend_is_honest(self):
         for k in ("AW_VISION_URL", "AW_VISION_MODEL"):

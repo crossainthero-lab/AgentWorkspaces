@@ -155,6 +155,7 @@ class NoHostDisplayInTheCode(unittest.TestCase):
         "aw/manager.py": "sets the compositor's / apps' own private XDG_RUNTIME_DIR; reads the runtime dir for systemd",
         "aw/audio.py": "private audio daemons get XDG_RUNTIME_DIR = the workspace's own runtime dir",
         "aw/paths.py": "XDG_RUNTIME_DIR locates the base directory of the API socket",
+        "aw/agentrun.py": "builds the AGENT process environment from scratch; names the host display variables to REFUSE them",
         "aw/sandbox.py": "--setenv XDG_RUNTIME_DIR <the workspace's own runtime dir>",
     }
 
