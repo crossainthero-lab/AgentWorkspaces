@@ -17,10 +17,24 @@ class FakeClient:
     def call(self, method, **p):
         self.calls.append((method, p))
         if method == "workspace.list":
-            ws = self.workspaces
+            lst = self.workspaces
             if p.get("agent_kind"):
-                ws = [w for w in ws if w["agent"]["kind"] in (p["agent_kind"], "none")]
-            return {"workspaces": ws}
+                lst = [w for w in lst if w["agent"]["kind"] in (p["agent_kind"], "none")]
+            return {"workspaces": lst}
+        if method == "workspace.create":
+            if any(w["name"].lower() == p["name"].lower() for w in self.workspaces):
+                raise ApiError("E_EXISTS", "exists")
+            w = ws(p["name"], p["agent_kind"])
+            self.workspaces.append(w)
+            return w
+        if method == "workspace.start":
+            return [w for w in self.workspaces if w["name"] == p["workspace"]][0] | {"state": "running"}
+        if method == "window.list":
+            return {"windows": []}
+        if method == "workspace.launch":
+            return {"app": 1, "pid": 42}
+        if method in ("window.move", "window.resize"):
+            raise ApiError("E_UNKNOWN_METHOD", "unknown")
         if method == "screen.screenshot":
             return {"base64": "AAAA", "width": 10, "height": 5, "capture_ms": 1.0, "workspace": p["workspace"]}
         if method.startswith("input."):
@@ -35,11 +49,12 @@ def ws(name, kind):
             "display": {"width": 100, "height": 50}, "input_mode": "agent", "activity": {"window_count": 0}}
 
 
-def server(workspaces, kind="claude-code", default=None):
+def server(workspaces, kind="claude-code", default=None, auto=False):
     os.environ["AW_AGENT_KIND"] = kind
     os.environ.pop("AW_WORKSPACE", None)
     s = mcp.Server.__new__(mcp.Server)
     s.kind, s.default_ws, s.client = kind, default, FakeClient(workspaces)
+    s.project, s.auto, s.shots_dir, s._ws_cache, s._shot_n = "proj", auto, None, None, 0
     return s
 
 
@@ -50,7 +65,7 @@ class McpTests(unittest.TestCase):
     def test_initialize_states_assigned_workspace_rule(self):
         r = self.rpc(server([]), "initialize", {"protocolVersion": "2025-06-18"})["result"]
         self.assertEqual(r["protocolVersion"], "2025-06-18")
-        self.assertIn("never touch the user's personal desktop", r["instructions"])
+        self.assertIn("never the user's personal desktop", r["instructions"])
         self.assertIn("assigned", r["instructions"])
 
     def test_tool_list_is_complete(self):
@@ -91,6 +106,7 @@ class McpTests(unittest.TestCase):
 
     def test_launch_app_string_is_split_without_shell(self):
         s = server([ws("mine", "claude-code")], default="mine")
+        s._wait_first_window = lambda *a, **k: None
         self.rpc(s, "tools/call", {"name": "launch_app", "arguments": {"command": "gnome-calculator --x; rm -rf /"}})
         argv = [c for c in s.client.calls if c[0] == "workspace.launch"][0][1]["argv"]
         self.assertEqual(argv, ["gnome-calculator", "--x;", "rm", "-rf", "/"])  # plain argv, no shell
@@ -99,6 +115,91 @@ class McpTests(unittest.TestCase):
         s = server([ws("mine", "claude-code")], default="mine")
         r = self.rpc(s, "tools/call", {"name": "mouse_move", "arguments": {}})["result"]
         self.assertTrue(r["isError"])
+
+    # ---- automatic workspace
+    def test_auto_name_is_valid_stable_and_bounded(self):
+        import re
+        rx = re.compile(r"^[A-Za-z0-9][A-Za-z0-9 _.\-]{0,39}$")
+        self.assertEqual(mcp.auto_name("codex", "my app"), "codex-my-app")
+        for proj in ("x" * 100, "../../etc", "Ünïcode ✓", "", "a b"):
+            n = mcp.auto_name("claude-code", proj)
+            self.assertTrue(rx.match(n), n)
+            self.assertEqual(n, mcp.auto_name("claude-code", proj))
+        self.assertNotEqual(mcp.auto_name("claude-code", "x" * 60), mcp.auto_name("claude-code", "x" * 61))
+
+    def test_first_graphical_call_creates_the_agents_workspace(self):
+        s = server([], auto=True)
+        r = self.rpc(s, "tools/call", {"name": "screenshot", "arguments": {}})["result"]
+        self.assertFalse(r["isError"], r)
+        created = [c for c in s.client.calls if c[0] == "workspace.create"]
+        self.assertEqual(len(created), 1)
+        self.assertEqual(created[0][1]["name"], "claude-code-proj")
+        self.assertEqual(created[0][1]["agent_kind"], "claude-code")
+        self.rpc(s, "tools/call", {"name": "screenshot", "arguments": {}})
+        self.assertEqual(len([c for c in s.client.calls if c[0] == "workspace.create"]), 1)  # reused
+
+    def test_existing_workspace_is_attached_not_duplicated(self):
+        s = server([ws("claude-code-proj", "claude-code"), ws("other", "claude-code")], auto=True)
+        self.rpc(s, "tools/call", {"name": "screenshot", "arguments": {}})
+        self.assertFalse([c for c in s.client.calls if c[0] == "workspace.create"])
+        self.assertEqual(s.client.calls[-1][1]["workspace"], "claude-code-proj")
+
+    def test_stopped_workspace_is_started(self):
+        w = ws("codex-proj", "codex")
+        w["state"] = "stopped"
+        s = server([w], kind="codex", auto=True)
+        self.rpc(s, "tools/call", {"name": "screenshot", "arguments": {}})
+        self.assertIn("workspace.start", [c[0] for c in s.client.calls])
+
+    def test_name_owned_by_another_agent_is_reported(self):
+        s = server([], auto=True)
+        real = s.client.call
+        def call(m, **p):
+            if m == "workspace.create":
+                raise ApiError("E_EXISTS", "exists")
+            return real(m, **p)
+        s.client.call = call
+        r = self.rpc(s, "tools/call", {"name": "screenshot", "arguments": {}})["result"]
+        self.assertTrue(r["isError"])
+        self.assertIn("E_ASSIGNMENT", r["content"][0]["text"])
+
+    def test_auto_create_can_be_disabled(self):
+        s = server([], auto=False)
+        r = self.rpc(s, "tools/call", {"name": "screenshot", "arguments": {}})["result"]
+        self.assertTrue(r["isError"])
+        self.assertFalse([c for c in s.client.calls if c[0] == "workspace.create"])
+
+    def test_launch_by_role_uses_installed_app_and_returns_screenshot(self):
+        s = server([ws("mine", "claude-code")], default="mine")
+        import aw.apps as apps
+        apps.list_apps = lambda *a, **k: [{"id": "org.gnome.TextEditor", "name": "Text Editor",
+                                           "argv": ["gnome-text-editor"], "categories": ["TextEditor"],
+                                           "comment": "", "mime": []}]
+        s._wait_first_window = lambda *a, **k: None
+        r = self.rpc(s, "tools/call", {"name": "launch_app", "arguments": {"app": "text editor"}})["result"]
+        self.assertFalse(r["isError"], r)
+        self.assertEqual([c for c in s.client.calls if c[0] == "workspace.launch"][0][1]["argv"], ["gnome-text-editor"])
+        self.assertEqual(r["content"][0]["type"], "image")
+
+    def test_window_move_degrades_gracefully_on_old_daemon(self):
+        s = server([ws("mine", "claude-code")], default="mine")
+        r = self.rpc(s, "tools/call", {"name": "window_move", "arguments": {"window": 1, "x": 1, "y": 2}})["result"]
+        self.assertTrue(r["isError"])
+        self.assertIn("E_UNSUPPORTED", r["content"][0]["text"])
+
+    def test_describe_screen_without_backend_is_honest(self):
+        for k in ("AW_VISION_URL", "AW_VISION_MODEL"):
+            os.environ.pop(k, None)
+        s = server([ws("mine", "claude-code")], default="mine")
+        r = self.rpc(s, "tools/call", {"name": "describe_screen", "arguments": {}})["result"]
+        self.assertTrue(r["isError"])
+        self.assertIn("E_NO_VISION", r["content"][0]["text"])
+
+    def test_destroy_needs_confirmation(self):
+        s = server([ws("mine", "claude-code")], default="mine")
+        r = self.rpc(s, "tools/call", {"name": "workspace_control", "arguments": {"action": "destroy"}})["result"]
+        self.assertTrue(r["isError"])
+        self.assertFalse([c for c in s.client.calls if c[0] == "workspace.destroy"])
 
     def test_unknown_method(self):
         self.assertEqual(self.rpc(server([]), "bogus")["error"]["code"], -32601)
