@@ -1,0 +1,27 @@
+GPU: NVIDIA GeForce RTX 4060 Ti, 595.99.02
+
+== compositor renderer (wlroots debug log, headless backend, gles2 on /dev/dri/renderD128)
+   [util/env.c:25] Loading WLR_RENDERER option: gles2
+   [render/wlr_renderer.c:157] Opening DRM render node '/dev/dri/renderD128' from WLR_RENDER_DRM_DEVICE
+   [render/egl.c:523] Using EGL device /dev/dri/card1
+   [render/egl.c:374] EGL vendor: NVIDIA
+   [render/egl.c:376] EGL driver name: nvidia
+
+== gpu=auto: processes in this workspace's cgroup: ['dbus-daemon', 'labwc', 'vkcube']
+   nvidia-smi pmon (3 samples, only rows whose PID belongs to this workspace):
+    # gpu         pid   type     sm    mem    enc    dec    jpg    ofa     fb   ccpm    command 
+    # Idx           #    C/G      %      %      %      %      %      %     MB     MB    name 
+        0     860671     G      -      -      -      -      -      -      4      0    labwc          
+        0     860684   C+G      7     21      -      -      -      -     19      0    vkcube         
+        0     860671     G      -      -      -      -      -      -      4      0    labwc          
+        0     860684   C+G      9     26      -      -      -      -     19      0    vkcube         
+        0     860671     G      -      -      -      -      -      -      4      0    labwc          
+        0     860684   C+G     11     25      -      -      -      -     19      0    vkcube         
+
+== gpu=off: processes in this workspace's cgroup: ['dbus-daemon', 'labwc', 'vkcube']
+   nvidia-smi pmon (3 samples, only rows whose PID belongs to this workspace):
+    # gpu         pid   type     sm    mem    enc    dec    jpg    ofa     fb   ccpm    command 
+    # Idx           #    C/G      %      %      %      %      %      %     MB     MB    name 
+        0     860761     G      -      -      -      -      -      -      2      0    vkcube         
+        0     860761     G      -      -      -      -      -      -      2      0    vkcube         
+        0     860761     G      -      -      -      -      -      -      2      0    vkcube         

@@ -1,0 +1,6 @@
+#!/usr/bin/python3
+import os, sys
+root = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
+sys.path.insert(0, root)
+from aw.cli import main
+sys.exit(main())

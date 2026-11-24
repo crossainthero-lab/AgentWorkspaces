@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<schemalist>
+  <schema id="org.gnome.shell.extensions.agent-workspaces"
+          path="/org/gnome/shell/extensions/agent-workspaces/">
+
+    <key name="enter-shortcut" type="as">
+      <default>["&lt;Control&gt;&lt;Alt&gt;Down"]</default>
+      <summary>Enter AgentWorkspaces</summary>
+      <description>Accelerators that move from a personal workspace to the AgentWorkspaces workspace.</description>
+    </key>
+
+    <key name="return-shortcut" type="as">
+      <default>["&lt;Control&gt;&lt;Alt&gt;Up"]</default>
+      <summary>Return to the personal workspace</summary>
+      <description>Accelerators that move from the AgentWorkspaces workspace back to the personal workspace you came from.</description>
+    </key>
+
+    <key name="create-on-demand" type="b">
+      <default>true</default>
+      <summary>Create the AgentWorkspaces workspace on demand</summary>
+      <description>When entering and no AgentWorkspaces viewer window exists, create a dedicated GNOME workspace and ask the AgentWorkspaces service to open the viewer there. When off, entering only works while a viewer window already exists.</description>
+    </key>
+
+    <!-- State kept by the extension. Not shown in preferences. -->
+    <key name="backup" type="s">
+      <default>""</default>
+      <summary>Bindings removed from GNOME while the extension is enabled (JSON)</summary>
+      <description>Written before the extension removes an accelerator from org.gnome.desktop.wm.keybindings, cleared after it is restored. A non-empty value at start-up means the shell ended while the bindings were removed, and they are restored first.</description>
+    </key>
+
+    <key name="conflicts" type="as">
+      <default>[]</default>
+      <summary>Other bindings that use the same accelerators</summary>
+      <description>Filled by the extension; read by the preferences page.</description>
+    </key>
+
+    <key name="test-hooks" type="b">
+      <default>false</default>
+      <summary>Expose a test-only D-Bus interface</summary>
+      <description>Used by the isolated-session tests. Leave off.</description>
+    </key>
+  </schema>
+</schemalist>
