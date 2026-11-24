@@ -81,6 +81,7 @@ def to_rgb(buf, width: int, height: int, stride: int, fourcc: int, y_invert: boo
 class WorkspaceSession:
     def __init__(self, socket_path: str, layout: str = "us"):
         self.conn = wl.Connection(socket_path)  # raises if socket missing: fail closed
+        self.epoch = time.monotonic_ns()         # distinguishes this connection's toplevel ids from a later one's
         self.socket_path = socket_path
         self.lock = threading.RLock()
         self.keymap = xkb.Keymap(layout)

@@ -25,9 +25,10 @@ from .auth import AuthError, Principal
 from .grants import GrantError, GrantStore
 from .manager import AGENT_KINDS, Manager, ManagerError
 from .session import SessionError
+from .windows import WindowError
 
 INPUT_METHODS = {"input.move", "input.click", "input.drag", "input.type", "input.key", "input.scroll",
-                 "window.action", "clipboard.set"}
+                 "window.action", "window.move", "window.resize", "window.set_geometry", "clipboard.set"}
 
 
 class Approval:
@@ -254,7 +255,7 @@ class Daemon:
             d["pending_approvals"] = sum(1 for a in self.approvals.values()
                                          if a.workspace == ws.id and a.status == "pending")
             try:
-                d["windows"] = self._session(ws).list_windows() if ws.state == "running" else []
+                d["windows"] = self.mgr.winmgr(ws).list() if ws.state == "running" else []
             except ManagerError:
                 d["windows"] = []
             return d
@@ -319,7 +320,7 @@ class Daemon:
         if method == "window.list":
             ws = self._ws(p)
             self._check_assignment(ws, p, pr)
-            return {"windows": self._session(ws).list_windows()}
+            return {"windows": self.mgr.winmgr(ws).list()}
         if method in INPUT_METHODS:
             return self._input(method, p, pr)
         if method == "clipboard.get":
@@ -469,6 +470,7 @@ class Daemon:
         actor = self._guard_input(ws, p, pr)
         s = self._session(ws)
         kind = method.split(".", 1)[1]
+        wres = None
         if method == "input.move":
             s.pointer_move(float(p["x"]), float(p["y"]))
         elif method == "input.click":
@@ -482,13 +484,24 @@ class Daemon:
         elif method == "input.scroll":
             s.scroll(float(p.get("dx", 0)), float(p.get("dy", 0)), p.get("x"), p.get("y"))
         elif method == "window.action":
-            s.window_action(int(p["window"]), p["action"])
+            wres = self.mgr.winmgr(ws).action(int(p["window"]), p["action"])
             kind = "window." + p["action"]
+        elif method in ("window.move", "window.resize", "window.set_geometry"):
+            g = {k: p.get(k) for k in ("x", "y", "width", "height")}
+            if method == "window.move":
+                g["width"] = g["height"] = None
+            elif method == "window.resize":
+                g["x"] = g["y"] = None
+            wres = self.mgr.winmgr(ws).set_geometry(int(p["window"]), **g)
+            kind = "window.geometry"
         elif method == "clipboard.set":
             s.set_clipboard(str(p["text"]))
             kind = "clipboard"
         self.mgr.note_action(ws, kind, actor)
-        return {"ok": True, "pointer": {"x": s.pos[0], "y": s.pos[1]}}
+        res = {"ok": True, "pointer": {"x": s.pos[0], "y": s.pos[1]}}
+        if method.startswith("window."):
+            res["window"] = wres
+        return res
 
     def _enter(self, p):
         ws = self._ws(p) if p.get("workspace") else None     # no workspace: the viewer opens where you left off
@@ -645,6 +658,8 @@ class Handler(socketserver.StreamRequestHandler):
                     err(rid, e.code, e.message)
                     if failures >= 10:
                         break
+                except WindowError as e:
+                    err(rid, e.code, e.message)
                 except SessionError as e:
                     err(rid, "E_SESSION", str(e))
                 except (KeyError, ValueError, TypeError) as e:

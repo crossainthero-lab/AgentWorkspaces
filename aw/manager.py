@@ -26,6 +26,7 @@ import time
 from typing import Any, Callable, Dict, List, Optional
 
 from . import appenv, auth, paths
+from .windows import WindowManager, render_rc
 from .session import SessionError, WorkspaceSession
 
 AGENT_KINDS = {
@@ -133,6 +134,7 @@ class Manager:
         self.lock = threading.RLock()
         self.workspaces: Dict[str, Workspace] = {}
         self.sessions: Dict[str, WorkspaceSession] = {}
+        self._winmgrs: Dict[str, WindowManager] = {}
         self.use_systemd = _systemd_available()
         paths.ensure_private_dir(paths.base_dir())
         self.creds = auth.CredentialStore(paths.base_dir())
@@ -254,21 +256,8 @@ class Manager:
     def _write_config(self, ws: Workspace):
         cfg = os.path.join(ws.dir, "labwc")
         os.makedirs(cfg, mode=0o700, exist_ok=True)
-        rule = ('<windowRules><windowRule identifier="*"><action name="Maximize"/></windowRule></windowRules>'
-                if ws.window_policy == "maximized" else "")
         with open(os.path.join(cfg, "rc.xml"), "w") as f:
-            f.write(f"""<?xml version="1.0"?>
-<labwc_config>
-  <core><gap>0</gap></core>
-  <theme><name>Clearlooks</name><cornerRadius>0</cornerRadius></theme>
-  <focus><followMouse>no</followMouse><raiseOnFocus>yes</raiseOnFocus></focus>
-  <keyboard><default /><keybind key="A-Tab"><action name="NextWindow"/></keybind>
-    <keybind key="A-F4"><action name="Close"/></keybind>
-    <keybind key="W-Up"><action name="ToggleMaximize"/></keybind></keyboard>
-  <mouse><default /></mouse>
-  {rule}
-</labwc_config>
-""")
+            f.write(render_rc(ws.window_policy))
         # labwc's default menu/autostart would run host-installed desktop entries; keep both empty.
         open(os.path.join(cfg, "autostart"), "w").close()
         startup = os.path.join(ws.dir, "startup.sh")
@@ -364,6 +353,9 @@ echo "$DISPLAY" > {shlex.quote(ws.dir)}/display.tmp && mv {shlex.quote(ws.dir)}/
                 return
             unexpected = ws.state == "running"
             sess = self.sessions.pop(ws.id, None)
+            wm = self._winmgrs.pop(ws.id, None)
+            if wm:
+                wm.close()
             ws.compositor_pid = None
             ws.state = "stopped" if ws.state != "failed" else "failed"
             self._save(ws)
@@ -410,6 +402,9 @@ echo "$DISPLAY" > {shlex.quote(ws.dir)}/display.tmp && mv {shlex.quote(ws.dir)}/
             sess = self.sessions.pop(ws.id, None)
             if sess:
                 sess.close()
+            wm = self._winmgrs.pop(ws.id, None)
+            if wm:
+                wm.close()
             ws.state = "stopping"
         self._kill_processes(ws)
         with self.lock:
@@ -548,6 +543,14 @@ echo "$DISPLAY" > {shlex.quote(ws.dir)}/display.tmp && mv {shlex.quote(ws.dir)}/
             self.sessions[ws.id] = s
             return s
 
+    def winmgr(self, ws: Workspace) -> WindowManager:
+        """Window service for a running workspace (merged Wayland + X11 list, window management)."""
+        with self.lock:
+            wm = self._winmgrs.get(ws.id)
+            if wm is None:
+                wm = self._winmgrs[ws.id] = WindowManager(ws, lambda: self.session(ws))
+            return wm
+
     # ---- apps
     def launch(self, ws: Workspace, argv: List[str], cwd: Optional[str] = None,
                extra_env: Optional[Dict[str, str]] = None) -> Dict[str, Any]:
@@ -641,7 +644,7 @@ echo "$DISPLAY" > {shlex.quote(ws.dir)}/display.tmp && mv {shlex.quote(ws.dir)}/
         s = self.sessions.get(ws.id)
         if s is not None and s.alive:
             try:
-                wins = s.toplevels_snapshot()
+                wins = self.winmgr(ws).list(max_age=0.5)
             except Exception:
                 wins = []
         focused = next((w for w in wins if w.get("focused")), None)

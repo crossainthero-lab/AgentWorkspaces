@@ -88,6 +88,16 @@ def build_parser() -> argparse.ArgumentParser:
     wa = sub.add_parser("window-action"); ws_arg(wa); wa.add_argument("window", type=int)
     wa.add_argument("action", choices=["focus", "close", "maximize", "unmaximize", "minimize",
                                        "unminimize", "fullscreen", "unfullscreen", "restore"]); caller(wa)
+    wm_ = sub.add_parser("window-move", help="move a window (content rectangle origin, logical px)"); ws_arg(wm_)
+    wm_.add_argument("window", type=int); wm_.add_argument("x", type=int); wm_.add_argument("y", type=int); caller(wm_)
+    wr_ = sub.add_parser("window-resize", help="resize a window (content size, logical px)"); ws_arg(wr_)
+    wr_.add_argument("window", type=int); wr_.add_argument("width", type=int)
+    wr_.add_argument("height", type=int); caller(wr_)
+    wg_ = sub.add_parser("window-geometry", help="move and resize a window in one step"); ws_arg(wg_)
+    wg_.add_argument("window", type=int)
+    for n in ("x", "y", "width", "height"):
+        wg_.add_argument(n, type=int)
+    caller(wg_)
     ck = sub.add_parser("click"); ws_arg(ck); ck.add_argument("x", type=float, nargs="?")
     ck.add_argument("y", type=float, nargs="?"); ck.add_argument("--button", default="left")
     ck.add_argument("--count", type=int, default=1); caller(ck)
@@ -339,7 +349,11 @@ def _run(args) -> int:
             for w in res["windows"]:
                 flags = "".join(f for f, on in (("F", w["focused"]), ("M", w["maximized"]),
                                                 ("m", w["minimized"]), ("S", w["fullscreen"])) if on)
-                print(f"{w['id']:>3} [{flags:<3}] {w['app_id']:<28} {w['title']}")
+                g = w.get("geometry") or {}
+                geo = (f"{g['width']}x{g['height']}+{g['x']}+{g['y']}" if g.get("width") is not None
+                       else "?")
+                print(f"{w['id']:>3} {w.get('kind', 'wayland'):<7} [{flags:<4}] {geo:<16} "
+                      f"{w['app_id']:<24} {w['title']}")
         return 0
     if cmd == "display-info":
         _p(c.call("screen.info", workspace=args.workspace, **kw))
@@ -347,6 +361,16 @@ def _run(args) -> int:
     if cmd == "window-action":
         show(c.call("window.action", workspace=args.workspace, window=args.window, action=args.action, **kw),
              "ok")
+        return 0
+    if cmd in ("window-move", "window-resize", "window-geometry"):
+        method = {"window-move": "window.move", "window-resize": "window.resize",
+                  "window-geometry": "window.set_geometry"}[cmd]
+        g = {k: getattr(args, k) for k in ("x", "y", "width", "height") if hasattr(args, k)}
+        res = c.call(method, workspace=args.workspace, window=args.window, **g, **kw)
+        win = res.get("window") or {}
+        geo = win.get("geometry") or {}
+        show(res, "ok " + (f"{geo.get('width')}x{geo.get('height')}+{geo.get('x')}+{geo.get('y')} "
+                           f"({win.get('geometry_source')})" if geo else ""))
         return 0
     if cmd == "click":
         if (args.x is None) != (args.y is None):
