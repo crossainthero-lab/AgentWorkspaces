@@ -314,7 +314,7 @@ class OrdinaryWork(unittest.TestCase):
                 shot = os.path.join(work, "shot.png")
                 if os.path.exists(shot):
                     os.remove(shot)
-                cmd = f"google-chrome --headless=new --disable-gpu --no-sandbox --screenshot={shot} --window-size=400,300 file://{work}/Makefile"
+                cmd = f"google-chrome --user-data-dir={work}/chrome-prof --headless=new --disable-gpu --no-sandbox --screenshot={shot} --window-size=400,300 file://{work}/Makefile"
                 if rw:
                     cmd = guard.rewrite(cmd, HOST.rt)
                 subprocess.run(["bash", "-c", cmd], env=envf(), cwd=work, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,

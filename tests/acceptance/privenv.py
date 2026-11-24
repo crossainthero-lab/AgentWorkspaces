@@ -72,7 +72,8 @@ class PrivateEnv:
         shutil.rmtree(self.root, ignore_errors=True)
 
 
-def assert_private(env: Dict[str, str], allowed_roots: Iterable[str] = (), label: str = "agent") -> List[str]:
+def assert_private(env: Dict[str, str], allowed_roots: Iterable[str] = (), label: str = "agent",
+                   allowed_values: Optional[Dict[str, str]] = None) -> List[str]:
     """Raise AssertionError when `env` could expose the real home / desktop / bus. `allowed_roots`: private directories
     (the stand-in desktop's) whose paths may appear. Returns the printable plan (secrets redacted)."""
     rh, rrt = real_home(), real_runtime_dir()
@@ -80,7 +81,8 @@ def assert_private(env: Dict[str, str], allowed_roots: Iterable[str] = (), label
     problems = []
     for k, v in env.items():
         low = os.path.realpath(v) if v.startswith("/") else v
-        under_allowed = any(low == a or low.startswith(a + os.sep) for a in allowed)
+        under_allowed = any(low == a or low.startswith(a + os.sep) or (a + os.sep) in v for a in allowed) or \
+            (allowed_values or {}).get(k) == v
         if k in FORBIDDEN_NAMES and not under_allowed and not (k in ("WAYLAND_DISPLAY",) and not v.startswith("/") and allowed):
             problems.append(f"{k} is set")
         if SECRET_NAME.search(k):

@@ -788,9 +788,31 @@ def serve(foreground: bool = True) -> int:
     signal.signal(signal.SIGTERM, on_sig)
     signal.signal(signal.SIGINT, on_sig)
     print(f"agent-workspacesd {__version__} listening on {sock}", flush=True)
+    pidfile = os.path.join(paths.base_dir(), "daemon.pid")
+    with open(pidfile, "w") as f:
+        f.write(str(os.getpid()))
+    idle = float(os.environ.get("AW_IDLE_EXIT_SECONDS") or 0)
+    if idle > 0:
+        # A daemon started on demand by an agent's MCP server exits by itself after being idle (no workspace) for this
+        # long: no persistent process is left behind when nobody uses it. Workspaces are never touched by this.
+        def idle_watch():
+            since = None
+            while not stop.wait(min(15.0, max(idle / 2, 0.5))):
+                if d.mgr.workspaces:
+                    since = None
+                elif since is None:
+                    since = time.time()
+                elif time.time() - since >= idle:
+                    on_sig()
+                    return
+        threading.Thread(target=idle_watch, daemon=True).start()
     try:
         srv.serve_forever()
     finally:
+        try:
+            os.unlink(pidfile)
+        except OSError:
+            pass
         d.mgr.shutdown_sessions()
         srv.server_close()
         try:

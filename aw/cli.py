@@ -9,7 +9,7 @@ import subprocess
 import sys
 from typing import List, Optional
 
-from . import __version__
+from . import __version__, paths
 from .client import ApiError, Client
 
 
@@ -39,6 +39,7 @@ def build_parser() -> argparse.ArgumentParser:
         p.add_argument("--as-agent", metavar="KIND", help="identify as an agent kind (claude-code, codex, ...)")
 
     sub.add_parser("daemon", help="run the workspace daemon in the foreground")
+    sub.add_parser("stop-daemon", help="stop the daemon process (workspaces keep running and are re-adopted)")
     sub.add_parser("status", help="daemon status + workspace summary").add_argument("workspace", nargs="?")
     sub.add_parser("list", help="list workspaces").add_argument("--all", action="store_true")
 
@@ -167,6 +168,20 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv: Optional[List[str]] = None) -> int:
     args = build_parser().parse_args(argv)
+    if args.cmd == "stop-daemon":
+        import signal
+        pf = os.path.join(paths.base_dir(), "daemon.pid")
+        try:
+            pid = int(open(pf).read())
+            if b"aw.daemon" not in open(f"/proc/{pid}/cmdline", "rb").read() and b"agent-workspaces" not in open(f"/proc/{pid}/cmdline", "rb").read():
+                print("the recorded pid is not the daemon; nothing stopped", file=sys.stderr)
+                return 1
+            os.kill(pid, signal.SIGTERM)
+            print(f"daemon (pid {pid}) told to stop; workspaces keep running")
+            return 0
+        except (OSError, ValueError):
+            print("no daemon is running")
+            return 0
     if args.cmd == "daemon":
         from .daemon import serve
         return serve()

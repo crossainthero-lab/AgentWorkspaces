@@ -79,7 +79,7 @@ def run_agent(agent: str, prompt: str, base: str, project: str, run_dir: str, mo
     if agent == "claude-code":
         env.update(priv.claude_login())
     env.update(plan.extra_env)
-    lines = privenv.assert_private(env, plan.allowed_roots, label=f"{agent} run")
+    lines = privenv.assert_private(env, plan.allowed_roots, label=f"{agent} run", allowed_values=getattr(plan, "allowed_values", None))
     with open(os.path.join(run_dir, "planned-env.txt"), "w") as f:
         f.write("\n".join(lines) + "\nargv[0]: " + os.path.basename(plan.argv[0]) + "\n")
     plan.argv[0] = shutil.which(plan.argv[0]) or plan.argv[0]       # resolved with the harness PATH; the agent gets a system PATH

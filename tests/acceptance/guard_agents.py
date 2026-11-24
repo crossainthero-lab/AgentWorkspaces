@@ -51,6 +51,8 @@ def standin_vars():
     e = G.standin_env()
     e["PATH"] = privenv.SYSTEM_PATH
     e["BROWSER"] = "xdg-open"          # as a typical desktop has it
+    e.update({"XDG_CONFIG_HOME": os.path.join(G.HOME, ".config"), "XDG_DATA_HOME": os.path.join(G.HOME, ".local/share"),
+              "XDG_CACHE_HOME": os.path.join(G.HOME, ".cache"), "XDG_STATE_HOME": os.path.join(G.HOME, ".local/state")})
     return e
 
 
@@ -63,6 +65,7 @@ def customize_claude(guard_on):
             a += ["--settings", json.dumps(settings_for_claude())]
         plan.extra_env = standin_vars()
         plan.allowed_roots = (G.K.BASE,)
+        plan.allowed_values = {"DISPLAY": G.DISPLAY}
     return cust
 
 
@@ -86,6 +89,7 @@ def customize_hermes(guard_on):
                 os.environ["HERMES_HOME"] = old
         plan.extra_env = standin_vars()
         plan.allowed_roots = (G.K.BASE,)
+        plan.allowed_values = {"DISPLAY": G.DISPLAY}
     return cust
 
 

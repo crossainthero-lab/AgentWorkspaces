@@ -87,6 +87,7 @@ class Client:
     def _spawn_daemon(self):
         root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         env = {k: v for k, v in os.environ.items() if not k.startswith("AW_TOKEN") and not k.startswith("AW_ADMIN")}
+        env.setdefault("AW_IDLE_EXIT_SECONDS", "1800")     # on-demand daemon: leave nothing behind when unused
         env["PYTHONPATH"] = root + (":" + env["PYTHONPATH"] if env.get("PYTHONPATH") else "")
         log = os.path.join(paths.ensure_private_dir(paths.base_dir()), "daemon.log")
         subprocess.Popen([sys.executable, "-m", "aw.daemon"], env=env, stdin=subprocess.DEVNULL,

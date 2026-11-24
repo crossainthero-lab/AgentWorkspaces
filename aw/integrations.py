@@ -82,7 +82,7 @@ SKILL_ROOT = {"claude-code": ".claude/skills", "codex": ".codex/skills"}
 BLOCK_BEGIN = "<!-- agent-workspaces:begin (managed by `agent-workspaces integrate`; removed by uninstall) -->"
 BLOCK_END = "<!-- agent-workspaces:end -->"
 # Global memory/rules files, for agents that read one (Antigravity: ~/.gemini/GEMINI.md, see its changelog).
-RULES_FILE = {"antigravity": ".gemini/GEMINI.md"}
+RULES_FILE = {"antigravity": ".gemini/GEMINI.md", "hermes": "SOUL.md"}   # hermes: relative to $HERMES_HOME (default ~/.hermes)
 
 
 def managed_block(text: str) -> str:
@@ -91,7 +91,11 @@ def managed_block(text: str) -> str:
 
 def rules_path(agent: str, home: Optional[str] = None) -> Optional[str]:
     rel = RULES_FILE.get(agent)
-    return os.path.join(home or os.path.expanduser("~"), rel) if rel else None
+    if not rel:
+        return None
+    if agent == "hermes":
+        return os.path.join(home or os.environ.get("HERMES_HOME") or os.path.join(os.path.expanduser("~"), ".hermes"), rel)
+    return os.path.join(home or os.path.expanduser("~"), rel)
 
 
 def _install_rules(agent: str, dry: bool) -> Optional[str]:

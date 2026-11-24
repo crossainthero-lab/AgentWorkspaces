@@ -126,6 +126,10 @@ def hermes_home(model: Optional[str], menv: Dict[str, str]) -> str:
            "providers": {HERMES_PROVIDER: prov},
            "mcp_servers": {ig.NAME: {"command": server[0], "args": server[1:], "env": menv}}}
     os.makedirs(HERMES_RUN_HOME, mode=0o700, exist_ok=True)
+    # the rule text, through Hermes' identity file exactly as `integrate hermes install` writes it (SOUL.md is injected
+    # into the system prompt; the MCP server's own `instructions` are not shown to the model by Hermes)
+    with open(os.path.join(HERMES_RUN_HOME, "SOUL.md"), "w") as f:
+        f.write(ig.managed_block(ig.INSTRUCTIONS))
     link = os.path.join(HERMES_RUN_HOME, "hermes-agent")
     if not os.path.islink(link) and not os.path.exists(link):
         os.symlink(os.path.join(real, "hermes-agent"), link)
