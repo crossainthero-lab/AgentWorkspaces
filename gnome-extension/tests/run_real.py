@@ -194,7 +194,27 @@ def main():
         check("the new workspace is the one now attached", ws.get("notes", {}).get("viewers") == 1)
         shot("viewer-new-workspace.png")
 
-        # ---- close workspace from the menu
+        # ---- sidebar collapses to an icon rail and back
+        s.click(*UI["sidebar_toggle"])
+        time.sleep(0.8)
+        shot("viewer-collapsed.png")
+        s.click(*UI["sidebar_toggle"])
+        time.sleep(0.6)
+
+        # ---- the approval bar: Deny and Approve do what they say
+        s.click(1544, 104)
+        got = wait_for(lambda: c.call("approval.get", id=a["id"])["status"] == "approved", 5)
+        check("Approve in the viewer resolves the agent's request as approved", bool(got))
+        a2 = c.call("approval.request", workspace=cur, title="Copy from the host clipboard?", kind="input")
+        time.sleep(1.5)
+        s.click(1455, 104)
+        got = wait_for(lambda: c.call("approval.get", id=a2["id"])["status"] == "denied", 5)
+        check("Deny in the viewer resolves it as denied", bool(got))
+        time.sleep(1.0)
+        check("the bar and the badge go away when nothing is pending",
+              c.call("approval.list", pending=True)["approvals"] == [] and
+              all(w["pending_approvals"] == 0 for w in c.call("workspace.list")["workspaces"]))
+
         s.click(*UI["menu"])
         time.sleep(0.8)
         shot("viewer-menu.png")
@@ -226,6 +246,39 @@ def main():
         ws = {w["name"]: w for w in c.call("workspace.list")["workspaces"]}
         check("re-entering opens the viewer again on the workspace I used last",
               bool(ok) and ws["notes"]["viewers"] == 1, str({n: w["viewers"] for n, w in ws.items()}))
+
+        # ---- stop / start / close from the menu (the viewer is on 'notes')
+        s.click(*UI["menu"])
+        time.sleep(0.6)
+        s.click(1437, 207)                       # Stop workspace
+        got = wait_for(lambda: next(w for w in c.call("workspace.list")["workspaces"] if w["name"] == "notes")["state"] == "stopped", 10)
+        check("Stop workspace from the menu stops it", bool(got))
+        time.sleep(1.2)
+        shot("viewer-stopped.png")
+        s.click(*UI["menu"])
+        time.sleep(0.6)
+        s.click(1437, 177)                       # Start workspace
+        got = wait_for(lambda: next(w for w in c.call("workspace.list")["workspaces"] if w["name"] == "notes")["state"] == "running", 15)
+        check("Start workspace from the menu starts it again", bool(got))
+        time.sleep(2.0)
+        s.click(*UI["menu"])
+        time.sleep(0.6)
+        s.click(1444, 237)                       # Close workspace...
+        time.sleep(1.0)
+        shot("viewer-close-dialog.png")
+        s.key("Escape")
+        time.sleep(0.6)
+        check("Cancel keeps the workspace", any(w["name"] == "notes" for w in c.call("workspace.list")["workspaces"]))
+        s.click(*UI["menu"])
+        time.sleep(0.6)
+        s.click(1444, 237)
+        time.sleep(1.0)
+        s.key("Tab")
+        time.sleep(0.2)
+        s.key("Return")                          # the dialog's 'Close workspace' button
+        got = wait_for(lambda: not any(w["name"] == "notes" for w in c.call("workspace.list")["workspaces"]), 10)
+        check("Close workspace (confirmed) destroys it", bool(got))
+        time.sleep(1.5)
 
         # ---- Back to desktop button (extension D-Bus Return)
         origin = s.state()["active"]
