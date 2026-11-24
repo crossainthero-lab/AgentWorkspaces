@@ -1,0 +1,39 @@
+{
+  "agent": "hermes",
+  "model": "qwen3.6-35b-a3b",
+  "prompt": "Open a text editor, write a short paragraph about autumn rain and save it as autumn.txt.",
+  "exit_code": 0,
+  "seconds": 27.7,
+  "workspace": "hermes-editor",
+  "run_alongside": [],
+  "workspace_viewers_attached": 0,
+  "workspace_windows": [
+    "autumn.txt (~/) - Text Editor"
+  ],
+  "files_in_workspace_home": [
+    "autumn.txt"
+  ],
+  "file_previews": {
+    "autumn.txt": "Autumn rain falls with a quiet persistence, each drop a gentle percussion on the rustling leaves. The air carries the earthy scent of damp soil and decay, a rem"
+  },
+  "host_display_variables_seen_in_agent_process_group": [],
+  "host_wayland_sockets_before_after": [
+    {
+      "host_sockets": [
+        "wayland-0"
+      ]
+    },
+    {
+      "host_sockets": [
+        "wayland-0"
+      ]
+    }
+  ],
+  "dbus_calls_through_filtering_proxy": [],
+  "agent_dbus_addresses": [],
+  "agent_peak_pss_mib_incl_mcp_server": 65.5,
+  "agent_cpu_seconds": 0.55,
+  "workspace_memory_mib": 216,
+  "workspace_cpu_seconds": 2.7,
+  "usage": null
+}

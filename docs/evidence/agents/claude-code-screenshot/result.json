@@ -1,0 +1,41 @@
+{
+  "agent": "claude-code",
+  "model": "haiku",
+  "prompt": "Open the calculator, take a screenshot of it and tell me what you see on its screen.",
+  "exit_code": 0,
+  "seconds": 7.8,
+  "workspace": "claude-code-screenshot",
+  "run_alongside": [],
+  "workspace_viewers_attached": 0,
+  "workspace_windows": [
+    "Calculator"
+  ],
+  "files_in_workspace_home": [],
+  "file_previews": {},
+  "host_display_variables_seen_in_agent_process_group": [],
+  "host_wayland_sockets_before_after": [
+    {
+      "host_sockets": [
+        "wayland-0"
+      ]
+    },
+    {
+      "host_sockets": [
+        "wayland-0"
+      ]
+    }
+  ],
+  "agent_peak_pss_mib_incl_mcp_server": 285.7,
+  "agent_cpu_seconds": 1.14,
+  "workspace_memory_mib": 208,
+  "workspace_cpu_seconds": 1.4,
+  "usage": {
+    "turns": 2,
+    "cost_usd": 0.00094461,
+    "duration_ms": 6875,
+    "input": 4,
+    "cache_read": 17751,
+    "cache_creation": 2681,
+    "output": 461
+  }
+}

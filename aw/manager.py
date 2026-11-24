@@ -1,0 +1,917 @@
+"""Workspace lifecycle: one headless labwc compositor per workspace, supervised in its own
+systemd user scope/slice (when available) so that destroy always removes every process, and
+resource use is measurable per workspace.
+
+Isolation boundaries implemented here (see docs/isolation-model.md):
+  * own Wayland compositor + seat  -> own pointer, keyboard focus, clipboard, outputs
+  * own XDG_RUNTIME_DIR           -> host Wayland/X/D-Bus/PipeWire sockets are not discoverable
+  * own session D-Bus (no service dirs) and own HOME by default
+  * own systemd slice (cgroup)    -> lifecycle + accounting (+ optional memory cap)
+NOT implemented: filesystem, network or syscall confinement. Apps are ordinary user processes.
+"""
+from __future__ import annotations
+
+import glob
+import json
+import os
+import re
+import secrets
+import shlex
+import shutil
+import signal
+import stat
+import subprocess
+import threading
+import time
+from typing import Any, Callable, Dict, List, Optional
+
+from . import appenv, auth, paths, sandbox as sbx, wl
+from . import audio as audiomod
+from .windows import WindowManager, render_rc
+from .session import SessionError, WorkspaceSession
+
+AGENT_KINDS = {
+    "claude-code": {"label": "Claude Code", "icon_hint": "claude"},
+    "codex": {"label": "OpenAI Codex", "icon_hint": "openai"},
+    "antigravity": {"label": "Google Antigravity", "icon_hint": "google-antigravity"},
+    "hermes": {"label": "Hermes Agent", "icon_hint": "hermes"},
+    "other": {"label": "Agent", "icon_hint": "robot"},
+    "none": {"label": "Unassigned", "icon_hint": "none"},
+}
+
+NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9 _.\-]{0,39}$")
+ID_LIKE_RE = re.compile(r"^w[0-9a-f]{6}$")   # names that look like ids would make references ambiguous
+
+
+class ManagerError(Exception):
+    def __init__(self, code: str, message: str):
+        super().__init__(message)
+        self.code, self.message = code, message
+
+
+def _proc_start(pid: int) -> Optional[str]:
+    try:
+        with open(f"/proc/{pid}/stat") as f:
+            s = f.read()
+        return s.rsplit(")", 1)[1].split()[19]  # starttime (clock ticks)
+    except (OSError, IndexError):
+        return None
+
+
+def _proc_gone_or_zombie(pid: int) -> bool:
+    try:
+        with open(f"/proc/{pid}/stat") as f:
+            return f.read().rsplit(")", 1)[1].split()[0] in ("Z", "X")
+    except (OSError, IndexError):
+        return True
+
+
+def _alive(pid: Optional[int], start: Optional[str]) -> bool:
+    """The process exists, is not a zombie, and (when `start` is given) is the SAME process: a pid that was
+    reused by something else has a different start time and counts as dead."""
+    return (bool(pid) and _proc_start(pid) is not None and (start is None or _proc_start(pid) == start)
+            and not _proc_gone_or_zombie(pid))
+
+
+def find_render_node() -> Optional[str]:
+    nodes = sorted(glob.glob("/dev/dri/renderD*"))
+    return nodes[0] if nodes else None
+
+
+def _systemd_available() -> bool:
+    return shutil.which("systemd-run") is not None and os.path.exists(
+        os.path.join(paths.host_runtime_dir(), "systemd"))
+
+
+PROFILE_FLAGS = ("--user-data-dir", "--profile", "-profile", "--user-profile")
+
+
+def profile_dir_of(argv: List[str], cwd: str) -> Optional[str]:
+    """The browser/Electron profile directory an app was told to use, if any (`--user-data-dir=X`,
+    `--user-data-dir X`, Firefox `-profile X`). Resolved to a real path; None when the app uses its default."""
+    for i, a in enumerate(argv):
+        for f in PROFILE_FLAGS:
+            val = None
+            if a == f and i + 1 < len(argv):
+                val = argv[i + 1]
+            elif a.startswith(f + "="):
+                val = a[len(f) + 1:]
+            if val:
+                return os.path.realpath(val if os.path.isabs(val) else os.path.join(cwd, val))
+    return None
+
+
+class Workspace:
+    """Plain data holder; persisted as ws.json next to the workspace's runtime dir."""
+
+    FIELDS = ("id", "name", "agent", "width", "height", "scale", "gpu", "render_node", "clipboard",
+              "window_policy", "home", "memory_max", "state", "input_mode", "compositor_pid",
+              "compositor_start", "x_display", "created_at", "apps", "next_app", "xkb_layout",
+              "takeover_reason", "last_action", "last_action_at", "last_input_at", "viewers", "xwayland", "sandbox", "bus_pid", "bus_start",
+              "audio", "audio_route")
+
+    def __init__(self, **kw):
+        self.id: str = kw["id"]
+        self.name: str = kw["name"]
+        self.agent: Dict[str, Any] = kw.get("agent") or {"kind": "none", "label": ""}
+        self.width: int = kw.get("width", 1280)
+        self.height: int = kw.get("height", 720)
+        self.scale: float = kw.get("scale", 1.0)
+        self.gpu: str = kw.get("gpu", "auto")          # auto | off
+        self.render_node: Optional[str] = kw.get("render_node")
+        self.clipboard: str = kw.get("clipboard", "isolated")
+        self.window_policy: str = kw.get("window_policy", "maximized")
+        self.home: str = kw.get("home", "private")
+        self.memory_max: Optional[str] = kw.get("memory_max")
+        self.state: str = kw.get("state", "stopped")
+        self.input_mode: str = kw.get("input_mode", "agent")   # agent | manual (human takeover)
+        self.compositor_pid: Optional[int] = kw.get("compositor_pid")
+        self.compositor_start: Optional[str] = kw.get("compositor_start")
+        self.x_display: Optional[str] = kw.get("x_display")
+        self.created_at: float = kw.get("created_at", time.time())
+        self.apps: Dict[str, Dict[str, Any]] = kw.get("apps") or {}
+        self.next_app: int = kw.get("next_app", 1)
+        self.xkb_layout: str = kw.get("xkb_layout", "us")
+        self.takeover_reason: str = kw.get("takeover_reason", "")
+        self.last_action: str = kw.get("last_action", "")
+        self.last_action_at: float = kw.get("last_action_at", 0.0)
+        self.last_input_at: float = kw.get("last_input_at", 0.0)
+        self.viewers: int = 0
+        self.xwayland: bool = kw.get("xwayland", True)
+        self.bus_pid: Optional[int] = kw.get("bus_pid")           # the workspace's private session bus
+        self.bus_start: Optional[str] = kw.get("bus_start")
+        self.sandbox: Optional[Dict[str, Any]] = kw.get("sandbox")   # None | {"mounts": [{"path","ro"}]}
+        self.audio: str = kw.get("audio", "off")               # off | private (null sink, docs/audio.md)
+        self.audio_route: Dict[str, Any] = kw.get("audio_route") or {}   # {} or {"to": "host", "pids": [...]}
+
+    def to_meta(self) -> Dict[str, Any]:
+        return {k: getattr(self, k) for k in self.FIELDS if k != "viewers"}
+
+    @property
+    def dir(self) -> str:
+        return paths.ws_dir(self.id)
+
+    @property
+    def rt(self) -> str:
+        return paths.ws_rt(self.id)
+
+    @property
+    def socket(self) -> str:
+        return os.path.join(self.rt, "wayland-0")
+
+    @property
+    def slice(self) -> str:
+        return f"aw-{self.id}.slice"
+
+
+class Manager:
+    def __init__(self, emit: Optional[Callable[[str, Dict[str, Any]], None]] = None):
+        self.emit = emit or (lambda t, d: None)
+        self.lock = threading.RLock()
+        self.workspaces: Dict[str, Workspace] = {}
+        self.sessions: Dict[str, WorkspaceSession] = {}
+        self._winmgrs: Dict[str, WindowManager] = {}
+        self._audio: Dict[str, "audiomod.PrivateAudio"] = {}
+        self.use_systemd = _systemd_available()
+        paths.ensure_private_dir(paths.base_dir())
+        self.creds = auth.CredentialStore(paths.base_dir())
+        self._adopt()
+        threading.Thread(target=self._watch_compositors, name="aw-watch", daemon=True).start()
+
+    # ---- persistence / adoption
+    def _save(self, ws: Workspace):
+        os.makedirs(ws.dir, mode=0o700, exist_ok=True)
+        tmp = os.path.join(ws.dir, "ws.json.tmp")
+        with open(tmp, "w") as f:
+            json.dump(ws.to_meta(), f)
+        os.replace(tmp, os.path.join(ws.dir, "ws.json"))
+
+    def _adopt(self):
+        for meta in glob.glob(os.path.join(paths.base_dir(), "*", "ws.json")):
+            try:
+                with open(meta) as f:
+                    d = json.load(f)
+                ws = Workspace(**{k: v for k, v in d.items() if k in Workspace.FIELDS})
+            except (OSError, ValueError, KeyError, TypeError):
+                continue
+            if _alive(ws.compositor_pid, ws.compositor_start) and os.path.exists(ws.socket):
+                ws.state = "running"
+            else:
+                ws.state = "stopped"
+                ws.compositor_pid = None
+            for n, app in list(ws.apps.items()):
+                if not _alive(app.get("pid"), app.get("start")):
+                    app["running"] = False
+            self.workspaces[ws.id] = ws
+            self._save(ws)
+            self.creds.ensure_workspace(ws.id)
+
+    def _watch_compositors(self):
+        """A compositor that dies for any reason (crash, kill, OOM) is noticed within a second, also for
+        workspaces adopted after a daemon restart (which have no Popen to wait on)."""
+        while True:
+            time.sleep(1.0)
+            for ws in list(self.workspaces.values()):
+                if ws.state == "running" and ws.compositor_pid and not _alive(ws.compositor_pid,
+                                                                              ws.compositor_start):
+                    self._on_compositor_exit(ws, ws.compositor_pid)
+
+    # ---- lookup
+    def get(self, ref: str) -> Workspace:
+        with self.lock:
+            if ref in self.workspaces:
+                return self.workspaces[ref]
+            for ws in self.workspaces.values():
+                if ws.name == ref:
+                    return ws
+            low = [w for w in self.workspaces.values() if w.name.lower() == str(ref).lower()]
+            if len(low) == 1:
+                return low[0]
+        raise ManagerError("E_NOT_FOUND", f"no workspace named {ref!r}")
+
+    # ---- create / start
+    def create(self, name: str, agent_kind: str = "none", agent_label: str = "", width: int = 1280,
+               height: int = 720, scale: float = 1.0, gpu: str = "auto", clipboard: str = "isolated",
+               window_policy: str = "maximized", home: str = "private", memory_max: Optional[str] = None,
+               start: bool = True, render_node: Optional[str] = None, xwayland: bool = True,
+               sandbox: Any = None, sandbox_mounts: Optional[List[Any]] = None,
+               sandbox_net: bool = True, audio: str = "private") -> Workspace:
+        if not NAME_RE.match(name or "") or ID_LIKE_RE.match(name):
+            raise ManagerError("E_BAD_NAME", "name must be 1-40 chars: letters, digits, space, _ . - "
+                               "(and must not look like a workspace id)")
+        if agent_kind not in AGENT_KINDS:
+            raise ManagerError("E_BAD_AGENT", f"agent kind must be one of {sorted(AGENT_KINDS)}")
+        if gpu not in ("auto", "off"):
+            raise ManagerError("E_BAD_GPU", "gpu must be 'auto' or 'off'")
+        if clipboard not in ("isolated", "to-workspace", "from-workspace", "both"):
+            raise ManagerError("E_BAD_CLIPBOARD", "clipboard must be isolated|to-workspace|from-workspace|both")
+        if window_policy not in ("maximized", "floating"):
+            raise ManagerError("E_BAD_POLICY", "window_policy must be maximized|floating")
+        if home not in ("private", "shared"):
+            raise ManagerError("E_BAD_HOME", "home must be private|shared")
+        if not (320 <= width <= 7680 and 240 <= height <= 4320 and 0.5 <= scale <= 4):
+            raise ManagerError("E_BAD_SIZE", "width 320-7680, height 240-4320, scale 0.5-4")
+        sb_cfg = None
+        if sandbox or sandbox_mounts:
+            if not sbx.available():
+                raise ManagerError("E_NO_SANDBOX", "sandbox requested but bubblewrap (bwrap) is not installed")
+            if home != "private":
+                raise ManagerError("E_BAD_HOME", "a sandboxed workspace needs home=private")
+            try:
+                mounts = sbx.validate_mounts(sbx.parse_mounts(sandbox_mounts), paths.base_dir(),
+                                             paths.host_runtime_dir())
+            except sbx.SandboxError as e:
+                raise ManagerError("E_BAD_SANDBOX", str(e))
+            sb_cfg = {"mounts": mounts, "net": bool(sandbox_net)}
+        if audio not in ("off", "private"):
+            raise ManagerError("E_BAD_AUDIO", "audio must be 'off' or 'private'")
+        with self.lock:
+            if any(w.name.lower() == name.lower() for w in self.workspaces.values()):
+                raise ManagerError("E_EXISTS", f"a workspace named {name!r} already exists")
+            wid = "w" + secrets.token_hex(3)
+            ws = Workspace(id=wid, name=name, width=width, height=height, scale=scale, gpu=gpu,
+                           clipboard=clipboard, window_policy=window_policy, home=home,
+                           memory_max=memory_max, render_node=render_node, xwayland=xwayland, sandbox=sb_cfg,
+                           audio=audio,
+                           agent={"kind": agent_kind, "label": agent_label or AGENT_KINDS[agent_kind]["label"]})
+            self.workspaces[wid] = ws
+            paths.ensure_private_dir(ws.dir)
+            self._save(ws)
+            self.creds.ensure_workspace(wid)
+        self.emit("workspace.created", self.summary(ws))
+        if start:
+            self.start(ws)
+        return ws
+
+    def _host_bus_env(self) -> Dict[str, str]:
+        rt = paths.host_runtime_dir()
+        return {"PATH": os.environ.get("PATH", "/usr/bin:/bin"), "XDG_RUNTIME_DIR": rt,
+                "DBUS_SESSION_BUS_ADDRESS": os.environ.get("DBUS_SESSION_BUS_ADDRESS",
+                                                           f"unix:path={rt}/bus"),
+                "HOME": os.path.expanduser("~")}
+
+    def _wrap(self, ws: Workspace, unit: str, inner_env: Dict[str, str], argv: List[str],
+              cwd: Optional[str] = None, stdout=None, stdin=None, stderr=None) -> subprocess.Popen:
+        """Start argv with EXACTLY inner_env (via env -i), inside the workspace's systemd slice."""
+        envargs = [f"{k}={v}" for k, v in inner_env.items()]
+        cmd = ["/usr/bin/env", "-i", *envargs, *argv]
+        if self.use_systemd:
+            cmd = ["systemd-run", "--user", "--scope", "--quiet", "--collect", f"--slice={ws.slice}",
+                   f"--unit=aw-{ws.id}-{unit}", "-p", "TimeoutStopSec=5"] + \
+                  (["-p", f"MemoryMax={ws.memory_max}"] if ws.memory_max and unit == "compositor" else []) + \
+                  ["--"] + cmd
+            launch_env = self._host_bus_env()      # only to reach the user manager; replaced by env -i
+        else:
+            launch_env = {"PATH": os.environ.get("PATH", "/usr/bin:/bin")}
+        return subprocess.Popen(cmd, env=launch_env, cwd=cwd, stdin=stdin or subprocess.DEVNULL,
+                                stdout=stdout or subprocess.DEVNULL, stderr=stderr or subprocess.STDOUT,
+                                start_new_session=True)
+
+    def _write_config(self, ws: Workspace):
+        cfg = os.path.join(ws.dir, "labwc")
+        os.makedirs(cfg, mode=0o700, exist_ok=True)
+        with open(os.path.join(cfg, "rc.xml"), "w") as f:
+            f.write(render_rc(ws.window_policy))
+        # labwc's default menu/autostart would run host-installed desktop entries; keep both empty.
+        open(os.path.join(cfg, "autostart"), "w").close()
+        startup = os.path.join(ws.dir, "startup.sh")
+        with open(startup, "w") as f:
+            f.write(f"""#!/bin/sh
+# Runs inside the workspace compositor session. Records the workspace's own XWayland display.
+echo "$DISPLAY" > {shlex.quote(ws.dir)}/display.tmp && mv {shlex.quote(ws.dir)}/display.tmp {shlex.quote(ws.dir)}/display
+""")
+        os.chmod(startup, 0o700)
+        with open(os.path.join(ws.dir, "bus.conf"), "w") as f:
+            f.write(f"""<!DOCTYPE busconfig PUBLIC "-//freedesktop//DTD D-Bus Bus Configuration 1.0//EN"
+ "http://www.freedesktop.org/standards/dbus/1.0/busconfig.dtd">
+<busconfig><type>session</type><keep_umask/>
+<listen>unix:path={ws.rt}/bus</listen>
+<auth>EXTERNAL</auth>
+<policy context="default"><allow send_destination="*" eavesdrop="true"/><allow eavesdrop="true"/>
+<allow own="*"/></policy></busconfig>
+""")
+
+    def start(self, ws: Workspace) -> Workspace:
+        with self.lock:
+            if ws.state == "running" and _alive(ws.compositor_pid, ws.compositor_start):
+                return ws
+            ws.state = "starting"
+            # fresh private runtime dir
+            shutil.rmtree(ws.rt, ignore_errors=True)
+            paths.ensure_private_dir(ws.dir)
+            paths.ensure_private_dir(ws.rt)
+            for stale in ("display",):
+                try:
+                    os.unlink(os.path.join(ws.dir, stale))
+                except OSError:
+                    pass
+            self._write_config(ws)
+            if ws.home == "private":
+                paths.ensure_private_dir(os.path.join(ws.dir, "home"))
+            node = ws.render_node or find_render_node()
+            env = {"PATH": os.environ.get("PATH", "/usr/bin:/bin"), "HOME": os.path.join(ws.dir, "home"),
+                   "XDG_RUNTIME_DIR": ws.rt, "WLR_BACKENDS": "headless", "WLR_LIBINPUT_NO_DEVICES": "1",
+                   "XKB_DEFAULT_LAYOUT": ws.xkb_layout, "LANG": os.environ.get("LANG", "C.UTF-8"),
+                   "XDG_CURRENT_DESKTOP": "labwc:wlroots", "GSETTINGS_BACKEND": "memory",
+                   "XDG_DATA_DIRS": os.environ.get("XDG_DATA_DIRS", "/usr/local/share:/usr/share")}
+            if ws.gpu == "auto" and node:
+                env.update(WLR_RENDERER="gles2", WLR_RENDER_DRM_DEVICE=node)
+            else:
+                env.update(WLR_RENDERER="pixman")
+            log = open(os.path.join(ws.dir, "compositor.log"), "ab")
+            # private session bus (no activatable services: nothing gets spawned behind the app's back)
+            bus = self._wrap(ws, "bus", {"PATH": env["PATH"], "HOME": env["HOME"]},
+                             ["dbus-daemon", f"--config-file={os.path.join(ws.dir, 'bus.conf')}", "--nofork",
+                              "--nopidfile"], stdout=log)
+            p = self._wrap(ws, "compositor", env,
+                           ["labwc", "-C", os.path.join(ws.dir, "labwc"), "-s", os.path.join(ws.dir, "startup.sh")],
+                           stdout=log)
+            ws.compositor_pid = p.pid
+            ws.bus_pid = bus.pid
+            ws.bus_start = _proc_start(bus.pid)
+            threading.Thread(target=lambda: (p.wait(), self._on_compositor_exit(ws, p.pid)),
+                             daemon=True).start()
+            threading.Thread(target=bus.wait, daemon=True).start()
+        deadline = time.monotonic() + 15
+        while time.monotonic() < deadline:
+            if os.path.exists(ws.socket) and os.path.exists(os.path.join(ws.dir, "display")):
+                break
+            if p.poll() is not None:
+                break
+            time.sleep(0.05)
+        if p.poll() is not None or not os.path.exists(ws.socket):
+            ws.state = "failed"
+            self._save(ws)
+            self.emit("workspace.state", {"id": ws.id, "name": ws.name, "state": "failed"})
+            raise ManagerError("E_START_FAILED", f"compositor failed to start; see {ws.dir}/compositor.log")
+        with self.lock:
+            ws.compositor_start = _proc_start(p.pid)
+            dsp = open(os.path.join(ws.dir, "display")).read().strip() if os.path.exists(
+                os.path.join(ws.dir, "display")) else ""
+            ws.x_display = dsp or None
+            ws.state = "running"
+            self._save(ws)
+        self._start_audio(ws)
+        try:
+            s = self.session(ws)
+            if (ws.width, ws.height, ws.scale) != (1280, 720, 1.0):
+                s.set_display(ws.width, ws.height, ws.scale)
+            else:
+                s.set_display(1280, 720, 1.0)
+        except (SessionError, Exception) as e:  # keep running even if resize failed
+            self.emit("workspace.warning", {"id": ws.id, "message": f"initial display setup: {e}"})
+        self.emit("workspace.state", {"id": ws.id, "name": ws.name, "state": "running"})
+        return ws
+
+    # ---- audio (docs/audio.md)
+    def _audio_dir(self, ws: Workspace) -> str:
+        return os.path.join(ws.dir, "audio")
+
+    def audio_env(self, ws: Workspace) -> Dict[str, str]:
+        path = os.environ.get("PATH", "/usr/bin:/bin")
+        return audiomod.daemon_env(ws.dir, ws.rt, path, f"unix:path={ws.rt}/bus")
+
+    def _start_audio(self, ws: Workspace):
+        os.makedirs(self._audio_dir(ws), mode=0o700, exist_ok=True)
+        with open(os.path.join(self._audio_dir(ws), "pulse-client.conf"), "w") as f:
+            f.write(audiomod.PULSE_CLIENT_CONF)
+        ws.audio_route = {}
+        if ws.audio != "private":
+            return
+        if not audiomod.have_pipewire():
+            self.emit("workspace.warning", {"id": ws.id, "message": "audio=private needs pipewire, "
+                                            "pipewire-pulse, wireplumber and pw-cat installed"})
+            return
+        pa = audiomod.PrivateAudio(ws.dir, ws.rt)
+        self._audio[ws.id] = pa
+        try:
+            pa.start(lambda unit, env, argv, out: self._wrap(ws, unit, env, argv, stdout=out),
+                     self.audio_env(ws))
+        except audiomod.AudioError as e:
+            self.emit("workspace.warning", {"id": ws.id, "message": str(e)})
+
+    def private_audio(self, ws: Workspace) -> "audiomod.PrivateAudio":
+        if ws.audio != "private":
+            raise ManagerError("E_AUDIO_OFF", f"workspace {ws.name!r} has audio off (create it with --audio private)")
+        if ws.state != "running":
+            raise ManagerError("E_NOT_RUNNING", f"workspace {ws.name!r} is {ws.state}")
+        pa = self._audio.get(ws.id)
+        if pa is None:
+            pa = self._audio[ws.id] = audiomod.PrivateAudio(ws.dir, ws.rt)
+        return pa
+
+    def audio_info(self, ws: Workspace) -> Dict[str, Any]:
+        if ws.audio != "private":
+            return {"mode": "off", "note": "no PipeWire/Pulse socket exists in this workspace; apps cannot "
+                    "reach the host's audio either"}
+        info = self.private_audio(ws).info(self.audio_env(ws))
+        route = {"to": ws.audio_route.get("to", "none")}
+        if route["to"] == "host":
+            route["alive"] = all(p and _proc_start(p) for p in ws.audio_route.get("pids", []))
+        info["route"] = route
+        return info
+
+    def audio_record(self, ws: Workspace, seconds: float, path: Optional[str]) -> Dict[str, Any]:
+        pa = self.private_audio(ws)
+        if not path:
+            path = os.path.join(self._audio_dir(ws), f"rec-{int(time.time())}.wav")
+        try:
+            return pa.record(self.audio_env(ws), seconds, path)
+        except audiomod.AudioError as e:
+            raise ManagerError(e.code, e.message)
+
+    def audio_route(self, ws: Workspace, to: str, host_remote: Optional[str] = None,
+                    sink: Optional[str] = None) -> Dict[str, Any]:
+        """Explicit, human-requested routing of the workspace's audio to a host PipeWire sink (off by
+        default). Capture side runs against the workspace's own PipeWire, playback side against `host_remote`;
+        both are ordinary processes in the workspace's slice."""
+        pa = self.private_audio(ws)
+        if to not in ("host", "none"):
+            raise ManagerError("E_BAD_ARGS", "to must be 'host' or 'none'")
+        for pid in ws.audio_route.get("pids", []):
+            if pid and _proc_start(pid):
+                try:
+                    os.killpg(pid, signal.SIGTERM)
+                except (ProcessLookupError, PermissionError):
+                    pass
+        ws.audio_route = {}
+        if to == "none":
+            self._save(ws)
+            return {"to": "none"}
+        remote = host_remote or os.environ.get("AW_AUDIO_HOST_REMOTE") or os.path.join(
+            paths.host_runtime_dir(), "pipewire-0")
+        if os.path.realpath(remote) == os.path.realpath(pa.pw_socket):
+            raise ManagerError("E_BAD_ARGS", "host remote is the workspace's own PipeWire")
+        if not os.path.exists(remote):
+            raise ManagerError("E_AUDIO_HOST", f"no PipeWire socket at {remote}")
+        fmt = ["-a", "--format", "s16", "--rate", str(audiomod.RATE), "--channels", str(audiomod.CHANNELS)]
+        cap_argv = ["pw-cat", "-r", *fmt, "--target", audiomod.SINK, "-P", "stream.capture.sink=true", "-"]
+        play_argv = ["pw-cat", "-p", *fmt, "-P", json.dumps({"media.name": "AgentWorkspace " + ws.name})]
+        if sink:
+            play_argv += ["--target", sink]
+        play_argv.append("-")
+        rlog = open(os.path.join(self._audio_dir(ws), "route.log"), "ab")
+        cap = self._wrap(ws, "audio-route-capture", self.audio_env(ws), cap_argv, stdout=subprocess.PIPE,
+                         stderr=rlog)
+        play_env = {"PATH": os.environ.get("PATH", "/usr/bin:/bin"), "XDG_RUNTIME_DIR": os.path.dirname(remote),
+                    "PIPEWIRE_REMOTE": remote, "HOME": os.path.join(ws.dir, "audio")}
+        play = self._wrap(ws, "audio-route-playback", play_env, play_argv, stdin=cap.stdout, stdout=rlog)
+        cap.stdout.close()
+        ws.audio_route = {"to": "host", "pids": [cap.pid, play.pid], "remote": remote, "sink": sink}
+        threading.Thread(target=cap.wait, daemon=True).start()
+        threading.Thread(target=play.wait, daemon=True).start()
+        self._save(ws)
+        self.emit("workspace.audio_route", {"id": ws.id, "name": ws.name, "to": "host"})
+        return {"to": "host", "remote": remote, "sink": sink}
+
+    def _on_compositor_exit(self, ws: Workspace, pid: int):
+        with self.lock:
+            if ws.compositor_pid != pid:
+                return
+            unexpected = ws.state == "running"
+            sess = self.sessions.pop(ws.id, None)
+            wm = self._winmgrs.pop(ws.id, None)
+            if wm:
+                wm.close()
+            ws.compositor_pid = None
+            ws.state = "stopped" if ws.state != "failed" else "failed"
+            self._save(ws)
+        if sess:
+            sess.close()
+        if unexpected:
+            # The compositor died under us (crash, kill, OOM). Its apps cannot work any more and its private
+            # session bus would be orphaned: remove them now so recovery starts from a clean slate.
+            self._kill_processes(ws)
+            with self.lock:
+                for a in ws.apps.values():
+                    a["running"] = False
+                self._save(ws)
+        self.emit("workspace.state", {"id": ws.id, "name": ws.name, "state": ws.state,
+                                      "reason": "compositor_exited" if unexpected else "stopped"})
+
+    # ---- stop / destroy
+    def _kill_processes(self, ws: Workspace):
+        """Stop every process of this workspace: its systemd slice, then the exact pids we started."""
+        if self.use_systemd:
+            subprocess.run(["systemctl", "--user", "stop", ws.slice], env=self._host_bus_env(),
+                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=30)
+        # only processes whose pid AND start time match what we recorded: a reused pid is never signalled
+        cand = [(ws.compositor_pid, ws.compositor_start), (ws.bus_pid, ws.bus_start)] + [
+            (a.get("pid"), a.get("start")) for a in ws.apps.values()]
+        pids = [p for p, st in cand if p and _alive(p, st)]
+        for pid in pids:
+            if _proc_start(pid):
+                try:
+                    os.killpg(pid, signal.SIGTERM)
+                except (ProcessLookupError, PermissionError):
+                    pass
+        deadline = time.monotonic() + 5
+        while time.monotonic() < deadline and any(_proc_start(p) for p in pids):
+            time.sleep(0.1)
+        for pid in pids:  # last resort, exact pids we started
+            if _proc_start(pid):
+                try:
+                    os.killpg(pid, signal.SIGKILL)
+                except (ProcessLookupError, PermissionError):
+                    pass
+
+    def stop(self, ws: Workspace):
+        with self.lock:
+            sess = self.sessions.pop(ws.id, None)
+            if sess:
+                sess.close()
+            wm = self._winmgrs.pop(ws.id, None)
+            if wm:
+                wm.close()
+            ws.state = "stopping"
+        self._audio.pop(ws.id, None)
+        self._kill_processes(ws)
+        with self.lock:
+            ws.state = "stopped"
+            ws.compositor_pid = None
+            for a in ws.apps.values():
+                a["running"] = False
+            self._save(ws)
+        self.emit("workspace.state", {"id": ws.id, "name": ws.name, "state": "stopped"})
+
+    def destroy(self, ref: str):
+        ws = self.get(ref)
+        self.stop(ws)
+        with self.lock:
+            self.workspaces.pop(ws.id, None)
+            self.creds.drop_workspace(ws.id)
+        shutil.rmtree(ws.dir, ignore_errors=True)
+        self.emit("workspace.destroyed", {"id": ws.id, "name": ws.name})
+
+    # ---- mutation
+    def rename(self, ref: str, new_name: str) -> Workspace:
+        ws = self.get(ref)
+        if not NAME_RE.match(new_name or "") or ID_LIKE_RE.match(new_name):
+            raise ManagerError("E_BAD_NAME", "invalid name")
+        with self.lock:
+            if any(w.name.lower() == new_name.lower() and w.id != ws.id for w in self.workspaces.values()):
+                raise ManagerError("E_EXISTS", f"a workspace named {new_name!r} already exists")
+            old = ws.name
+            ws.name = new_name
+            self._save(ws)
+        self.emit("workspace.renamed", {"id": ws.id, "old": old, "name": new_name})
+        return ws
+
+    def assign(self, ref: str, kind: str, label: str = "") -> Workspace:
+        ws = self.get(ref)
+        if kind not in AGENT_KINDS:
+            raise ManagerError("E_BAD_AGENT", f"agent kind must be one of {sorted(AGENT_KINDS)}")
+        with self.lock:
+            ws.agent = {"kind": kind, "label": label or AGENT_KINDS[kind]["label"]}
+            self._save(ws)
+        self.emit("workspace.assigned", {"id": ws.id, "name": ws.name, "agent": ws.agent})
+        return ws
+
+    def set_input_mode(self, ref: str, mode: str, reason: str = "") -> Workspace:
+        ws = self.get(ref)
+        if mode not in ("agent", "manual"):
+            raise ManagerError("E_BAD_MODE", "mode must be agent|manual")
+        with self.lock:
+            changed = ws.input_mode != mode
+            ws.input_mode = mode
+            ws.takeover_reason = reason if mode == "manual" else ""
+            self._save(ws)
+        if changed:
+            self.emit("workspace.input_mode", {"id": ws.id, "name": ws.name, "input_mode": mode, "reason": reason})
+        return ws
+
+    def configure(self, ref: str, **opts) -> Workspace:
+        ws = self.get(ref)
+        restart = False
+        with self.lock:
+            if opts.get("audio") is not None:
+                if opts["audio"] not in ("off", "private"):
+                    raise ManagerError("E_BAD_AUDIO", "audio must be 'off' or 'private'")
+                restart = restart or opts["audio"] != ws.audio
+                ws.audio = opts["audio"]
+            for k in ("clipboard", "window_policy", "memory_max"):
+                if k in opts and opts[k] is not None:
+                    setattr(ws, k, opts[k])
+                    restart = restart or k in ("window_policy", "memory_max")
+            if "gpu" in opts and opts["gpu"] is not None:
+                if opts["gpu"] not in ("auto", "off"):
+                    raise ManagerError("E_BAD_GPU", "gpu must be 'auto' or 'off'")
+                restart = restart or opts["gpu"] != ws.gpu
+                ws.gpu = opts["gpu"]
+            self._save(ws)
+        if any(opts.get(k) is not None for k in ("width", "height", "scale")):
+            w = int(opts.get("width") or ws.width)
+            h = int(opts.get("height") or ws.height)
+            sc = float(opts.get("scale") or ws.scale)
+            if not (320 <= w <= 7680 and 240 <= h <= 4320 and 0.5 <= sc <= 4):
+                raise ManagerError("E_BAD_SIZE", "width 320-7680, height 240-4320, scale 0.5-4")
+            if ws.state == "running":
+                self.session(ws).set_display(w, h, sc)
+            ws.width, ws.height, ws.scale = w, h, sc
+            self._save(ws)
+        if restart and ws.state == "running":
+            # gpu/window_policy/memory change needs a compositor restart; apps are closed.
+            self.stop(ws)
+            self.start(ws)
+        self.emit("workspace.configured", self.summary(ws))
+        return ws
+
+    # ---- sessions
+    def verify_routing(self, ws: Workspace) -> os.stat_result:
+        """Prove, before EVERY screenshot/input/window call, that the socket we are about to use is the live
+        compositor of THIS workspace and nothing else. Raises ManagerError; never falls back to anything.
+
+        Checks: workspace state; socket path is exactly <base>/<id>/rt/wayland-0 with no symlink in the
+        last components; it is a socket owned by us; the recorded compositor pid is alive AND has the recorded
+        start time (pid reuse); a dead compositor is recorded as stopped (stale socket file)."""
+        if ws.state != "running":
+            raise ManagerError("E_NOT_RUNNING", f"workspace {ws.name!r} is {ws.state}")
+        expected = os.path.join(paths.ws_rt(ws.id), "wayland-0")
+        if ws.socket != expected or os.path.realpath(os.path.dirname(expected)) != os.path.join(
+                os.path.realpath(paths.base_dir()), ws.id, "rt"):
+            raise ManagerError("E_ROUTING", f"workspace {ws.name!r}: compositor socket path is not the "
+                               "workspace's own runtime directory; refusing")
+        if not _alive(ws.compositor_pid, ws.compositor_start):
+            self._on_compositor_exit(ws, ws.compositor_pid)
+            raise ManagerError("E_NOT_RUNNING", f"workspace {ws.name!r}: its compositor is gone (crashed or "
+                               "killed); the socket file is stale. Run workspace.start to recover")
+        try:
+            st = os.lstat(expected)
+        except OSError:
+            raise ManagerError("E_NOT_RUNNING", f"workspace {ws.name!r}: compositor socket is missing")
+        if not stat.S_ISSOCK(st.st_mode) or st.st_uid != os.getuid():
+            raise ManagerError("E_ROUTING", f"workspace {ws.name!r}: {expected} is not a socket owned by you")
+        return st
+
+    def check_after_failure(self, ws: Workspace, settle: float = 0.6):
+        """A call on a workspace's compositor connection failed. Decide why, without ever guessing: if the compositor
+        process is gone (also within the few milliseconds in which a SIGKILLed process is still being torn down)
+        this raises E_NOT_RUNNING; if something else serves the socket, E_ROUTING; otherwise the cached connection
+        is dropped so the next call reconnects, and the caller reports that the operation is unconfirmed."""
+        deadline = time.monotonic() + settle
+        while True:
+            self.verify_routing(ws)            # raises E_NOT_RUNNING / E_ROUTING
+            if time.monotonic() >= deadline:
+                break
+            time.sleep(0.03)
+        self.drop_session(ws)
+
+    def drop_session(self, ws: Workspace):
+        """Forget a cached compositor connection that failed; the next call reconnects (and re-verifies)."""
+        with self.lock:
+            s = self.sessions.pop(ws.id, None)
+        if s is not None:
+            try:
+                s.close()
+            except Exception:
+                pass
+
+    def session(self, ws: Workspace) -> WorkspaceSession:
+        with self.lock:
+            st = self.verify_routing(ws)
+            s = self.sessions.get(ws.id)
+            if s is not None and s.alive:
+                if getattr(s, "aw_ino", None) == st.st_ino and getattr(s, "aw_peer", None) == ws.compositor_pid:
+                    return s
+                # the socket was replaced or belongs to another process: drop the old connection
+                s.close()
+                self.sessions.pop(ws.id, None)
+            try:
+                # the peer pid is verified before a single Wayland byte is exchanged
+                s = WorkspaceSession(ws.socket, ws.xkb_layout, expect_pid=ws.compositor_pid)
+            except wl.PeerMismatch as e:
+                raise ManagerError("E_ROUTING", f"workspace {ws.name!r}: the process behind its compositor "
+                                   f"socket is not the workspace's compositor ({e}); refusing")
+            except Exception as e:
+                raise ManagerError("E_SESSION", f"cannot connect to workspace compositor: {e}")
+            s.aw_ino, s.aw_peer = st.st_ino, ws.compositor_pid
+            s.on_windows = lambda ws=ws: self._windows_changed(ws)
+            self.sessions[ws.id] = s
+            return s
+
+    def winmgr(self, ws: Workspace) -> WindowManager:
+        """Window service for a running workspace (merged Wayland + X11 list, window management)."""
+        with self.lock:
+            wm = self._winmgrs.get(ws.id)
+            if wm is None:
+                wm = self._winmgrs[ws.id] = WindowManager(ws, lambda: self.session(ws))
+            return wm
+
+    # ---- apps
+    def launch(self, ws: Workspace, argv: List[str], cwd: Optional[str] = None,
+               extra_env: Optional[Dict[str, str]] = None) -> Dict[str, Any]:
+        if not argv:
+            raise ManagerError("E_BAD_ARGS", "empty command")
+        if ws.state != "running":
+            raise ManagerError("E_NOT_RUNNING", f"workspace {ws.name!r} is {ws.state}")
+        try:
+            display = ws.x_display if ws.xwayland else None   # no DISPLAY => nothing can trigger XWayland
+            base = appenv.build_env(ws.rt, x_display=display, bus_address=f"unix:path={ws.rt}/bus",
+                                    extra=extra_env)
+            appenv.assert_no_host_sockets(base, paths.host_runtime_dir())
+        except appenv.WorkspaceNotRunning as e:
+            raise ManagerError("E_NOT_RUNNING", str(e))
+        except ValueError as e:
+            raise ManagerError("E_BAD_ENV", str(e))
+        if ws.home == "private":
+            base["HOME"] = os.path.join(ws.dir, "home")
+        base.update(audiomod.client_env(ws.rt, ws.audio == "private", self._audio_dir(ws)))
+        base["GSETTINGS_BACKEND"] = "memory"
+        base["NO_AT_BRIDGE"] = "1"
+        base["GTK_A11Y"] = "none"
+        base["GTK_USE_PORTAL"] = "0"
+        if ws.gpu == "off":
+            base["LIBGL_ALWAYS_SOFTWARE"] = "1"
+            base["GSK_RENDERER"] = "cairo"
+        exe = argv[0]
+        if os.sep not in exe:
+            found = shutil.which(exe, path=base["PATH"])
+            if not found:
+                raise ManagerError("E_NO_SUCH_PROGRAM", f"{exe!r} not found in PATH")
+            argv = [found] + list(argv[1:])
+        with self.lock:
+            n = ws.next_app
+            ws.next_app += 1
+        logp = os.path.join(ws.dir, f"app-{n}.log")
+        cwd = cwd or (base["HOME"] if os.path.isdir(base["HOME"]) else "/")
+        profile = profile_dir_of(argv, cwd)
+        if profile:
+            # Chromium/Firefox/Electron hand a second launch over to the instance that already owns the profile
+            # directory. Across workspaces that would open the agent's page inside ANOTHER workspace's browser
+            # session (measured with Chrome), so a profile in use elsewhere is refused.
+            with self.lock:
+                for other in self.workspaces.values():
+                    if other.id == ws.id:
+                        continue
+                    for a in other.apps.values():
+                        if a.get("profile") == profile and _alive(a.get("pid"), a.get("start")):
+                            raise ManagerError("E_PROFILE_BUSY", f"profile directory {profile} is in use by a "
+                                               f"running app of workspace {other.name!r}; use a separate profile "
+                                               "directory per workspace")
+        popen_cwd = cwd
+        if ws.sandbox:
+            home = base["HOME"]
+            allowed = [os.path.realpath(home)] + [m["path"] for m in ws.sandbox["mounts"]]
+            rc = os.path.realpath(cwd)
+            if not any(rc == a or rc.startswith(a + os.sep) for a in allowed):
+                raise ManagerError("E_BAD_ARGS", f"cwd {cwd!r} is outside the sandbox (allowed: the workspace "
+                                   f"home and the mounted directories {[m['path'] for m in ws.sandbox['mounts']]})")
+            argv = ["bwrap"] + sbx.build_argv(ws.dir, ws.rt, home, ws.sandbox["mounts"], x_display=display,
+                                              cwd=rc, gpu=ws.gpu != "off",
+                                              net=ws.sandbox.get("net", True))[1:] + ["--"] + argv
+            popen_cwd = ws.dir
+        lf = open(logp, "ab")
+        p = self._wrap(ws, f"app{n}", base, argv, cwd=popen_cwd, stdout=lf)
+        app = {"n": n, "pid": p.pid, "argv": argv, "started": time.time(), "log": logp, "running": True,
+               "start": None, "profile": profile}
+        time.sleep(0.05)
+        app["start"] = _proc_start(p.pid)
+        with self.lock:
+            ws.apps[str(n)] = app
+            self._save(ws)
+
+        def reap():
+            code = p.wait()
+            with self.lock:
+                a = ws.apps.get(str(n))
+                if a:
+                    a["running"] = False
+                    a["exit_code"] = code
+                    self._save(ws)
+            self.emit("app.exited", {"id": ws.id, "workspace": ws.name, "n": n, "exit_code": code})
+        threading.Thread(target=reap, daemon=True).start()
+        self.emit("app.started", {"id": ws.id, "workspace": ws.name, "n": n, "argv": argv})
+        return {"app": n, "pid": p.pid, "log": logp, "argv": argv}
+
+    def kill_app(self, ws: Workspace, n: int):
+        app = ws.apps.get(str(n))
+        if not app:
+            raise ManagerError("E_NOT_FOUND", f"no app {n}")
+        pid = app.get("pid")
+        if pid and _alive(pid, app.get("start")):
+            try:
+                os.killpg(pid, signal.SIGTERM)
+            except (ProcessLookupError, PermissionError):
+                os.kill(pid, signal.SIGTERM)
+
+    # ---- reporting
+    def usage(self, ws: Workspace) -> Dict[str, Any]:
+        out: Dict[str, Any] = {}
+        if self.use_systemd and ws.state == "running":
+            try:
+                r = subprocess.run(["systemctl", "--user", "show", ws.slice, "-p",
+                                    "MemoryCurrent,CPUUsageNSec,TasksCurrent"], env=self._host_bus_env(),
+                                   capture_output=True, text=True, timeout=5)
+                for line in r.stdout.splitlines():
+                    k, _, v = line.partition("=")
+                    if v.isdigit():
+                        out[{"MemoryCurrent": "memory_bytes", "CPUUsageNSec": "cpu_ns",
+                             "TasksCurrent": "tasks"}[k]] = int(v)
+            except (subprocess.SubprocessError, OSError):
+                pass
+        return out
+
+    def summary(self, ws: Workspace) -> Dict[str, Any]:
+        kind = ws.agent.get("kind", "none")
+        wins: List[Dict[str, Any]] = []
+        s = self.sessions.get(ws.id)
+        if s is not None and s.alive:
+            try:
+                wins = self.winmgr(ws).list(max_age=0.5)
+            except Exception:
+                wins = []
+        focused = next((w for w in wins if w.get("focused")), None)
+        now = time.time()
+        return {
+            "id": ws.id, "name": ws.name, "state": ws.state,
+            "agent": {"kind": kind, "label": ws.agent.get("label", ""),
+                      "icon_hint": AGENT_KINDS.get(kind, AGENT_KINDS["other"])["icon_hint"]},
+            "input_mode": ws.input_mode, "takeover_reason": ws.takeover_reason,
+            "display": {"width": ws.width, "height": ws.height, "scale": ws.scale},
+            "sandbox": ({"enabled": True, "mounts": ws.sandbox["mounts"], "network": ws.sandbox.get("net", True)} if ws.sandbox else {"enabled": False}),
+            "gpu": ws.gpu, "xwayland": ws.xwayland, "audio": ws.audio, "clipboard": ws.clipboard, "window_policy": ws.window_policy, "home": ws.home,
+            "activity": {"last_action": ws.last_action, "last_action_at": ws.last_action_at or None,
+                         "idle_seconds": (now - ws.last_action_at) if ws.last_action_at else None,
+                         "window_count": len(wins), "focused_window": focused["title"] if focused else None},
+            "apps": [{"n": a["n"], "pid": a["pid"], "argv": a["argv"],
+                      "running": bool(a.get("running", False)) and _alive(a.get("pid"), a.get("start"))}
+                     for a in ws.apps.values()],
+            "viewers": ws.viewers, "created_at": ws.created_at,
+        }
+
+    def _windows_changed(self, ws: Workspace):
+        """Event `window.changed`, debounced to one per 150 ms burst, from the compositor's own toplevel events."""
+        t = getattr(self, "_win_timers", None)
+        if t is None:
+            t = self._win_timers = {}
+        with self.lock:
+            if ws.id in t:
+                return
+            def fire(wid=ws.id):
+                with self.lock:
+                    t.pop(wid, None)
+                w = self.workspaces.get(wid)
+                if w is not None:
+                    self.emit("window.changed", {"id": w.id, "name": w.name})
+            tm = threading.Timer(0.15, fire)
+            tm.daemon = True
+            t[ws.id] = tm
+            tm.start()
+
+    def note_action(self, ws: Workspace, kind: str, actor: str, pos=None):
+        """pos: the pointer position (logical output pixels) after a pointer action, so that a viewer can show
+        where THAT actor's pointer is without polling."""
+        now = time.time()
+        ws.last_action, ws.last_action_at = f"{actor}:{kind}", now
+        if kind in ("click", "move", "drag", "type", "key", "scroll"):
+            ws.last_input_at = now
+        ev = {"id": ws.id, "name": ws.name, "actor": actor, "action": kind, "at": now}
+        if pos is not None:
+            ev["x"], ev["y"] = round(pos[0], 1), round(pos[1], 1)
+        self.emit("workspace.activity", ev)
+
+    def shutdown_sessions(self):
+        with self.lock:
+            for s in self.sessions.values():
+                s.close()
+            self.sessions.clear()

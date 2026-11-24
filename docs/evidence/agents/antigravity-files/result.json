@@ -1,0 +1,53 @@
+{
+  "agent": "antigravity",
+  "model": "gemini-3.8-flash-low",
+  "prompt": "Open the file manager and look inside the folder <tmp>/inbox. Tell me which files are in it.",
+  "exit_code": 0,
+  "seconds": 38.2,
+  "workspace": "antigravity-files",
+  "run_alongside": [],
+  "workspace_viewers_attached": 0,
+  "workspace_windows": [
+    "inbox"
+  ],
+  "files_in_workspace_home": [],
+  "file_previews": {},
+  "host_display_variables_seen_in_agent_process_group": [],
+  "host_wayland_sockets_before_after": [
+    {
+      "host_sockets": [
+        "wayland-0"
+      ]
+    },
+    {
+      "host_sockets": [
+        "wayland-0"
+      ]
+    }
+  ],
+  "dbus_calls_through_filtering_proxy": [
+    "org.freedesktop.DBus org.freedesktop.DBus.Hello",
+    "org.freedesktop.secrets org.freedesktop.DBus.Properties.Get",
+    "org.freedesktop.secrets org.freedesktop.Secret.Collection.SearchItems",
+    "org.freedesktop.secrets org.freedesktop.Secret.Item.GetSecret",
+    "org.freedesktop.secrets org.freedesktop.Secret.Service.OpenSession",
+    "org.freedesktop.secrets org.freedesktop.Secret.Service.Unlock",
+    "org.freedesktop.secrets org.freedesktop.Secret.Session.Close"
+  ],
+  "agent_dbus_addresses": [
+    "unix:path=~/.cache/claude-tmp/aw-run-j1qz36gc/bus"
+  ],
+  "agent_peak_pss_mib_incl_mcp_server": 285.1,
+  "agent_cpu_seconds": 1.12,
+  "workspace_memory_mib": 219,
+  "workspace_cpu_seconds": 1.6,
+  "usage": {
+    "turns": 1,
+    "duration_s": 33.37643941,
+    "input_tokens": 27527,
+    "output_tokens": 700,
+    "thinking_tokens": 0,
+    "cache_read_tokens": 74038,
+    "total_tokens": 28227
+  }
+}

@@ -1,0 +1,13 @@
+prompt: Open the calculator and a text editor. Work out 17 times 23 in the calculator, then type the result into the text editor.
+
+agent: I’ll open the calculator and text editor in my workspace, calculate the product, then enter it in the editor.
+  call launch_app {"app": "calculator"} -> <image> | launched Calculator (app 1, pid 1088839) in workspace codex-twoapps; workspace 'codex-twoa...
+  call keyboard_type {"text": "17*23"} -> ok (pointer at 0.0,0.0)
+  call keyboard_key {"combo": "Return"} -> ok (pointer at 0.0,0.0)
+  call screenshot {} -> <image> | workspace 'codex-twoapps' screen 1280x720 px (captured in 19.5 ms); also saved as <run>/we...
+  call launch_app {"app": "text editor"} -> <image> | launched Text Editor (app 2, pid 1089231) in workspace codex-twoapps; workspace 'codex-two...
+  call keyboard_type {"text": "391"} -> ok (pointer at 0.0,0.0)
+  call screenshot {} -> <image> | workspace 'codex-twoapps' screen 1280x720 px (captured in 8.9 ms); also saved as <run>/we8...
+agent: 17 × 23 = **391**. I entered `391` in the text editor.
+
+USAGE {"input_tokens": 219103, "cached_input_tokens": 189568, "cache_write_input_tokens": 0, "output_tokens": 535, "reasoning_output_tokens": 0}

@@ -1,0 +1,17 @@
+prompt: Open my browser and visit agdc.dev, then tell me what the page's main heading says.
+
+[init] model=claude-haiku-5-5 mcp=[('agent-workspaces', 'connected')] builtin_tools=[]
+  call launch_browser {"url": "https://agdc.dev", "profile": "throwaway"}
+  -> E_BROWSER_UNSUPPORTED: Chromium (not-installed): profile data found but the browser executable is not installe...
+  call list_browsers {}
+  -> {   "browsers": [     {       "id": "google-chrome",       "label": "Google Chrome",       "family": "chromium...
+agent: Chromium isn't installed, but Google Chrome is launchable. I'll use it with a throwaway profile, not one of your signed-in profiles.
+  call launch_browser {"browser": "google-chrome", "url": "https://agdc.dev", "profile": "throwaway"}
+  -> launched google-chrome (app 1, pid 3342602), profile throwaway. Take a screenshot to see it.
+  call wait {"seconds": 3}
+  call screenshot {}
+  -> waited
+  -> <image> | workspace 'claude-code-browser' screen 1280x720 px (captured in 18.7 ms); also saved as <run>/w6188e7/shots/sh...
+agent: The main heading on agdc.dev reads **"One workspace. Every agent."** The page is titled "AgentDock Silver," and the subheading below it says "Claude Code, Codex, and Antigravity. All in one place."  I opened it in Google...
+
+USAGE {"turns": 6, "cost_usd": 0.0034923, "duration_ms": 9362, "input": 10, "cache_read": 46120, "cache_creation": 13698, "output": 581}

@@ -1,0 +1,24 @@
+prompt: Open the file manager and look inside the folder <tmp>/inbox. Tell me which files are in it.
+
+[init] model=qwen3.6-35b-a3b
+  call tool_call {"calls": [{"name": "tool_search", "arguments": {"queries": ["terminal execute command"], "limit": 3}}]}
+  ->  {"error": "tool_call cannot invoke 'tool_search' (it is itself a bridge tool)"}
+  call tool_call {"calls": [{"name": "terminal", "arguments": {"command": "ls -la <run>/inbox/"}}]}
+  ->  {"error": "'terminal' is not available in this execution context. Don't retry it — state the assumption and pr...
+  call list_workspaces {}
+  ->  - hermes-screenshot: running, 1280x720, agent=Hermes Agent, input=agent, windows=1 (your workspace 'hermes-fil...
+  call list_apps {}
+  ->  Defaults (launch_app app=<role or id>): browser: google-chrome (Google Chrome) text editor: org.gnome.TextEdit...
+  call launch_app {"app": "org.gnome.Nautilus"}
+  -> <image as file path: MEDIA tag> {"_multimodal": true, "content": [{"type": "text", "text": "{\"result\": \" Files (app 1, pid 3328895) in work...
+  call keyboard_key {"combo": "ctrl+l"}
+  ->  ok (pointer at 0.0,0.0)
+  call keyboard_type {"text": "<run>/inbox"}
+  ->  ok (pointer at 0.0,0.0)
+  call keyboard_key {"combo": "Return"}
+  ->  ok (pointer at 0.0,0.0)
+  call screenshot {}
+  -> <image as file path: MEDIA tag> {"_multimodal": true, "content": [{"type": "text", "text": "{\"result\": \" 'hermes-files' screen 1280x720 px ...
+agent: Here are the files in `<run>/inbox`:  | Item | Type | |---|---| | **archive** | Folder | | **holiday.jpg** | Image | | **invoice-2024.pdf** | PDF document | | **notes.txt** | Text file |
+
+USAGE null

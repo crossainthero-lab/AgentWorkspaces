@@ -1,0 +1,101 @@
+prompt: Open the calculator and a text editor. Work out 17 times 23 in the calculator, then type the result into the text editor.
+
+[init] model=claude-haiku-5-5 mcp=[('agent-workspaces', 'connected')] builtin_tools=[]
+  call list_apps {}
+  -> Defaults (launch_app app=<role or id>): browser: google-chrome (Google Chrome) text editor: org.gnome.TextEdit...
+  call launch_app {"app": "calculator"}
+  call launch_app {"app": "text editor"}
+  -> <image> | launched Calculator (app 3, pid 1089744) in workspace claude-code-twoapps; workspace 'claude-code-twoapps' scr...
+  -> <image> | launched Text Editor (app 4, pid 1089767) in workspace claude-code-twoapps; workspace 'claude-code-twoapps' sc...
+agent: The text editor already shows "391" in what looks like an existing draft. I'll compute the result in the calculator first, then check that document before typing anything.
+  call mouse_click {"x": 640, "y": 590}
+  call keyboard_type {"text": "17*23="}
+  call screenshot {}
+  -> ok (pointer at 640,590)
+  -> ok (pointer at 640,590)
+  -> <image> | workspace 'claude-code-twoapps' screen 1280x720 px (captured in 21.3 ms); also saved as <run>/w8dfa33/shots/sh...
+agent: My keystrokes went into the text editor instead of the calculator, because the editor had focus. I'll remove the six characters I added so the existing "391" draft is restored, then switch to the calculator.
+  call keyboard_key {"combo": "BackSpace"}
+  -> ok (pointer at 640,590)
+  call keyboard_key {"combo": "BackSpace"}
+  -> ok (pointer at 640,590)
+  call keyboard_key {"combo": "BackSpace"}
+  -> ok (pointer at 640,590)
+  call keyboard_key {"combo": "BackSpace"}
+  -> ok (pointer at 640,590)
+  call keyboard_key {"combo": "BackSpace"}
+  -> ok (pointer at 640,590)
+  call keyboard_key {"combo": "BackSpace"}
+  call screenshot {}
+  -> ok (pointer at 640,590)
+  -> <image> | workspace 'claude-code-twoapps' screen 1280x720 px (captured in 8.2 ms); also saved as <run>/w8dfa33/shots/sho...
+agent: The editor is back to its original "391". Now I'll switch to the calculator and enter the calculation there.
+  call list_windows {}
+  -> [   {     "id": 1,     "title": "Calculator",     "app_id": "org.gnome.Calculator",     "focused": false,     ...
+  call window_action {"window": 3, "action": "focus"}
+  -> ok
+  call wait {"seconds": 1}
+  call screenshot {}
+  -> waited
+  -> <image> | workspace 'claude-code-twoapps' screen 1280x720 px (captured in 17.6 ms); also saved as <run>/w8dfa33/shots/sh...
+agent: The calculator is in front. I'll enter the calculation with its on-screen buttons.
+  call mouse_click {"x": 638, "y": 638}
+  -> ok (pointer at 638,638)
+  call mouse_click {"x": 367, "y": 542}
+  -> ok (pointer at 367,542)
+  call mouse_click {"x": 775, "y": 542}
+  -> ok (pointer at 775,542)
+  call mouse_click {"x": 503, "y": 638}
+  -> ok (pointer at 503,638)
+  call mouse_click {"x": 638, "y": 590}
+  -> ok (pointer at 638,590)
+  call mouse_click {"x": 911, "y": 661}
+  call screenshot {}
+  -> ok (pointer at 911,661)
+  -> <image> | workspace 'claude-code-twoapps' screen 1280x720 px (captured in 15.7 ms); also saved as <run>/w8dfa33/shots/sh...
+agent: I entered the wrong digits: the first click hit "3" instead of "1", and the sixth click hit "6". The display shows 37×26. I'll clear it and enter 17×23 again with the correct buttons.
+  call mouse_click {"x": 367, "y": 493}
+  call wait {"seconds": 1}
+  -> ok (pointer at 367,493)
+  call screenshot {"max_width": 640}
+  -> waited
+  -> <image> | workspace 'claude-code-twoapps' screen 640x360 px (captured in 24.5 ms); also saved as <run>/w8dfa33/shots/sho...
+agent: The previous expression was evaluated and the input is now empty. I'll enter 17×23 with the correct buttons.
+  call mouse_click {"x": 367, "y": 638}
+  -> ok (pointer at 367,638)
+  call mouse_click {"x": 367, "y": 542}
+  -> ok (pointer at 367,542)
+  call mouse_click {"x": 775, "y": 542}
+  -> ok (pointer at 775,542)
+  call mouse_click {"x": 503, "y": 638}
+  -> ok (pointer at 503,638)
+  call mouse_click {"x": 638, "y": 638}
+  call mouse_click {"x": 911, "y": 661}
+  -> ok (pointer at 638,638)
+  call screenshot {}
+  -> ok (pointer at 911,661)
+  -> <image> | workspace 'claude-code-twoapps' screen 1280x720 px (captured in 34.8 ms); also saved as <run>/w8dfa33/shots/sh...
+agent: The expression shows 17×23 but no result yet. I'll wait a moment and check again before pressing anything else.
+  call wait {"seconds": 1}
+  call screenshot {"max_width": 640}
+  -> waited
+  -> <image> | workspace 'claude-code-twoapps' screen 640x360 px (captured in 19.1 ms); also saved as <run>/w8dfa33/shots/sho...
+agent: The calculator shows 17×23 = 391. The text editor already has a "391" draft that I shouldn't overwrite, so I'll type the result into a new document.
+  call window_action {"window": 2, "action": "focus"}
+  -> ok
+  call wait {"seconds": 1}
+  call mouse_click {"x": 103, "y": 22}
+  call wait {"seconds": 1}
+  call screenshot {"max_width": 640}
+  -> waited
+  -> ok (pointer at 103,22)
+  -> waited
+  -> <image> | workspace 'claude-code-twoapps' screen 640x360 px (captured in 23.2 ms); also saved as <run>/w8dfa33/shots/sho...
+agent: A new empty document is open in its own tab. I'll type the result there and check it.
+  call keyboard_type {"text": "391"}
+  -> ok (pointer at 103,22)
+  call screenshot {"max_width": 640}
+  -> <image> | workspace 'claude-code-twoapps' screen 640x360 px (captured in 16.1 ms); also saved as <run>/w8dfa33/shots/sho...
+agent: 17 × 23 = 391. I computed it in the calculator and typed 391 into a new, unsaved document in the Text Editor.  The Text Editor already had a tab with "391" in it when I opened it. I briefly typed "17*23=" into that tab b...
+
+USAGE {"turns": 44, "cost_usd": 0.00854852, "duration_ms": 42745, "input": 26, "cache_read": 238472, "cache_creation": 19511, "output": 4518}

@@ -1,0 +1,45 @@
+{
+  "agent": "claude-code",
+  "model": "haiku",
+  "prompt": "Open a text editor, write a short paragraph about autumn rain and save it as autumn.txt.",
+  "exit_code": 0,
+  "seconds": 15.9,
+  "workspace": "claude-code-editor",
+  "run_alongside": [],
+  "workspace_viewers_attached": 0,
+  "workspace_windows": [
+    "autumn.txt (~/) - Text Editor"
+  ],
+  "files_in_workspace_home": [
+    "autumn.txt"
+  ],
+  "file_previews": {
+    "autumn.txt": "Autumn rain falls softly on the golden leaves, tapping gently against the windowpanes as the afternoon grows grey and quiet. The air smells of wet earth and fal"
+  },
+  "host_display_variables_seen_in_agent_process_group": [],
+  "host_wayland_sockets_before_after": [
+    {
+      "host_sockets": [
+        "wayland-0"
+      ]
+    },
+    {
+      "host_sockets": [
+        "wayland-0"
+      ]
+    }
+  ],
+  "agent_peak_pss_mib_incl_mcp_server": 298.0,
+  "agent_cpu_seconds": 1.41,
+  "workspace_memory_mib": 212,
+  "workspace_cpu_seconds": 2.2,
+  "usage": {
+    "turns": 12,
+    "cost_usd": 0.004404450000000001,
+    "duration_ms": 14928,
+    "input": 12,
+    "cache_read": 58985,
+    "cache_creation": 16197,
+    "output": 1148
+  }
+}

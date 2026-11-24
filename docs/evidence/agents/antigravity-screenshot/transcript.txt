@@ -1,0 +1,8 @@
+prompt: Open the calculator, take a screenshot of it and tell me what you see on its screen.
+
+[init] model=gemini-3.8-flash-low tools=60 (incl. its own shell and browser tools; only mcp(agent-workspaces/*) is allowed in headless mode)
+  call launch_app {"app": "calculator"} -> launched Calculator (app 1, pid 3252351) in workspace antigravity-screenshot; workspace 'antigravity-screensho...
+  [read_file] {"Path": "<tmp>/home/.gemini/antigravity-cli/brain/ffe88cfd-401d-456c-b87b-979d797a4a1b/.system_generated/steps/3/media_0.png"} -> ok, no text output (image read)
+agent: The calculator application (GNOME Calculator) is open in **Basic** mode. Here is what is visible on its screen:  1. **Header Bar**:    - Undo/redo buttons on the top left.    - Mode selector in the center set to **"Basic...
+
+USAGE {"turns": 1, "duration_s": 20.05380983, "input_tokens": 18470, "output_tokens": 711, "thinking_tokens": 0, "cache_read_tokens": 27504, "total_tokens": 19181}

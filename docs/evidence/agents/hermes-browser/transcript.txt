@@ -1,0 +1,20 @@
+prompt: Open my browser and visit agdc.dev, then tell me what the page's main heading says.
+
+[init] model=qwen3.6-35b-a3b
+  call list_browsers {}
+  ->  {   "browsers": [     {       "id": "google-chrome",       "label": "Google Chrome",       "family": "chromium...
+  call ensure_workspace {}
+  ->  workspace 'hermes-browser' attached (running, 1280x720)
+  call launch_browser {"browser": "google-chrome", "url": "https://agdc.dev"}
+  ->  launched google-chrome (app 1, pid 3346066), profile throwaway. Take a screenshot to see it.
+  call screenshot {}
+  -> <image as file path: MEDIA tag> {"_multimodal": true, "content": [{"type": "text", "text": "{\"result\": \" 'hermes-browser' screen 1280x720 p...
+  call describe_screen {}
+  ->  {"error": "E_NO_VISION: no vision backend is configured (AW_VISION_URL / AW_VISION_MODEL). This agent's own mo...
+  call wait {"seconds": 3}
+  ->  waited
+  call screenshot {}
+  -> <image as file path: MEDIA tag> {"output": "{\"_multimodal\": true, \"content\": [{\"type\": \"text\", \"text\": \"{\\\"result\\\": \\\" 'herm...
+agent: The main heading on the agdc.dev page says:  **One workspace. Every agent.**  (Subtext below reads: "Claude Code, Codex, and Antigravity. All in one place.")
+
+USAGE null
