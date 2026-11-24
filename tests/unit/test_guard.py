@@ -37,6 +37,14 @@ BLOCKED = [
     "sed -i 's/a/b/' ~/.claude/settings.json", "echo '{}' > /home/u/.claude/settings.json", "rm ~/.hermes/shell-hooks-allowlist.json",
     "python3 -c \"open('/home/u/.hermes/config.yaml','w').write('')\"", "tee .claude/settings.local.json < x",
     "cp x /home/u/.local/share/agent-workspaces/aw/guard.py", "hermes hooks revoke foo",
+    "python3 -m webbrowser http://x", "python3 -c \"import webbrowser; webbrowser.open('http://x')\"", "open http://x",
+    "/opt/google/chrome/chrome http://x", "/usr/bin/google-chrome-stable --new-tab http://x", "env FOO=1 google-chrome http://x",
+    "sh -c 'google-chrome http://x'", "nohup chromium http://x >/dev/null 2>&1 &", "(setsid brave-browser http://x &)",
+    "google-chrome --headless --user-data-dir=$HOME/.config/google-chrome http://x",
+    "google-chrome --user-data-dir=/home/u/.config/google-chrome --headless", "chromium --user-data-dir ~/.config/chromium http://x",
+    "firefox --headless -profile /home/u/.mozilla/firefox/abc.default http://x", "firefox -P default http://x",
+    "code .", "code /tmp/file.txt", "slack", "discord", "obsidian obsidian://open?vault=x", "signal-desktop", "codium .",
+    "flatpak run org.mozilla.firefox", "kioclient5 exec http://x", "mimeopen file.pdf", "xdg-open http://x &",
     "google-chrome https://example.org", "firefox https://example.org", "firefox", "chromium-browser x",
     "/usr/bin/google-chrome-stable x", "nohup google-chrome x &", "brave-browser", "epiphany x",
 ]
@@ -51,6 +59,9 @@ ALLOWED = [
     "systemctl --user restart agent-workspaces.service", "journalctl --user -u foo -n 5",
     "google-chrome --headless --disable-gpu --screenshot=/tmp/x.png http://127.0.0.1:8000/",
     "chromium --headless=new --dump-dom http://127.0.0.1:8000/", "firefox --headless --screenshot /tmp/x.png http://127.0.0.1",
+    "code --list-extensions", "code --install-extension ms-python.python", "code --version", "libreoffice --headless --convert-to pdf a.odt",
+    "google-chrome --user-data-dir=/tmp/p --no-first-run about:blank", "firefox --profile /tmp/ffp --version",
+    "git commit -m 'open the browser docs'", "echo open", "grep -rn webbrowser src/", "python3 -c \"print('webbrowser')\"",
     "google-chrome --user-data-dir=/tmp/p --headless http://x", "google-chrome --version", "firefox --version",
     "xvfb-run -a pytest tests/gui", "Xvfb :99 & export DISPLAY=:99; python3 t.py",
     "dbus-send --system --print-reply --dest=org.freedesktop.DBus / org.freedesktop.DBus.ListNames",
@@ -111,6 +122,9 @@ class Rewrite(unittest.TestCase):
         code, out = guard._hermes({"tool_name": "terminal", "tool_input": {"command": "xeyes; xdotool key a"}})
         self.assertEqual(json.loads(out)["action"], "block")
         self.assertEqual(guard._hermes({"tool_name": "web_search", "tool_input": {}}), (0, ""))
+        for t in ("browser_exec", "browser_cdp", "computer_use"):
+            code, out = guard._hermes({"tool_name": t, "tool_input": {}})
+            self.assertEqual(json.loads(out)["action"], "block", t)
 
     def test_idempotent(self):
         once = guard.rewrite("ls", self.rt)

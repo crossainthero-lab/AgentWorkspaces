@@ -64,6 +64,8 @@ DENY_BIN = {
     "gtk-launch": "desktop launcher", "gtk4-launch": "desktop launcher", "gvfs-open": "desktop launcher",
     "sensible-browser": "opens the host browser", "x-www-browser": "opens the host browser",
     "www-browser": "opens the host browser", "gnome-www-browser": "opens the host browser",
+    "open": "desktop launcher", "kioclient": "desktop launcher", "kioclient5": "desktop launcher", "kioclient6": "desktop launcher",
+    "kfmclient": "desktop launcher", "mimeopen": "desktop launcher", "run-mailcap": "desktop launcher", "see": "desktop launcher",
     "xdg-email": "desktop launcher", "xdg-desktop-menu": "desktop integration", "xdg-desktop-icon": "desktop integration",
     "xdg-settings": "desktop integration", "xdg-screensaver": "desktop control", "gnome-session-quit": "desktop control",
     "gnome-extensions": "desktop control", "gnome-shell": "desktop control", "gsettings": "desktop settings",
@@ -78,6 +80,10 @@ DENY_BIN = {
     "wl-copy": "host clipboard", "wl-paste": "host clipboard", "xclip": "host clipboard", "xsel": "host clipboard",
     "wl-clipboard": "host clipboard",
 }
+# MCP servers / tools of the agents that drive the user's REAL browser or desktop. Claude Code's permission rules deny them
+# while the guard is on (aw/guard_install.py); the workspace tools replace them.
+HOST_BROWSER_MCP_DENY = ["mcp__claude-in-chrome"]
+
 # command words denied only for particular arguments
 GIO_DENY_SUBCMDS = {"open", "launch"}
 GAPPLICATION_DENY = {"launch", "action"}
@@ -92,6 +98,22 @@ BROWSERS = re.compile(r"^(google-chrome(-stable|-beta|-unstable)?|chrome|chromiu
                       r"microsoft-edge(-stable)?|vivaldi(-stable)?|opera|firefox(-esr|-developer-edition)?|"
                       r"librewolf|epiphany|midori|tor-browser|start-tor-browser|falkon|qutebrowser|"
                       r"google-chrome-whitesur-frame)$")
+# Single-instance applications. Started from an agent's shell (which has the user's REAL home), a browser or an Electron
+# app hands its work to the instance that is already running on the desktop through a socket in the real profile, so
+# neither a faked display nor a hidden bus helps. They are denied unless the call is clearly harmless (headless,
+# --version, extension management) AND does not name a real profile.
+ELECTRON_APPS = re.compile(r"^(code(-insiders|-oss)?|codium|vscodium|cursor|windsurf|slack|discord|obsidian|signal-desktop|"
+                           r"element-desktop|teams(-for-linux)?|spotify(-client)?|zoom|skype(forlinux)?|notion-app|"
+                           r"1password|bitwarden|postman|insomnia|figma-linux|claude-desktop|chatgpt|whatsapp-for-linux|"
+                           r"telegram-desktop|thunderbird|evolution|libreoffice|soffice|gimp|inkscape|vlc|"
+                           r"agentdock|agent-dock)$", re.I)
+APP_MANAGEMENT_OK = re.compile(r"(^|\s)(--list-extensions|--install-extension|--uninstall-extension|--update-extensions|"
+                               r"--version|-v|--help|-h|--status|--convert-to|--headless|--cat|--print-to-pdf)(\s|$)")
+REAL_PROFILE_RE = re.compile(r"\.config/(google-chrome\S*|chromium\S*|BraveSoftware|vivaldi\S*|microsoft-edge\S*|opera\S*|"
+                             r"Slack|discord|obsidian|Code\b|VSCodium|Cursor|Claude)|\.mozilla|snap/(firefox|chromium)|"
+                             r"\.librewolf|\.var/app|\.config/mozilla|\.thunderbird", re.I)
+WEBBROWSER_RE = re.compile(r"(^|[\s;&|(`\"'])-m\s+webbrowser\b|\bwebbrowser\.(open|get|register)|\bimport\s+webbrowser\b|"
+                           r"\bxdg-open\b.*\bos\.system|\bos\.(system|popen)\(.*(xdg-open|chrome|firefox)")
 HEADLESS_OK = re.compile(r"(^|\s)(--headless(=\S+)?|-headless|--screenshot|--dump-dom|--print-to-pdf|--version|-v|"
                          r"--help|-h)(\s|$)")
 # explicit assignment of a display-relevant variable anywhere in the text (shell, python, JS ...)
@@ -286,10 +308,18 @@ def _check_words(words: List[str], raw: str, depth: int) -> Optional[str]:
                 return "`systemctl --user " + verbs[0] + "` of a graphical unit"
     if base in ("at", "batch"):
         return f"`{base}` (scheduled launch inside the desktop session)"
-    if BROWSERS.match(base) and not HEADLESS_OK.search(" " + joined + " "):
-        if not re.search(r"--user-data-dir|-profile\b|--profile\b", joined) or base.startswith("google-chrome-whitesur"):
-            return (f"`{base}` without --headless (a running host browser would open the page in its own window)")
-        # a separate profile cannot attach to the host instance, and the guard environment has no display
+    if base == "flatpak" and args and args[0] in ("run", "override"):
+        return "`flatpak run` (starts an app in the desktop session)"
+    if BROWSERS.match(base) or ELECTRON_APPS.match(base):
+        text = " " + joined + " "
+        if REAL_PROFILE_RE.search(text):
+            return f"`{base}` aimed at a real user profile (it would hand the page to the running host application)"
+        harmless = HEADLESS_OK.search(text) or APP_MANAGEMENT_OK.search(text)
+        separate = re.search(r"--user-data-dir[= ]\S+|(^|\s)-profile\s+\S+|--profile[= ]\S+", text) and BROWSERS.match(base)
+        if not harmless and not separate:
+            return (f"`{base}` (a single-instance application: it would open in, or hand its work to, the one already "
+                    "running on the desktop)")
+        # headless / management calls and a browser on a separate throw-away profile cannot attach to the host instance
     if base in SHELLS:
         # sh -c '...', bash -lc '...'
         for k, a in enumerate(args):
@@ -309,6 +339,8 @@ def check_command(cmd: str, depth: int = 0) -> Decision:
     """Decide whether the shell command may run. Allowed commands still run under the guard environment."""
     if not isinstance(cmd, str):
         return Decision()
+    if WEBBROWSER_RE.search(cmd):
+        return Decision(True, MSG.format(why="it opens the desktop browser through Python's webbrowser module"))
     pw = protected_write(cmd)
     if pw:
         return Decision(True, PROTECTED_MSG.format(what=pw))
@@ -405,6 +437,9 @@ def _claude(data: dict) -> Tuple[int, str]:
 def _hermes(data: dict) -> Tuple[int, str]:
     tool = data.get("tool_name")
     args = data.get("tool_input") or {}
+    if isinstance(tool, str) and (tool.startswith("browser_") or tool in ("computer_use", "bot_desktop")):
+        return 0, json.dumps({"action": "block", "message": MSG.format(
+            why=f"`{tool}` drives a browser or the desktop of the user (host-browser / computer-use tool)")})
     if tool in ("write_file", "patch", "edit_file", "replace_file"):
         path = str(args.get("path") or args.get("file_path") or args.get("filename") or "")
         if PROTECTED_PATH_RE.search(path):

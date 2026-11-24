@@ -20,6 +20,7 @@ class ClaudeGuard(unittest.TestCase):
         self.d = tempfile.mkdtemp()
         os.environ["CLAUDE_CONFIG_DIR"] = self.d
         os.environ["AW_HOST_RUNTIME_DIR"] = self.d
+        os.environ["XDG_CONFIG_HOME"] = os.path.join(self.d, "xdgconf")
         self.p = os.path.join(self.d, "settings.json")
         with open(self.p, "w") as f:
             f.write(json.dumps(SETTINGS, indent=2) + "\n")
@@ -28,12 +29,14 @@ class ClaudeGuard(unittest.TestCase):
     def tearDown(self):
         os.environ.pop("CLAUDE_CONFIG_DIR")
         os.environ.pop("AW_HOST_RUNTIME_DIR")
+        os.environ.pop("XDG_CONFIG_HOME")
         shutil.rmtree(self.d, ignore_errors=True)
 
     def test_install_is_minimal_and_uninstall_restores_the_exact_bytes(self):
         gi.claude_install()
         d = json.load(open(self.p))
-        self.assertEqual(d["permissions"], SETTINGS["permissions"])
+        self.assertEqual(d["permissions"]["allow"], SETTINGS["permissions"]["allow"])
+        self.assertEqual(d["permissions"]["deny"], ["mcp__claude-in-chrome"])      # the host-browser MCP tools are denied
         self.assertEqual(d["env"]["TMPDIR"], "/x/tmp")
         self.assertEqual(d["env"]["DISPLAY"], "")
         self.assertEqual(d["env"]["WAYLAND_DISPLAY"], "aw-guard-no-wayland-display")
@@ -107,7 +110,7 @@ class HermesGuard(unittest.TestCase):
         gi.hermes_install()
         cfg = yaml.safe_load(open(self.p))
         h = cfg["hooks"]["pre_tool_call"][0]
-        self.assertEqual(h["matcher"], "terminal|execute_code|write_file|patch")
+        self.assertEqual(h["matcher"], "terminal|execute_code|write_file|patch|browser_.*|computer_use")
         self.assertTrue(h["fail_closed"])
         self.assertEqual(cfg["model"]["default"], "m")
 

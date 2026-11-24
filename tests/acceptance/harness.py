@@ -51,7 +51,7 @@ def host_fingerprint() -> Dict[str, Any]:
 
 def run_agent(agent: str, prompt: str, base: str, project: str, run_dir: str, model: Optional[str] = None,
               timeout: float = 240.0, extra_env: Optional[Dict[str, str]] = None, shots_every: float = 6.0,
-              ws_name: Optional[str] = None, instructions: bool = True, customize=None, cwd: Optional[str] = None) -> Dict[str, Any]:
+              ws_name: Optional[str] = None, instructions: bool = True, customize=None, cwd: Optional[str] = None, post=None) -> Dict[str, Any]:
     os.makedirs(run_dir, exist_ok=True)
     plan = agentrun.plan(agent, prompt, model=model, project=project, base_dir=base, extra_env=extra_env,
                       instructions=instructions, cwd=cwd)
@@ -170,6 +170,11 @@ def run_agent(agent: str, prompt: str, base: str, project: str, run_dir: str, mo
     except Exception as e:
         res["workspace_error"] = str(e)
     res["dbus_proxy_calls"] = plan.keyring_summary()
+    if post:
+        try:
+            res["verify"] = post(res, plan)      # independent checks, before the agent's project dir is removed
+        except Exception as e:  # noqa
+            res["verify"] = {"error": repr(e)}
     plan.close()
     out_f.close()
     err_f.close()

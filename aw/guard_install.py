@@ -77,12 +77,43 @@ def _dump(path: str, data: Dict[str, Any]) -> None:
 
 
 # --------------------------------------------------------------------------- Claude Code
+def _state_path() -> str:
+    from . import paths
+    return os.path.join(paths.config_dir(), "guard-state.json")
+
+
+def _state_get(key: str) -> List[str]:
+    try:
+        return list(json.load(open(_state_path())).get(key, []))
+    except (OSError, ValueError):
+        return []
+
+
+def _state_set(key: str, value: List[str]) -> None:
+    sp = _state_path()
+    try:
+        data = json.load(open(sp))
+    except (OSError, ValueError):
+        data = {}
+    if value:
+        data[key] = value
+    else:
+        data.pop(key, None)
+    if data:
+        os.makedirs(os.path.dirname(sp), exist_ok=True)
+        json.dump(data, open(sp, "w"), indent=2)
+    elif os.path.exists(sp):
+        os.remove(sp)
+
+
 def claude_status() -> Dict[str, Any]:
     d = _load(claude_settings_path()) or {}
     hooks = [h for g in (d.get("hooks") or {}).get("PreToolUse", []) for h in g.get("hooks", []) if _is_our_hook(h)]
     want = claude_env()
     env_ok = all((d.get("env") or {}).get(k) == v for k, v in want.items())
-    return {"hook": bool(hooks), "env": env_ok, "script": os.path.exists(GUARD_PY),
+    deny = (d.get("permissions") or {}).get("deny") or []
+    host_mcp = all(x in deny for x in guard.HOST_BROWSER_MCP_DENY)
+    return {"hook": bool(hooks), "env": env_ok, "script": os.path.exists(GUARD_PY), "host_browser_mcp_denied": host_mcp,
             "on": bool(hooks) and env_ok}
 
 
@@ -98,6 +129,12 @@ def claude_install(dry: bool = False) -> List[str]:
             msgs.append(f"{path}: env.{k} is already set to another value; left as it is (the guard is weaker)")
             continue
         env[k] = v
+    perms = d.setdefault("permissions", {})
+    deny = perms.setdefault("deny", [])
+    added = [x for x in guard.HOST_BROWSER_MCP_DENY if x not in deny]
+    deny.extend(added)
+    if added:
+        _state_set("claude_deny_added", _state_get("claude_deny_added") + [a for a in added if a not in _state_get("claude_deny_added")])
     pre = d.setdefault("hooks", {}).setdefault("PreToolUse", [])
     if not any(_is_our_hook(h) for g in pre for h in g.get("hooks", [])):
         pre.append({"matcher": "Bash|Edit|Write|MultiEdit|NotebookEdit", "hooks": [{"type": "command", "command": hook_command("claude")}]})
@@ -115,6 +152,19 @@ def claude_uninstall(dry: bool = False) -> List[str]:
     if d is None:
         return [f"{path} does not exist; nothing to remove"]
     removed = []
+    ours = _state_get("claude_deny_added")
+    perms = d.get("permissions") or {}
+    deny = perms.get("deny") or []
+    for x in list(ours):
+        if x in deny:
+            deny.remove(x)
+            removed.append(f"permissions.deny:{x}")
+    if "deny" in perms and not deny:
+        del perms["deny"]
+    if "permissions" in d and not d["permissions"]:
+        del d["permissions"]
+    if not dry:
+        _state_set("claude_deny_added", [])
     want = claude_env()
     env = d.get("env") or {}
     for k, v in want.items():
@@ -158,7 +208,7 @@ def hermes_allowlist_path() -> str:
 
 
 def _hermes_block() -> str:
-    return (f"{BEGIN}\nhooks:\n  pre_tool_call:\n    - matcher: \"terminal|execute_code|write_file|patch\"\n"
+    return (f"{BEGIN}\nhooks:\n  pre_tool_call:\n    - matcher: \"terminal|execute_code|write_file|patch|browser_.*|computer_use\"\n"
             f"      command: {json.dumps(hook_command('hermes'))}\n      timeout: 10\n      fail_closed: true\n{END}\n")
 
 
