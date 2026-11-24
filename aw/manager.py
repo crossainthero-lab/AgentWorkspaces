@@ -25,7 +25,7 @@ import threading
 import time
 from typing import Any, Callable, Dict, List, Optional
 
-from . import appenv, auth, paths
+from . import appenv, auth, paths, sandbox as sbx
 from .session import SessionError, WorkspaceSession
 
 AGENT_KINDS = {
@@ -76,7 +76,7 @@ class Workspace:
     FIELDS = ("id", "name", "agent", "width", "height", "scale", "gpu", "render_node", "clipboard",
               "window_policy", "home", "memory_max", "state", "input_mode", "compositor_pid",
               "compositor_start", "x_display", "created_at", "apps", "next_app", "xkb_layout",
-              "takeover_reason", "last_action", "last_action_at", "last_input_at", "viewers", "xwayland")
+              "takeover_reason", "last_action", "last_action_at", "last_input_at", "viewers", "xwayland", "sandbox")
 
     def __init__(self, **kw):
         self.id: str = kw["id"]
@@ -106,6 +106,7 @@ class Workspace:
         self.last_input_at: float = kw.get("last_input_at", 0.0)
         self.viewers: int = 0
         self.xwayland: bool = kw.get("xwayland", True)
+        self.sandbox: Optional[Dict[str, Any]] = kw.get("sandbox")   # None | {"mounts": [{"path","ro"}]}
 
     def to_meta(self) -> Dict[str, Any]:
         return {k: getattr(self, k) for k in self.FIELDS if k != "viewers"}
@@ -194,7 +195,9 @@ class Manager:
     def create(self, name: str, agent_kind: str = "none", agent_label: str = "", width: int = 1280,
                height: int = 720, scale: float = 1.0, gpu: str = "auto", clipboard: str = "isolated",
                window_policy: str = "maximized", home: str = "private", memory_max: Optional[str] = None,
-               start: bool = True, render_node: Optional[str] = None, xwayland: bool = True) -> Workspace:
+               start: bool = True, render_node: Optional[str] = None, xwayland: bool = True,
+               sandbox: Any = None, sandbox_mounts: Optional[List[Any]] = None,
+               sandbox_net: bool = True) -> Workspace:
         if not NAME_RE.match(name or "") or ID_LIKE_RE.match(name):
             raise ManagerError("E_BAD_NAME", "name must be 1-40 chars: letters, digits, space, _ . - "
                                "(and must not look like a workspace id)")
@@ -210,13 +213,25 @@ class Manager:
             raise ManagerError("E_BAD_HOME", "home must be private|shared")
         if not (320 <= width <= 7680 and 240 <= height <= 4320 and 0.5 <= scale <= 4):
             raise ManagerError("E_BAD_SIZE", "width 320-7680, height 240-4320, scale 0.5-4")
+        sb_cfg = None
+        if sandbox or sandbox_mounts:
+            if not sbx.available():
+                raise ManagerError("E_NO_SANDBOX", "sandbox requested but bubblewrap (bwrap) is not installed")
+            if home != "private":
+                raise ManagerError("E_BAD_HOME", "a sandboxed workspace needs home=private")
+            try:
+                mounts = sbx.validate_mounts(sbx.parse_mounts(sandbox_mounts), paths.base_dir(),
+                                             paths.host_runtime_dir())
+            except sbx.SandboxError as e:
+                raise ManagerError("E_BAD_SANDBOX", str(e))
+            sb_cfg = {"mounts": mounts, "net": bool(sandbox_net)}
         with self.lock:
             if any(w.name.lower() == name.lower() for w in self.workspaces.values()):
                 raise ManagerError("E_EXISTS", f"a workspace named {name!r} already exists")
             wid = "w" + secrets.token_hex(3)
             ws = Workspace(id=wid, name=name, width=width, height=height, scale=scale, gpu=gpu,
                            clipboard=clipboard, window_policy=window_policy, home=home,
-                           memory_max=memory_max, render_node=render_node, xwayland=xwayland,
+                           memory_max=memory_max, render_node=render_node, xwayland=xwayland, sandbox=sb_cfg,
                            agent={"kind": agent_kind, "label": agent_label or AGENT_KINDS[agent_kind]["label"]})
             self.workspaces[wid] = ws
             paths.ensure_private_dir(ws.dir)
@@ -583,9 +598,21 @@ echo "$DISPLAY" > {shlex.quote(ws.dir)}/display.tmp && mv {shlex.quote(ws.dir)}/
             n = ws.next_app
             ws.next_app += 1
         logp = os.path.join(ws.dir, f"app-{n}.log")
-        lf = open(logp, "ab")
         cwd = cwd or (base["HOME"] if os.path.isdir(base["HOME"]) else "/")
-        p = self._wrap(ws, f"app{n}", base, argv, cwd=cwd, stdout=lf)
+        popen_cwd = cwd
+        if ws.sandbox:
+            home = base["HOME"]
+            allowed = [os.path.realpath(home)] + [m["path"] for m in ws.sandbox["mounts"]]
+            rc = os.path.realpath(cwd)
+            if not any(rc == a or rc.startswith(a + os.sep) for a in allowed):
+                raise ManagerError("E_BAD_ARGS", f"cwd {cwd!r} is outside the sandbox (allowed: the workspace "
+                                   f"home and the mounted directories {[m['path'] for m in ws.sandbox['mounts']]})")
+            argv = ["bwrap"] + sbx.build_argv(ws.dir, ws.rt, home, ws.sandbox["mounts"], x_display=display,
+                                              cwd=rc, gpu=ws.gpu != "off",
+                                              net=ws.sandbox.get("net", True))[1:] + ["--"] + argv
+            popen_cwd = ws.dir
+        lf = open(logp, "ab")
+        p = self._wrap(ws, f"app{n}", base, argv, cwd=popen_cwd, stdout=lf)
         app = {"n": n, "pid": p.pid, "argv": argv, "started": time.time(), "log": logp, "running": True,
                "start": None}
         time.sleep(0.05)
@@ -652,6 +679,7 @@ echo "$DISPLAY" > {shlex.quote(ws.dir)}/display.tmp && mv {shlex.quote(ws.dir)}/
                       "icon_hint": AGENT_KINDS.get(kind, AGENT_KINDS["other"])["icon_hint"]},
             "input_mode": ws.input_mode, "takeover_reason": ws.takeover_reason,
             "display": {"width": ws.width, "height": ws.height, "scale": ws.scale},
+            "sandbox": ({"enabled": True, "mounts": ws.sandbox["mounts"], "network": ws.sandbox.get("net", True)} if ws.sandbox else {"enabled": False}),
             "gpu": ws.gpu, "xwayland": ws.xwayland, "clipboard": ws.clipboard, "window_policy": ws.window_policy, "home": ws.home,
             "activity": {"last_action": ws.last_action, "last_action_at": ws.last_action_at or None,
                          "idle_seconds": (now - ws.last_action_at) if ws.last_action_at else None,

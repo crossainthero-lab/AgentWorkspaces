@@ -57,6 +57,13 @@ def build_parser() -> argparse.ArgumentParser:
     c.add_argument("--no-xwayland", action="store_true",
                    help="do not give apps a DISPLAY: X11 apps will not run, and GPU drivers cannot wake XWayland (~90 MB)")
     c.add_argument("--no-start", action="store_true")
+    c.add_argument("--sandbox", action="store_true",
+                   help="run the workspace's apps in a bubblewrap sandbox: private HOME, read-only system, "
+                        "private /tmp, nothing of your files unless mounted (see docs/isolation-model.md)")
+    c.add_argument("--sandbox-no-network", action="store_true",
+                   help="with --sandbox: also give the apps no network (and no host abstract sockets)")
+    c.add_argument("--sandbox-mount", action="append", default=[], metavar="PATH[:ro|:rw]",
+                   help="make a project directory visible inside the sandbox (default read-only); repeatable")
 
     r = sub.add_parser("rename"); ws_arg(r); r.add_argument("new_name")
     a = sub.add_parser("assign", help="assign an agent to a workspace"); ws_arg(a)
@@ -259,7 +266,8 @@ def _run(args) -> int:
         res = c.call("workspace.create", name=args.name, agent_kind=args.agent, agent_label=args.agent_label,
                      width=int(w), height=int(h), scale=args.scale, gpu=args.gpu, clipboard=args.clipboard,
                      window_policy=args.window_policy, home=args.home, memory_max=args.memory_max,
-                     start=not args.no_start, xwayland=not args.no_xwayland)
+                     start=not args.no_start, xwayland=not args.no_xwayland, sandbox=bool(args.sandbox),
+                     sandbox_mounts=args.sandbox_mount, sandbox_net=not args.sandbox_no_network)
         show(res, f"created workspace {res['name']} ({res['id']}) state={res['state']}\n"
                   f"credential file for the agent: {res['token_file']}")
         return 0

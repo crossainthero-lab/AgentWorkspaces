@@ -260,7 +260,7 @@ class Daemon:
             return d
         if method == "workspace.create":
             allowed = ("agent_kind", "agent_label", "width", "height", "scale", "gpu", "clipboard",
-                       "window_policy", "home", "memory_max", "render_node", "xwayland", "sandbox")
+                       "window_policy", "home", "memory_max", "render_node", "xwayland", "sandbox", "sandbox_mounts", "sandbox_net")
             kw = {k: p[k] for k in allowed if k in p}
             ws = m.create(p.get("name", ""), start=p.get("start", True), **kw)
             d = m.summary(ws)
