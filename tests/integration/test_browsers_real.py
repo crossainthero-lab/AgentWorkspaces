@@ -375,6 +375,78 @@ class AuthorizedProfile(unittest.TestCase):
         self.assertIn(cm.exception.code, ("E_GRANT_REQUIRED", "E_NOT_FOUND"))
         self.assertEqual(tree_fingerprint(self.HOST_ROOT), before)
 
+    def test_generic_grant_flow_denial_approval_expiry_and_revocation(self):
+        """The generic grants of the security layer (`grant.request` by the agent, `grants approve|deny|revoke`
+        by the human in a real pseudo-terminal) drive the same profile copy: no grant -> refused; denied ->
+        refused; approved -> the copy is made at launch and the session works; expired -> refused and the copy
+        is removed; revoked -> removed at once."""
+        from aw.client import Client
+        wid = C.call("workspace.get", workspace="auth")["id"]
+        with open(os.path.join(K.BASE, wid, "token")) as f:
+            agent = Client(autostart=False, role="agent", token=f.read().strip())
+        clone = os.path.join(FAKE_HOME, ".local/share/agent-workspaces/authorized", wid, "google-chrome__Default")
+        prof = {"mode": "authorized", "name": "Default"}
+
+        def launch(url=None):
+            return agent.call("browser.launch", workspace="auth", browser="google-chrome", profile=prof, url=url)
+
+        def refused():
+            with self.assertRaises(ApiError) as cm:
+                launch()
+            self.assertEqual(cm.exception.code, "E_GRANT_REQUIRED")
+
+        # 1. nothing granted
+        refused()
+        # 2. requested, still pending: refused; the agent cannot resolve it
+        g1 = agent.call("grant.request", workspace="auth", kind="browser_profile",
+                        resource="google-chrome:Default", detail="read my mail")
+        self.assertEqual(g1["status"], "pending")
+        refused()
+        with self.assertRaises(ApiError):
+            agent.call("grant.resolve", id=g1["id"], decision="granted")
+        # 3. the human denies in a terminal
+        rc, out = run_cli_in_pty(["grants", "deny", g1["id"]], answers=["no"])
+        self.assertEqual(rc, 0, out)
+        self.assertEqual(agent.call("grant.check", workspace="auth", kind="browser_profile",
+                                    resource="google-chrome:Default")["granted"], False)
+        refused()
+        self.assertFalse(os.path.exists(clone))
+        # 4. a wildcard grant (no resource) is not accepted for a profile
+        gw = agent.call("grant.request", workspace="auth", kind="browser_profile", resource="")
+        rc, out = run_cli_in_pty(["grants", "approve", gw["id"], "--ttl", "60"], answers=["yes"])
+        self.assertEqual(rc, 0, out)
+        refused()
+        rc, out = run_cli_in_pty(["grants", "revoke", gw["id"]], answers=["revoke"])
+        self.assertEqual(rc, 0, out)
+        # 5. approved for 4 seconds: the copy is made at launch and the session works
+        g2 = agent.call("grant.request", workspace="auth", kind="browser_profile", resource="google-chrome:Default")
+        rc, out = run_cli_in_pty(["grants", "approve", g2["id"], "--ttl", "20"], answers=["yes"])
+        self.assertEqual(rc, 0, out)
+        nw = len(web_events("whoami"))
+        r = launch(WEB.url + "/whoami")
+        self.assertTrue(K.wait_for(lambda: any(e["v"] == "user-session-77" for e in web_events("whoami")[nw:]), 25))
+        self.assertTrue(os.path.isdir(clone))
+        self.assertTrue(close_browser("auth", r["app"]))
+        # 6. expiry: refused, and the copy is removed
+        K.wait_for(lambda: agent.call("grant.check", workspace="auth", kind="browser_profile",
+                                      resource="google-chrome:Default")["granted"] is False, 30, 1)
+        refused()
+        self.assertTrue(K.wait_for(lambda: not os.path.exists(clone), 5), "expired copy must be removed")
+        # 7. approved again, then revoked by the human: the copy goes at once
+        g3 = agent.call("grant.request", workspace="auth", kind="browser_profile", resource="google-chrome:Default")
+        rc, out = run_cli_in_pty(["grants", "approve", g3["id"]], answers=["yes"])
+        self.assertEqual(rc, 0, out)
+        r = launch(WEB.url + "/ping")
+        self.assertTrue(K.wait_for(lambda: os.path.isdir(clone), 5))
+        rc, out = run_cli_in_pty(["grants", "revoke", g3["id"]], answers=["revoke"])
+        self.assertEqual(rc, 0, out)
+        self.assertTrue(K.wait_for(lambda: not os.path.exists(clone), 5), "revoked copy must be removed")
+        refused()
+        log = open(os.path.join(K.BASE, "audit.log")).read()
+        for ev in ("grant.requested", "grant.denied", "grant.granted", "grant.revoked", "grant.refused_use",
+                   "browser.profile.cloned", "browser.profile.shredded"):
+            self.assertIn(ev, log)
+
     def test_destroying_the_workspace_removes_the_copy(self):
         rc, out = run_cli_in_pty(["profile", "authorize", "google-chrome", "Default", "--workspace", "auth"],
                                  answers=["auth"])

@@ -99,6 +99,15 @@ class Daemon:
             self.browser.sweep()        # authorised profile copies exist only while a live grant backs them
         except OSError:
             pass
+
+        def sweeper():
+            while True:
+                time.sleep(30)
+                try:
+                    self.browser.sweep()
+                except Exception:
+                    pass
+        threading.Thread(target=sweeper, daemon=True).start()
         self.approvals: Dict[str, Approval] = {}
         self._aseq = 0
         self.lock = threading.Lock()
@@ -467,7 +476,9 @@ class Daemon:
                                         p.get("ttl_seconds"), channel)
                 return g.to_json()
             if method == "grant.revoke":
-                return self.grants.revoke(str(p.get("id", "")), channel).to_json()
+                g = self.grants.revoke(str(p.get("id", "")), channel)
+                self.browser.sweep()        # an authorised browser-profile copy dies with its grant
+                return g.to_json()
         except GrantError as e:
             raise ManagerError(e.code, e.message)
         raise ManagerError("E_UNKNOWN_METHOD", f"unknown method {method!r}")

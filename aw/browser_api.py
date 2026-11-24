@@ -60,7 +60,10 @@ class BrowserAPI:
                 live = any(g.ws == wid and g.kind == GRANT_KIND and g.effective_status() == "granted"
                            and g.resource.split(":", 1)[0] == bid for g in self.d.grants.grants.values())
                 if not live:
-                    B.shred(os.path.join(wdir, ent))
+                    path = os.path.join(wdir, ent)
+                    if self._kill_apps_using(self.d.mgr.workspaces[wid], path):
+                        time.sleep(1.0)
+                    B.shred(path)
                     self.d.audit.write("browser.profile.shredded", workspace=wid, browser=bid, reason="no live grant")
                     n += 1
         return n
@@ -214,6 +217,10 @@ class BrowserAPI:
         args = B.validate_args(p.get("args"))
         mode, name, chromium_prof = self._profile_spec(p.get("profile"), b)
         claimed = None
+        if ws.sandbox and mode != "throwaway":
+            # a sandboxed workspace sees only its own directory and the mounts you gave it, not the data dir
+            raise ManagerError("E_BAD_ARGS", "a sandboxed workspace supports only throwaway browser profiles "
+                               "(browsers in sandboxed workspaces were not tested)")
         if mode == "throwaway":
             pdir = B.throwaway_dir(ws.dir, b["id"])
         elif mode == "agent":
@@ -222,8 +229,17 @@ class BrowserAPI:
             claimed = pdir
         else:   # authorized
             resource = f"{b['id']}:{name}"
-            self.d.grants.require(ws.id, GRANT_KIND, resource)
+            g = self.d.grants.require(ws.id, GRANT_KIND, resource)
+            if g.resource != resource:      # a grant without a resource would be a wildcard: not accepted here
+                raise ManagerError("E_GRANT_REQUIRED", f"the approved grant does not name {resource!r}; ask for "
+                                   "this exact profile with browser.profile.request")
             pdir = B.clone_dir(self.data, ws.id, b["id"], name)
+            if not os.path.lexists(pdir):
+                # approved through the generic grant flow (`agent-workspaces grants approve`): make the copy now
+                prof = self._resolve_profile(b, name)
+                B.clone_profile(b, prof, pdir)
+                self.d.audit.write("browser.profile.cloned", workspace=ws.id, browser=b["id"], profile=prof["name"],
+                                   grant=g.id, channel=g.channel, via="launch")
             B.check_clone_safe(pdir)
             B.claim_profile(pdir, ws.id)
             claimed = pdir

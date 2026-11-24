@@ -153,6 +153,7 @@ class NoHostDisplayInTheCode(unittest.TestCase):
         "aw/daemon.py": "workspace.enter: the human's viewer window is opened on the human's display",
         "aw/viewer.py": "the viewer IS a window on the human's desktop",
         "aw/manager.py": "sets the compositor's / apps' own private XDG_RUNTIME_DIR; reads the runtime dir for systemd",
+        "aw/audio.py": "private audio daemons get XDG_RUNTIME_DIR = the workspace's own runtime dir",
         "aw/paths.py": "XDG_RUNTIME_DIR locates the base directory of the API socket",
         "aw/sandbox.py": "--setenv XDG_RUNTIME_DIR <the workspace's own runtime dir>",
     }
