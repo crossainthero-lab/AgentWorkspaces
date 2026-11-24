@@ -2,7 +2,7 @@
 
 Tests are split on purpose. Unit tests need no compositor and cannot fail because of the machine. Real integration tests start real compositors and real apps and are labelled as such in their module docstrings.
 
-## Unit tests (106, `tests/unit/`)
+## Unit tests (107, `tests/unit/`)
 
 ```bash
 python3 -m unittest discover -s tests/unit -t .

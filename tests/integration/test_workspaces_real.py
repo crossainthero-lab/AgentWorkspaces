@@ -105,6 +105,7 @@ class TwoWorkspacesAreIndependent(unittest.TestCase):
         self.assertEqual((ib["x"], ib["y"]), (700, 200))
         # click into the entry of A only, then type: B's entry must stay empty
         C.call("input.click", workspace="A", agent_kind="claude-code", x=200, y=190)
+        time.sleep(0.3)       # the entry takes keyboard focus a frame after the click; typing at once loses the 1st key
         C.call("input.type", workspace="A", agent_kind="claude-code", text="only-in-A")
         time.sleep(0.4)
         ea = [e for e in K.log_events(self.logA)[a0:] if e["ev"] == "text"]

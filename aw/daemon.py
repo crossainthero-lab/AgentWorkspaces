@@ -210,8 +210,9 @@ class Daemon:
             ref = p.get("workspace")
             ws = self.mgr.workspaces.get(self._resolve_id(ref) or "") if isinstance(ref, str) else None
             if ws is not None and ws.state == "running":
-                self.mgr.verify_routing(ws)
-                self.mgr.drop_session(ws)
+                self.mgr.check_after_failure(ws)
+                raise ManagerError("E_SESSION", f"the connection to workspace {ws.name!r}'s compositor failed; "
+                                   "the operation may not have been applied. The connection was reset: try again")
             raise
         if method in AUDITED:
             self.audit.write("request", method=method, workspace=p.get("workspace") if isinstance(

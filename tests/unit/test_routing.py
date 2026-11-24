@@ -101,6 +101,32 @@ class VerifyRouting(unittest.TestCase):
         self.assertEqual(got, [b""])
         srv.close()
 
+    def test_check_after_failure_waits_for_a_dying_compositor_then_reports_it_gone(self):
+        import signal
+        import time
+        child = os.fork()
+        if child == 0:
+            time.sleep(30)
+            os._exit(0)
+        try:
+            srv = socket.socket(socket.AF_UNIX)
+            srv.bind(self.ws.socket)
+            self.fake_running(child, self.manager._proc_start(child))
+            import threading
+            threading.Timer(0.2, lambda: os.kill(child, signal.SIGKILL)).start()   # dies during the settle window
+            t0 = time.monotonic()
+            with self.assertRaises(self.manager.ManagerError) as cm:
+                self.m.check_after_failure(self.ws, settle=2.0)
+            self.assertEqual(cm.exception.code, "E_NOT_RUNNING")
+            self.assertLess(time.monotonic() - t0, 1.5)
+            srv.close()
+        finally:
+            try:
+                os.kill(child, signal.SIGKILL)
+                os.waitpid(child, 0)
+            except OSError:
+                pass
+
     def test_session_constructor_never_reads_the_environment(self):
         from aw import wl
         os.environ["WAYLAND_DISPLAY"] = "wayland-0"

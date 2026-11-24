@@ -48,7 +48,7 @@ Default `isolated`: the workspace clipboard is its own. The viewer (not the daem
 
 ## Optional sandbox for workspace apps
 
-Graphical isolation (everything above) does not limit what an app can read or do. `create --sandbox` (off by default, per workspace) runs every app launched into that workspace under bubblewrap (`bwrap`, found installed here: 0.11.1; it runs here on Ubuntu 26.04 with `kernel.apparmor_restrict_unprivileged_userns=1`, where the distribution also ships an AppArmor profile named `bwrap-userns-restrict`; other systems were not tried). `--sandbox-mount PATH[:ro|:rw]` (repeatable, read-only by default) adds project directories; `--sandbox-no-network` also unshares the network. `workspace.get` reports `sandbox: {enabled, mounts, network}`.
+Graphical isolation (everything above) does not limit what an app can read or do. `create --sandbox` (off by default, per workspace) runs every app launched into that workspace under bubblewrap (`bwrap`, found installed here: 0.11.1; it runs here on Ubuntu 26.04 with `kernel.apparmor_restrict_unprivileged_userns=1`, where the distribution also ships an AppArmor profile named `bwrap-userns-restrict`; other systems were not tried). `--sandbox-mount PATH[:ro|:rw]` (repeatable, read-only by default) adds project directories; `--sandbox-no-network` also unshares the network. `workspace.get` reports `sandbox: {enabled, mounts, network}`. The choice is made at creation and cannot be changed afterwards.
 
 | Inside the sandbox | Value | Measured by |
 |---|---|---|

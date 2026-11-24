@@ -484,6 +484,20 @@ class UnauthorisedAndWrongIds(unittest.TestCase):
         self.assertIsNotNone(closed_at, "connection was never closed after repeated bad credentials")
         self.assertLessEqual(closed_at, 12)
 
+    def test_no_token_appears_in_the_daemon_log_or_audit_log_or_process_arguments(self):
+        toks = [open(token_file(w["id"])).read().strip() for w in (self.a, self.b)]
+        toks.append(open(os.path.join(K.BASE, "admin.token")).read().strip())
+        issued = C.call("credential.issue", workspace="ua-a", ttl_seconds=60)["token"]
+        agent(self.a["id"]).call("workspace.get", workspace="ua-a")
+        for path in ("daemon.log", "audit.log"):
+            blob = open(os.path.join(K.BASE, path)).read()
+            for tk in toks + [issued]:
+                self.assertNotIn(tk, blob, path)
+        for pid in (K.DAEMON.pid,):
+            argv = open(f"/proc/{pid}/cmdline", "rb").read().decode(errors="replace")
+            for tk in toks + [issued]:
+                self.assertNotIn(tk, argv)
+
     def test_other_user_peer_check_exists_on_the_real_socket(self):
         st = os.stat(self.sock)
         self.assertEqual(oct(st.st_mode & 0o777), "0o600")

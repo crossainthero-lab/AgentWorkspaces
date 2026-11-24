@@ -572,6 +572,19 @@ echo "$DISPLAY" > {shlex.quote(ws.dir)}/display.tmp && mv {shlex.quote(ws.dir)}/
             raise ManagerError("E_ROUTING", f"workspace {ws.name!r}: {expected} is not a socket owned by you")
         return st
 
+    def check_after_failure(self, ws: Workspace, settle: float = 0.6):
+        """A call on a workspace's compositor connection failed. Decide why, without ever guessing: if the compositor
+        process is gone (also within the few milliseconds in which a SIGKILLed process is still being torn down)
+        this raises E_NOT_RUNNING; if something else serves the socket, E_ROUTING; otherwise the cached connection
+        is dropped so the next call reconnects, and the caller reports that the operation is unconfirmed."""
+        deadline = time.monotonic() + settle
+        while True:
+            self.verify_routing(ws)            # raises E_NOT_RUNNING / E_ROUTING
+            if time.monotonic() >= deadline:
+                break
+            time.sleep(0.03)
+        self.drop_session(ws)
+
     def drop_session(self, ws: Workspace):
         """Forget a cached compositor connection that failed; the next call reconnects (and re-verifies)."""
         with self.lock:
