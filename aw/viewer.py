@@ -198,7 +198,7 @@ GRANT_TITLES = {"browser_profile": "{ws} wants to use a copy of your browser pro
 def grant_view(viewer: "Viewer", g: Dict[str, Any], ws_name: str) -> Gtk.Widget:
     res = f" \u201c{g['resource']}\u201d" if g.get("resource") else ""
     title = GRANT_TITLES.get(g.get("kind", ""), "{ws} asks for permission: " + g.get("kind", "")).format(ws=ws_name, res=res)
-    detail = g.get("description") or ""
+    detail = (g.get("description") or "")[:1].upper() + (g.get("description") or "")[1:]
     if g.get("detail"):
         detail = (detail + " " if detail else "") + g["detail"]
     return _request_row(viewer, title, detail, [("Deny", lambda: viewer.resolve_grant(g["id"], "denied")),

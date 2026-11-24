@@ -51,13 +51,21 @@ GSettings schema `org.gnome.shell.extensions.agent-workspaces`: `enter-shortcut`
 
 * Enter: records the workspace you are on, finds the workspace that holds the viewer window (window app id
   `dev.agentworkspaces.Viewer`, or title starting with `AgentWorkspaces:`), or creates one (the empty workspace
-  GNOME keeps at the end, or a new one) and asks the daemon (`workspace.enter`, `docs/api.md`) to open the viewer
-  on it. With no daemon running it still switches, and shows a notice with the command to start it.
+  GNOME keeps at the end, or a new one) and asks the daemon (`workspace.enter`, `docs/api.md`, with the admin
+  credential from `$XDG_RUNTIME_DIR/agent-workspaces/admin.token`) to open the viewer maximized on it. The viewer
+  (`docs/viewer.md`) is the whole UI: workspace list, overview, control, requests. It opens on the workspace you used
+  last. The viewer's "Back to desktop" button calls this extension's session-bus method `Return` (same as Ctrl+Alt+Up). With no daemon running it still switches, and shows a notice with the command to start it.
 * Return: back to the recorded workspace. If it no longer exists (GNOME removes empty workspaces), to the
   neighbouring one.
 * On a vertical workspace layout (for example with V-Shell) Ctrl+Alt+Down already means "next workspace", so the
   keys are passed through to the normal neighbour switch.
 * Animations follow GNOME's *enable-animations* setting and are skipped while the Overview is open.
+
+## Desktop Cube, Tiling Shell, V-Shell
+
+Checked in isolated shells, see `../docs/gnome-extension.md`: Desktop Cube keeps turning for Ctrl+Alt+Left/Right and is
+not touched by the vertical slide; Tiling Shell binds no Ctrl+Alt+Up/Down by default (a foreign binding on the same
+accelerator is reported, never edited); V-Shell with a horizontal layout coexists. Not run: V-Shell with a vertical layout.
 
 ## Tests
 
@@ -65,6 +73,8 @@ GSettings schema `org.gnome.shell.extensions.agent-workspaces`: `enter-shortcut`
 HOME/XDG dirs, GSETTINGS_BACKEND=keyfile, private session bus and a private stand-in for the system bus so GDM,
 logind and polkit are unreachable), installs the extension there only, injects key events inside that shell and
 prints PASS/FAIL per check. `--coexist` runs a shorter check next to desktop-cube and tilingshell (private copies).
+`python3 tests/run_real.py` is the same isolation with the real daemon, workspaces and viewer and the developer's own
+extension set (36 checks); `tests/demo_video.py OUT.mp4` records the demo; `tests/measure_gs.py` measures CPU, memory and latency.
 `--prefs out.png` opens the preferences window in the isolated shell and saves a screenshot. It uses
 `/run/user/$UID/aw-ext-test/` and removes it afterwards (`--keep` leaves it). Needs `gnome-shell`, `dbus-daemon`,
 `glib-compile-schemas`, python3-gi with Gtk 4. Nothing is sent to your running session.

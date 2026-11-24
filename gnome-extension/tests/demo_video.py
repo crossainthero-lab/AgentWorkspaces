@@ -8,10 +8,11 @@ Ctrl+Alt+Down (real key events synthesised inside the private compositor) -> ver
 viewer, where a *scripted* AgentWorkspaces client (not a model) types into a real text editor that lives in a real
 workspace -> Ctrl+Alt+Up back -> a second visit shows the workspace kept working -> cube still works.
 
-Usage: demo_video.py OUT.mp4 [--frames DIR]
+Usage: demo_video.py OUT.mp4 [--frames DIR] [--strips DIR]
 """
 import json
 import os
+import subprocess
 import sys
 import time
 
@@ -49,6 +50,7 @@ def windows(s):
 def main():
     out = os.path.abspath(sys.argv[1])
     frames_dir = sys.argv[sys.argv.index("--frames") + 1] if "--frames" in sys.argv else None
+    strips = sys.argv[sys.argv.index("--strips") + 1] if "--strips" in sys.argv else None
     s = Session(monitors=("1600x900",), copy_extensions=REALISTIC_COPY, enable_extensions=REALISTIC_SYSTEM,
                 dump_user_settings=True, pipewire=True)
     d = None
@@ -110,9 +112,11 @@ def main():
         check("Ctrl+Alt+Up returned to workspace 0", s.state()["active"] == 0)
 
         # ---- the recording
+        marks = {}
         agent = ScriptedAgent("research", word_delay=0.28, line_pause=1.4)
         with record(s, out, fps=30) as rec:
             time.sleep(2.0)                                   # personal desktop
+            marks["cube"] = time.monotonic() - rec._t0
             s.chord("Control_L", "Alt_L", "Right")            # cube
             time.sleep(1.8)
             check("Ctrl+Alt+Right moved to workspace 1 (cube)", s.state()["active"] == 1)
@@ -121,9 +125,11 @@ def main():
             check("Ctrl+Alt+Left moved back to workspace 0 (cube)", s.state()["active"] == 0)
             agent.start()
             time.sleep(0.8)
+            marks["down"] = time.monotonic() - rec._t0
             s.chord("Control_L", "Alt_L", "Down")             # into AgentWorkspaces: vertical slide
             time.sleep(7.5)                                   # the user watches the agent type
             n_in = agent.typed
+            marks["up"] = time.monotonic() - rec._t0
             s.chord("Control_L", "Alt_L", "Up")               # back
             time.sleep(2.5)
             check("Ctrl+Alt+Up returned to workspace 0", s.state()["active"] == 0)
@@ -139,6 +145,13 @@ def main():
             time.sleep(2.0)
         print("video:", json.dumps(rec.info))
         RES["video"] = rec.info
+        print("marks (s after recording start; the video starts ~0.4 s earlier):", json.dumps(marks))
+        if strips:
+            for name in ("cube", "down", "up"):
+                t0 = marks[name] + 0.4
+                frames = extract_frames(out, os.path.join(strips, name), [round(t0 + 0.06 * i, 3) for i in range(0, 14)])
+                subprocess.run(["ffmpeg", "-v", "error", "-y", "-pattern_type", "glob", "-i", os.path.join(strips, name, "frame-*.png"),
+                                "-vf", "scale=400:-1,tile=4x2", "-frames:v", "1", os.path.join(strips, f"strip-{name}.png")], check=True)
         # ---- cube state is intact
         info = s.eval(f"""
           const ext = Main.extensionManager.lookup('{CUBE}');
