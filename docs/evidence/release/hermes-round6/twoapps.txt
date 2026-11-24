@@ -1,0 +1,98 @@
+prompt: Open the calculator and a text editor. Work out 14 times 13 in the calculator, then type the result into the editor.
+model: qwen3.8-27b-agent
+result: PASS
+verified by: expected 182 in an editor window title; windows ['Calculator', '182 (Draft) - Text Editor']
+seconds: 255.2  exit: 0
+host display variables seen in the agent process group: []
+host wayland sockets unchanged: True
+
+[init] model=qwen3.8-27b-agent
+  call tool_search {"queries": ["open app launch", "screenshot workspace", "type text keyboard", "list apps available", "workspace status ensure"]}
+  ->  {"queries": ["open app launch", "screenshot workspace", "type text keyboard", "list apps available", "workspac...
+  call tool_describe {"names": ["mcp__agent_workspaces__launch_app", "mcp__agent_workspaces__screenshot", "mcp__agent_workspaces__keyboard_type", "mcp_...
+  ->  {"tools": {"mcp__agent_workspaces__launch_app": {"description": "Start a graphical program inside your workspa...
+  call list_apps {}
+  ->  Defaults (launch_app app=<role or id>): browser: google-chrome (Google Chrome) text editor: org.gnome.TextEdit...
+  call launch_app {"app": "calculator"}
+  -> <image as file path: MEDIA tag> {"_multimodal": true, "content": [{"type": "text", "text": "{\"result\": \" Calculator (app 1, pid 3952006) in...
+  call launch_app {"app": "text editor"}
+  -> <image as file path: MEDIA tag> {"_multimodal": true, "content": [{"type": "text", "text": "{\"result\": \" Text Editor (app 2, pid 3952050) i...
+  call list_windows {}
+  ->  [   {     "id": 1,     "kind": "wayland",     "title": "Calculator",     "app_id": "org.gnome.Calculator",    ...
+  call window_action {"window": 1, "action": "focus"}
+  ->  ok
+  call keyboard_type {"text": "14x13"}
+  ->  ok (pointer at 0.0,0.0)
+  call keyboard_key {"combo": "Return"}
+  ->  ok (pointer at 0.0,0.0)
+  call screenshot {"max_width": 900}
+  -> <image as file path: MEDIA tag> {"_multimodal": true, "content": [{"type": "text", "text": "{\"result\": \" 'hermes-r23531-twoapps' screen 900...
+  call keyboard_key {"combo": "c"}
+  ->  ok (pointer at 0.0,0.0)
+  call keyboard_type {"text": "14*13"}
+  ->  ok (pointer at 0.0,0.0)
+  call keyboard_key {"combo": "Return"}
+  ->  ok (pointer at 0.0,0.0)
+  call screenshot {"max_width": 900}
+  -> <image as file path: MEDIA tag> {"_multimodal": true, "content": [{"type": "text", "text": "{\"result\": \" 'hermes-r23531-twoapps' screen 900...
+  call screenshot {}
+  -> <image as file path: MEDIA tag> {"_multimodal": true, "content": [{"type": "text", "text": "{\"result\": \" 'hermes-r23531-twoapps' screen 128...
+  call mouse_click {"x": 367, "y": 495}
+  ->  ok (pointer at 367,495)
+  call mouse_click {"x": 367, "y": 637}
+  ->  ok (pointer at 367,637)
+  call mouse_click {"x": 367, "y": 588}
+  ->  ok (pointer at 367,588)
+  call mouse_click {"x": 773, "y": 541}
+  ->  ok (pointer at 773,541)
+  call mouse_click {"x": 641, "y": 637}
+  ->  ok (pointer at 641,637)
+  call mouse_click {"x": 367, "y": 495}
+  ->  ok (pointer at 367,495)
+  call mouse_click {"x": 367, "y": 637}
+  ->  ok (pointer at 367,637)
+  call mouse_click {"x": 367, "y": 588}
+  ->  ok (pointer at 367,588)
+  call mouse_click {"x": 773, "y": 541}
+  ->  ok (pointer at 773,541)
+  call mouse_click {"x": 641, "y": 637}
+  ->  ok (pointer at 641,637)
+  call screenshot {}
+  -> <image as file path: MEDIA tag> {"_multimodal": true, "content": [{"type": "text", "text": "{\"result\": \" 'hermes-r23531-twoapps' screen 128...
+  call mouse_click {"x": 367, "y": 495}
+  ->  ok (pointer at 367,495)
+  call mouse_click {"x": 367, "y": 637}
+  ->  ok (pointer at 367,637)
+  call mouse_click {"x": 367, "y": 588}
+  ->  ok (pointer at 367,588)
+  call mouse_click {"x": 773, "y": 541}
+  ->  ok (pointer at 773,541)
+  call mouse_click {"x": 641, "y": 637}
+  ->  ok (pointer at 641,637)
+  call mouse_click {"x": 367, "y": 495}
+  ->  ok (pointer at 367,495)
+  call mouse_click {"x": 367, "y": 637}
+  ->  ok (pointer at 367,637)
+  call mouse_click {"x": 367, "y": 588}
+  ->  ok (pointer at 367,588)
+  call mouse_click {"x": 773, "y": 541}
+  ->  ok (pointer at 773,541)
+  call mouse_click {"x": 367, "y": 637}
+  ->  ok (pointer at 367,637)
+  call mouse_click {"x": 641, "y": 637}
+  ->  ok (pointer at 641,637)
+  call screenshot {}
+  -> <image as file path: MEDIA tag> {"_multimodal": true, "content": [{"type": "text", "text": "{\"result\": \" 'hermes-r23531-twoapps' screen 128...
+  call mouse_click {"x": 909, "y": 662}
+  ->  ok (pointer at 909,662)
+  call screenshot {}
+  -> <image as file path: MEDIA tag> {"_multimodal": true, "content": [{"type": "text", "text": "{\"result\": \" 'hermes-r23531-twoapps' screen 128...
+  call window_action {"window": 2, "action": "focus"}
+  ->  ok
+  call keyboard_type {"text": "182"}
+  ->  ok (pointer at 909,662)
+  call screenshot {}
+  -> <image as file path: MEDIA tag> {"_multimodal": true, "content": [{"type": "text", "text": "{\"result\": \" 'hermes-r23531-twoapps' screen 128...
+agent: Done. Here's what happened in the workspace:  1. Opened the Calculator and the Text Editor (GNOME apps, in my own headless desktop). 2. In the calculator, computed 14×13 — the display shows "14×13 = 182". (First attempt with typed "x" failed because the calculator treats x as a variable, so I cleared it and used the on-screen × button.) 3. Switched to the text editor and typed the result: the docu...
+
+USAGE null

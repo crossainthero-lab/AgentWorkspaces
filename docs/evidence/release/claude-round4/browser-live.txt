@@ -1,0 +1,21 @@
+prompt: Could you open my browser and go to agdc.dev? I'd like to know what the big headline says.
+model: haiku
+result: PASS
+verified by: window titles ['AgentDock Silver — one workspace, every agent - Google Chrome']; answer missing []
+seconds: 7.9  exit: 0
+host display variables seen in the agent process group: ['DISPLAY', 'WAYLAND_DISPLAY', 'WAYLAND_SOCKET', 'XAUTHORITY']
+host wayland sockets unchanged: True
+
+[init] model=claude-haiku-5-5 mcp=[('agent-workspaces', 'connected')] builtin_tools=['Bash']
+  call launch_browser {"url": "https://agdc.dev"}
+  -> launched google-chrome (app 1, pid 3822652), profile throwaway. Take a screenshot to see it.
+  call screenshot {}
+  -> <image> | workspace 'claude-code-r17521-browser-live' screen 1280x720 px (captured in 10.5 ms); also saved as <run>/w943...
+agent: The screen is black, so the browser may still be loading. I'll wait a moment and check again.
+  call wait {"seconds": 3}
+  call screenshot {}
+  -> waited
+  -> <image> | workspace 'claude-code-r17521-browser-live' screen 1280x720 px (captured in 26.9 ms); also saved as <run>/w943...
+agent: The big headline on agdc.dev reads **"One workspace. Every agent."** Below it, the subtitle says "Claude Code, Codex, and Antigravity. All in one place." The site is for AgentDock, and it's showing a "Download AgentDock ...
+
+USAGE {"turns": 5, "cost_usd": 0.00157988, "duration_ms": 6960, "input": 8, "cache_read": 50058, "cache_creation": 4585, "output": 323}

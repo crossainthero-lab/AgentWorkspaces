@@ -1,0 +1,11 @@
+prompt: Open a text editor, write a short paragraph about the ocean at night and save it as note-996.txt.
+model: haiku
+result: FAIL
+verified by: note-996.txt not found in the workspace home or project dir
+seconds: 1.1  exit: -11
+host display variables seen in the agent process group: ['DISPLAY', 'WAYLAND_DISPLAY', 'WAYLAND_SOCKET', 'XAUTHORITY']
+host wayland sockets unchanged: True
+
+[init] model=claude-haiku-5-5 mcp=[('agent-workspaces', 'connected')] builtin_tools=['Bash']
+
+USAGE null

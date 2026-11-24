@@ -1,0 +1,35 @@
+prompt: Open a text editor, write a short paragraph about fresh bread and save it as note-709.txt.
+model: haiku
+result: PASS
+verified by: note-709.txt: 64 words, contains 'bread': True
+seconds: 12.8  exit: 0
+host display variables seen in the agent process group: ['DISPLAY', 'WAYLAND_DISPLAY', 'WAYLAND_SOCKET', 'XAUTHORITY']
+host wayland sockets unchanged: True
+
+[init] model=claude-haiku-5-5 mcp=[('agent-workspaces', 'connected')] builtin_tools=['Bash']
+  call launch_app {"app": "text editor"}
+  -> <image> | launched Text Editor (app 1, pid 3823871) in workspace claude-code-r17552-editor-save-1; workspace 'claude-cod...
+  call mouse_click {"x": 400, "y": 200}
+  -> ok (pointer at 400,200)
+  call keyboard_type {"text": "There is nothing quite like the smell of fresh bread drifting through the kitchen in the early morning. The crust crackles softly ...
+  call keyboard_key {"combo": "ctrl+s"}
+  -> ok (pointer at 400,200)
+  -> ok (pointer at 400,200)
+  call screenshot {}
+  -> <image> | workspace 'claude-code-r17552-editor-save-1' screen 1280x720 px (captured in 10.9 ms); also saved as <run>/wf3...
+agent: The save dialog opened with the first sentence as the file name. I'll replace it with the requested name.
+  call keyboard_key {"combo": "ctrl+a"}
+  -> ok (pointer at 400,200)
+  call keyboard_type {"text": "note-709.txt"}
+  -> ok (pointer at 400,200)
+  call screenshot {"max_width": 640}
+  -> <image> | workspace 'claude-code-r17552-editor-save-1' screen 640x360 px (captured in 24.1 ms); also saved as <run>/wf3c...
+  call mouse_click {"x": 1233, "y": 22}
+  -> ok (pointer at 1233,22)
+  call wait {"seconds": 1}
+  call screenshot {}
+  -> waited
+  -> <image> | workspace 'claude-code-r17552-editor-save-1' screen 1280x720 px (captured in 8.5 ms); also saved as <run>/wf3c...
+agent: I wrote a short paragraph about fresh bread in the text editor and saved it as `note-709.txt` in your home folder (`~/`). The title bar shows the new name, and the text is visible in the editor.  The paragraph reads: "Th...
+
+USAGE {"turns": 12, "cost_usd": 0.00286667, "duration_ms": 11831, "input": 12, "cache_read": 84267, "cache_creation": 7359, "output": 1102}

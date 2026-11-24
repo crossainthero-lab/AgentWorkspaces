@@ -1,0 +1,46 @@
+prompt: Open the calculator and a text editor. Work out 13 times 22 in the calculator, then type the result into the editor.
+model: qwen3.8-27b-agent
+result: PASS
+verified by: expected 286 in an editor window title; windows ['Calculator', '286 (Draft) - Text Editor']
+seconds: 142.4  exit: 0
+host display variables seen in the agent process group: []
+host wayland sockets unchanged: True
+
+[init] model=qwen3.8-27b-agent
+  call tool_describe {"names": ["mcp__agent_workspaces__ensure_workspace", "mcp__agent_workspaces__list_apps", "mcp__agent_workspaces__launch_app", "mc...
+  call tool_search {"queries": ["agent workspaces launch app", "agent workspaces screenshot"]}
+  ->  {"error": "too many names: 11 > max 10. Retry with fewer names per call."}
+  ->  {"queries": ["agent workspaces launch app", "agent workspaces screenshot"], "total_available": 33, "results": ...
+  call tool_describe {"names": ["mcp__agent_workspaces__ensure_workspace", "mcp__agent_workspaces__mouse_click", "mcp__agent_workspaces__keyboard_type"...
+  ->  {"tools": {"mcp__agent_workspaces__ensure_workspace": {"description": "Create your own graphical workspace (a ...
+  call ensure_workspace {"width": 1280, "height": 800}
+  ->  workspace 'hermes-r22779-twoapps' created (running, 1280x800)
+  call list_apps {}
+  ->  Defaults (launch_app app=<role or id>): browser: google-chrome (Google Chrome) text editor: org.gnome.TextEdit...
+  call launch_app {"app": "org.gnome.Calculator"}
+  -> <image as file path: MEDIA tag> {"_multimodal": true, "content": [{"type": "text", "text": "{\"result\": \" Calculator (app 1, pid 3942384) in...
+  call mouse_click {"x": 374, "y": 717}
+  ->  ok (pointer at 374,717)
+  call mouse_click {"x": 639, "y": 717}
+  ->  ok (pointer at 639,717)
+  call mouse_click {"x": 773, "y": 623}
+  ->  ok (pointer at 773,623)
+  call mouse_click {"x": 507, "y": 717}
+  ->  ok (pointer at 507,717)
+  call mouse_click {"x": 507, "y": 717}
+  ->  ok (pointer at 507,717)
+  call mouse_click {"x": 908, "y": 742}
+  ->  ok (pointer at 908,742)
+  call screenshot {}
+  -> <image as file path: MEDIA tag> {"_multimodal": true, "content": [{"type": "text", "text": "{\"result\": \" 'hermes-r22779-twoapps' screen 128...
+  call launch_app {"app": "org.gnome.TextEditor"}
+  -> <image as file path: MEDIA tag> {"_multimodal": true, "content": [{"type": "text", "text": "{\"result\": \" Text Editor (app 2, pid 3942819) i...
+  call mouse_click {"x": 400, "y": 400}
+  ->  ok (pointer at 400,400)
+  call keyboard_type {"text": "286"}
+  ->  ok (pointer at 400,400)
+  call screenshot {}
+  -> <image as file path: MEDIA tag> {"_multimodal": true, "content": [{"type": "text", "text": "{\"result\": \" 'hermes-r22779-twoapps' screen 128...
+agent: Done. Here's what happened, all in my own workspace:  1. Opened the **Calculator** (GNOME Calculator, Basic mode). 2. Entered **13 × 22** and pressed "=". The calculator's history bar read "13×22 = 286" and the main display showed **286**. 3. Opened the **Text Editor** (GNOME Text Editor) with a new blank document. 4. Clicked into the editing area and typed **286**.  The final screenshot confirms ...
+
+USAGE null

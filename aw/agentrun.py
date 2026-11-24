@@ -32,7 +32,7 @@ HOST_DISPLAY_VARS = ("DISPLAY", "WAYLAND_DISPLAY", "WAYLAND_SOCKET", "XAUTHORITY
 
 # Cheapest suitable model per agent (names as accepted by that agent's own --model flag).
 CHEAP_MODEL = {"claude-code": "haiku", "codex": "gpt-6-luna", "antigravity": "gemini-3.8-flash-low",
-               "hermes": "qwen3.6-35b-a3b"}
+               "hermes": "qwen3.8-27b-agent"}
 
 # Name of the provider block in ~/.hermes/config.yaml that points at the (local) OpenAI-compatible router, and of the
 # environment variable holding its key. Both are the acceptance harness's defaults; override for another setup.
@@ -88,6 +88,11 @@ def stop_hermes_runtime() -> List[int]:
                 os.kill(pid, signal.SIGKILL)
             except ProcessLookupError:
                 pass
+    for stale in ("gateway.sock", "gateway.pid", "gateway.lock"):      # left behind by a stopped gateway: the next run would connect to nothing
+        try:
+            os.unlink(os.path.join(HERMES_RUN_HOME, stale))
+        except OSError:
+            pass
     return pids
 
 
@@ -291,7 +296,7 @@ def plan(agent: str, prompt: str, model: Optional[str] = None, project: str = "d
         menv["AW_PROJECT"] = os.path.basename(cwd)
         env["HERMES_HOME"] = hermes_home(model, menv)
         env.update(_hermes_key_env())        # the API key goes into THIS process's environment only
-        argv = ["hermes", "chat", "-q", prompt, "-Q", "--max-turns", str(max_turns), "-t", f"mcp-{ig.NAME}",
+        argv = ["hermes", "chat", "-q", prompt, "-Q", "--max-turns", str(max(max_turns, 40)), "-t", f"mcp-{ig.NAME}",
                 "--provider", HERMES_PROVIDER, "-m", model or CHEAP_MODEL["hermes"]]
         if structured:
             argv += ["--format", "stream-json"]

@@ -1,0 +1,16 @@
+prompt: Open the calculator, take a screenshot of it and describe what you see.
+model: qwen3.8-27b-agent
+result: PASS
+verified by: calculator window True; description terms ['basic', 'keypad', 'buttons', 'display', 'clear', 'equals', 'calculator']
+seconds: 61.7  exit: 0
+host display variables seen in the agent process group: []
+host wayland sockets unchanged: True
+
+[init] model=qwen3.8-27b-agent
+  call tool_describe {"names": ["mcp__agent_workspaces__ensure_workspace", "mcp__agent_workspaces__launch_app", "mcp__agent_workspaces__screenshot"]}
+  ->  {"tools": {"mcp__agent_workspaces__ensure_workspace": {"description": "Create your own graphical workspace (a ...
+  call launch_app {"app": "calculator", "screenshot": true}
+  -> <image as file path: MEDIA tag> {"_multimodal": true, "content": [{"type": "text", "text": "{\"result\": \" Calculator (app 1, pid 3954215) in...
+agent: The calculator is open and I've captured the screenshot (saved to /tmp/awt-hermes-home-1000/cache/images/img_b97b99590f2e.png). Here's what I see:  It's the GNOME Calculator running in "Basic" mode (there's a "Basic" dropdown in the top center for switching to Scientific, Program, etc.). The window is on a 1280x720 desktop, with the usual window controls top-right: minimize, maximize, close, plus ...
+
+USAGE null

@@ -1,0 +1,35 @@
+prompt: I need a quick note. Use a text editor to write two sentences on an old lighthouse and keep it under the file name lighthouse-582.txt.
+model: haiku
+result: PASS
+verified by: lighthouse-582.txt: 39 words, contains 'lighthouse': True
+seconds: 13.9  exit: 0
+host display variables seen in the agent process group: ['DISPLAY', 'WAYLAND_DISPLAY', 'WAYLAND_SOCKET', 'XAUTHORITY']
+host wayland sockets unchanged: True
+
+[init] model=claude-haiku-5-5 mcp=[('agent-workspaces', 'connected')] builtin_tools=['Bash']
+  call launch_app {"app": "text editor"}
+  -> <image> | launched Text Editor (app 1, pid 3924477) in workspace claude-code-r21833-editor-save-2; workspace 'claude-cod...
+  call keyboard_type {"text": "The old lighthouse stands on a rocky headland, its white paint faded to grey by decades of salt wind. Though its lamp has been ret...
+  call keyboard_key {"combo": "ctrl+s"}
+  -> ok (pointer at 0.0,0.0)
+  -> ok (pointer at 0.0,0.0)
+  call screenshot {}
+  -> <image> | workspace 'claude-code-r21833-editor-save-2' screen 1280x720 px (captured in 12.8 ms); also saved as <run>/w4c...
+  call keyboard_key {"combo": "ctrl+a"}
+  -> ok (pointer at 0.0,0.0)
+  call keyboard_type {"text": "lighthouse-582.txt"}
+  -> ok (pointer at 0.0,0.0)
+  call keyboard_key {"combo": "Return"}
+  call screenshot {}
+  -> ok (pointer at 0.0,0.0)
+  -> <image> | workspace 'claude-code-r21833-editor-save-2' screen 1280x720 px (captured in 18.1 ms); also saved as <run>/w4c...
+agent: The name is set, but the dialog is still open, so I'll click Save.
+  call mouse_click {"x": 1233, "y": 22}
+  call wait {"seconds": 1}
+  -> ok (pointer at 1233,22)
+  call screenshot {}
+  -> waited
+  -> <image> | workspace 'claude-code-r21833-editor-save-2' screen 1280x720 px (captured in 22.0 ms); also saved as <run>/w4c...
+agent: I wrote the two sentences in the text editor and saved them as `lighthouse-582.txt`. The title bar shows the saved name, with no unsaved-changes marker.  The text reads: "The old lighthouse stands on a rocky headland, it...
+
+USAGE {"turns": 12, "cost_usd": 0.0037211600000000003, "duration_ms": 12538, "input": 14, "cache_read": 98816, "cache_creation": 10823, "output": 1134}

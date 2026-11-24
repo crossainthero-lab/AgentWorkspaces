@@ -1,0 +1,59 @@
+prompt: The file <run>/data/inv/invoice-249.txt has an amount due. Open it in a text editor, find the amount, and then use the calculator to double it. What do I get?
+model: haiku
+result: PASS
+verified by: expected 6984 in answer; windows ['Calculator', 'invoice-249.txt (<run>/data/inv) - Text Editor']
+seconds: 19.7  exit: 0
+host display variables seen in the agent process group: ['DISPLAY', 'WAYLAND_DISPLAY', 'WAYLAND_SOCKET', 'XAUTHORITY']
+host wayland sockets unchanged: True
+
+[init] model=claude-haiku-5-5 mcp=[('agent-workspaces', 'connected')] builtin_tools=['Bash']
+  call launch_app {"app": "text editor", "args": ["<run>/data/inv/invoice-249.txt"]}
+  -> <image> | launched Text Editor (app 1, pid 3925957) in workspace claude-code-r21875-copy-number; workspace 'claude-code-...
+agent: The invoice shows "Amount due: 3492". Next I'll open the calculator to double it.
+  call launch_app {"app": "calculator"}
+  -> <image> | launched Calculator (app 2, pid 3926023) in workspace claude-code-r21875-copy-number; workspace 'claude-code-r...
+  call mouse_click {"x": 503, "y": 542}
+  -> ok (pointer at 503,542)
+  call mouse_click {"x": 639, "y": 590}
+  -> ok (pointer at 639,590)
+  call mouse_click {"x": 503, "y": 638}
+  -> ok (pointer at 503,638)
+  call mouse_click {"x": 367, "y": 685}
+  -> ok (pointer at 367,685)
+  call mouse_click {"x": 775, "y": 542}
+  -> ok (pointer at 775,542)
+  call mouse_click {"x": 503, "y": 685}
+  call mouse_click {"x": 911, "y": 661}
+  -> ok (pointer at 503,685)
+  -> ok (pointer at 911,661)
+  call screenshot {}
+  -> <image> | workspace 'claude-code-r21875-copy-number' screen 1280x720 px (captured in 13.3 ms); also saved as <run>/wfc73...
+agent: My first set of clicks entered the wrong digits (8620×.), so I'll clear the display and enter 3492 × 2 correctly.
+  call mouse_click {"x": 367, "y": 493}
+  -> ok (pointer at 367,493)
+  call mouse_click {"x": 639, "y": 638}
+  -> ok (pointer at 639,638)
+  call mouse_click {"x": 367, "y": 590}
+  -> ok (pointer at 367,590)
+  call mouse_click {"x": 639, "y": 542}
+  -> ok (pointer at 639,542)
+  call mouse_click {"x": 503, "y": 638}
+  -> ok (pointer at 503,638)
+  call mouse_click {"x": 775, "y": 542}
+  -> ok (pointer at 775,542)
+  call mouse_click {"x": 503, "y": 638}
+  -> ok (pointer at 503,638)
+  call mouse_click {"x": 911, "y": 661}
+  call screenshot {}
+  -> ok (pointer at 911,661)
+  -> <image> | workspace 'claude-code-r21875-copy-number' screen 1280x720 px (captured in 18.3 ms); also saved as <run>/wfc73...
+agent: The expression reads 3492×2 but hasn't been evaluated yet, so I'll press equals again.
+  call mouse_click {"x": 911, "y": 661}
+  -> ok (pointer at 911,661)
+  call screenshot {"region": [302, 380, 978, 460]}
+  -> E_SESSION: the connection to workspace 'claude-code-r21875-copy-number''s compositor failed; the operation may...
+  call screenshot {}
+  -> <image> | workspace 'claude-code-r21875-copy-number' screen 1280x720 px (captured in 10.5 ms); also saved as <run>/wfc73...
+agent: Doubling the amount gives **6984**.  The invoice (`invoice-249.txt`, customer Brightwood Ltd) says "Amount due: 3492". I entered 3492 × 2 in the calculator and it returned 6984.  The calculator history also shows a stray...
+
+USAGE {"turns": 23, "cost_usd": 0.00533978, "duration_ms": 18394, "input": 16, "cache_read": 127298, "cache_creation": 14061, "output": 2506}

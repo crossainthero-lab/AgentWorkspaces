@@ -1,0 +1,16 @@
+prompt: Open <run>/data/notes/notes-710.txt in a text editor and tell me what the second line says.
+model: qwen3.8-27b-agent
+result: PASS
+verified by: editor window for notes-710.txt: True; second line 'the jade door opens at 3:45' in answer: True
+seconds: 28.9  exit: 0
+host display variables seen in the agent process group: []
+host wayland sockets unchanged: True
+
+[init] model=qwen3.8-27b-agent
+  call tool_describe {"names": ["mcp__agent_workspaces__launch_app", "mcp__agent_workspaces__screenshot", "mcp__agent_workspaces__ensure_workspace"]}
+  ->  {"tools": {"mcp__agent_workspaces__launch_app": {"description": "Start a graphical program inside your workspa...
+  call launch_app {"app": "text editor", "args": ["<run>/data/notes/notes-710.txt"]}
+  -> <image as file path: MEDIA tag> {"_multimodal": true, "content": [{"type": "text", "text": "{\"result\": \" Text Editor (app 1, pid 3950619) i...
+agent: Opened the file in Text Editor — here's what it shows on screen:  1. Meeting memo 2. the jade door opens at 3:45 3. Bring snacks  So the second line says: "the jade door opens at 3:45"
+
+USAGE null

@@ -1,0 +1,20 @@
+prompt: Go to http://127.0.0.1:46771/team.html and tell me who the club's treasurer is.
+model: qwen3.8-27b-agent
+result: PASS
+verified by: server log: 1 Chrome request(s) for /team; treasurer is Marta Quinn
+seconds: 26.8  exit: 0
+host display variables seen in the agent process group: []
+host wayland sockets unchanged: True
+
+[init] model=qwen3.8-27b-agent
+  call tool_search {"queries": ["launch browser", "browser navigate url", "browser screenshot read text"]}
+  ->  {"queries": ["launch browser", "browser navigate url", "browser screenshot read text"], "total_available": 33,...
+  call tool_describe {"names": ["mcp__agent_workspaces__launch_browser", "mcp__agent_workspaces__screenshot", "mcp__agent_workspaces__keyboard_type", "...
+  ->  {"tools": {"mcp__agent_workspaces__launch_browser": {"description": "Start a browser inside this workspace. De...
+  call launch_browser {"url": "http://127.0.0.1:46771/team.html"}
+  ->  launched google-chrome (app 1, pid 3926704), profile throwaway. Take a screenshot to see it.
+  call screenshot {}
+  -> <image as file path: MEDIA tag> {"_multimodal": true, "content": [{"type": "text", "text": "{\"result\": \" 'hermes-r21896-browser-fact-2' scr...
+agent: The page loaded fine. The club committee table shows the treasurer is **Marta Quinn**.  For reference, the full committee: - secretary: Tomas Reyes - chair: Priya Natarajan - events lead: Callum Fraser - archivist: Helena Vogt - webmaster: Idris Okoye - treasurer: Marta Quinn
+
+USAGE null

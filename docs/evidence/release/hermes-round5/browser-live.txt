@@ -1,0 +1,24 @@
+prompt: Could you open my browser and go to agdc.dev? I'd like to know what the big headline says.
+model: qwen3.8-27b-agent
+result: PASS
+verified by: window titles ['AgentDock Silver — one workspace, every agent - Google Chrome']; answer missing []
+seconds: 43.6  exit: 0
+host display variables seen in the agent process group: []
+host wayland sockets unchanged: True
+
+[init] model=qwen3.8-27b-agent
+  call tool_search {"queries": ["open browser navigate url", "browser screenshot page content"]}
+  ->  {"queries": ["open browser navigate url", "browser screenshot page content"], "total_available": 33, "results"...
+  call tool_search {"queries": ["agent-workspaces launch browser", "agent-workspaces open app url", "agent-workspaces screenshot view", "agent-worksp...
+  ->  {"queries": ["agent-workspaces launch browser", "agent-workspaces open app url", "agent-workspaces screenshot ...
+  call tool_search {"queries": ["agent-workspaces take screenshot", "agent-workspaces capture screen image", "agent-workspaces view display"]}
+  call tool_describe {"names": ["mcp__agent_workspaces__launch_browser", "mcp__agent_workspaces__launch_app"]}
+  ->  {"queries": ["agent-workspaces take screenshot", "agent-workspaces capture screen image", "agent-workspaces vi...
+  ->  {"tools": {"mcp__agent_workspaces__launch_browser": {"description": "Start a browser inside this workspace. De...
+  call launch_browser {"url": "https://agdc.dev"}
+  ->  launched google-chrome (app 1, pid 3923536), profile throwaway. Take a screenshot to see it.
+  call screenshot {}
+  -> <image as file path: MEDIA tag> {"output": "{\"_multimodal\": true, \"content\": [{\"type\": \"text\", \"text\": \"{\\\"result\\\": \\\" 'herm...
+agent: Done — opened your browser (Google Chrome) and navigated to agdc.dev. The page is live.  The big headline reads:  **One workspace. Every agent.**  It's the AgentDock landing page (a dark-themed site). Right under the headline is the subhead: "Claude Code, Codex, and Antigravity. All in one place." — followed by a "Build whatever you imagine" input box and a "Download AgentDock Silver" button. Ther...
+
+USAGE null

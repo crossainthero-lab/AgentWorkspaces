@@ -1,0 +1,20 @@
+prompt: Open the calculator, take a screenshot of it and describe what you see.
+model: qwen3.8-27b-agent
+result: PASS
+verified by: calculator window True; description terms ['basic', 'keypad', 'buttons', 'display', 'clear', 'equals', 'calculator']
+seconds: 50.7  exit: 0
+host display variables seen in the agent process group: []
+host wayland sockets unchanged: True
+
+[init] model=qwen3.8-27b-agent
+  call tool_search {"queries": ["launch app calculator", "screenshot workspace"]}
+  ->  {"queries": ["launch app calculator", "screenshot workspace"], "total_available": 33, "results": [{"query": "l...
+  call list_apps {}
+  ->  Defaults (launch_app app=<role or id>): browser: google-chrome (Google Chrome) text editor: org.gnome.TextEdit...
+  call launch_app {"app": "calculator"}
+  -> <image as file path: MEDIA tag> {"_multimodal": true, "content": [{"type": "text", "text": "{\"result\": \" Calculator (app 1, pid 3949901) in...
+  call screenshot {}
+  -> <image as file path: MEDIA tag> {"_multimodal": true, "content": [{"type": "text", "text": "{\"result\": \" 'hermes-r23374-screenshot-describe...
+agent: Done — the calculator is open and I've captured it. Here's what I see:  The app is GNOME Calculator running in "Basic" mode (shown by the "Basic" dropdown at the top center of the window header bar). The screen is 1280x720 and the window is maximized to fill it.  Header bar (top): - Top-left: two arrow icons — "back" (undo) and "forward" (redo). - Center: a "Basic" mode selector with a dropdown ca...
+
+USAGE null

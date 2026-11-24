@@ -54,6 +54,9 @@ def host_fingerprint() -> Dict[str, Any]:
     return out
 
 
+_PLAN_LOCK = threading.Lock()
+
+
 def run_agent(agent: str, prompt: str, base: str, project: str, run_dir: str, model: Optional[str] = None,
               timeout: float = 240.0, extra_env: Optional[Dict[str, str]] = None, shots_every: float = 6.0,
               ws_name: Optional[str] = None, instructions: bool = True, customize=None, cwd: Optional[str] = None, post=None) -> Dict[str, Any]:
@@ -61,12 +64,13 @@ def run_agent(agent: str, prompt: str, base: str, project: str, run_dir: str, mo
     if agent not in ("claude-code", "hermes"):
         raise NotImplementedError("private-environment runs exist for claude-code and hermes only")
     priv = privenv.PrivateEnv("agent")
-    old_tmp, tempfile.tempdir = tempfile.tempdir, priv.tmp          # the agent's project dir and runtime dir are private too
-    try:
-        plan = agentrun.plan(agent, prompt, model=model, project=project, base_dir=base, extra_env=extra_env,
-                             instructions=instructions, cwd=cwd)
-    finally:
-        tempfile.tempdir = old_tmp
+    with _PLAN_LOCK:       # tempfile.tempdir is process-global: two runs at once must not interleave
+        old_tmp, tempfile.tempdir = tempfile.tempdir, priv.tmp      # the agent's project dir and runtime dir are private too
+        try:
+            plan = agentrun.plan(agent, prompt, model=model, project=project, base_dir=base, extra_env=extra_env,
+                                 instructions=instructions, cwd=cwd)
+        finally:
+            tempfile.tempdir = old_tmp
     plan.extra_env, plan.allowed_roots = {}, ()
     if customize:
         customize(plan)          # may add plan.extra_env (a STAND-IN desktop's variables) and plan.allowed_roots
