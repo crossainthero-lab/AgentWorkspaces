@@ -1,6 +1,6 @@
 # Measurements
 
-Machine for every number below: the development **workstation** (16 CPUs, 30 GB RAM, NVIDIA GeForce RTX 4060 Ti, driver 595.99.02, Ubuntu 26.04, kernel 7.0). Nothing was measured on the Aurora machine (no working NVIDIA driver there; it was also unreachable when I tried to run the unit tests there). Raw reports: `scripts/measure.py` (workspaces), `scripts/measure_viewer.py` (viewer), `scripts/gpu_evidence.py` (GPU). Re-run them on your hardware.
+Machine for every number below: the development **workstation** (16 CPUs, 30 GB RAM, NVIDIA GeForce RTX 4060 Ti, driver 595.99.02, Ubuntu 26.04, kernel 7.0). Nothing was measured on the second test machine (no working NVIDIA driver there; it was also unreachable when I tried to run the unit tests there). Raw reports: `scripts/measure.py` (workspaces), `scripts/measure_viewer.py` (viewer), `scripts/gpu_evidence.py` (GPU). Re-run them on your hardware.
 
 ## Memory and CPU per workspace
 

@@ -40,7 +40,7 @@ All numbers below were measured on the development workstation (16 cores, NVIDIA
 | `gnome-shell --headless --virtual-monitor` | gnome-shell alone 209 MiB PSS (335 MiB RSS); with the services D-Bus activated around it about 330 MiB PSS over about 30 processes. Its log printed "Registering session with GDM" even with a private session bus | Heavy, drags in the whole GNOME session stack and touches system services; input would need the RemoteDesktop portal. I did not run it again after the GDM log line. Not pursued further |
 | `gnome-shell --devkit` / `mutter --devkit` | Not available: no `mutter-devkit` binary installed | Could not be tested |
 | labwc nested in a window (`WLR_BACKENDS=wayland`) | Works, 184 MiB RSS | The workspace dies with the window. With `WLR_BACKENDS=headless,wayland` closing the window keeps the compositor alive but there is no way to re-open the window (labwc has no output creation command), windows spread over two outputs. Cannot meet "agent keeps working after the viewer closes, and I can come back" |
-| sway, cage, weston (wlroots/own headless) | Not installed on the workstation; weston exists on the Aurora test machine | Not prototyped. labwc met every requirement and was already installed, so I stopped there. This is not a claim that they are worse |
+| sway, cage, weston (wlroots/own headless) | Not installed on the workstation; weston exists on the second test machine | Not prototyped. labwc met every requirement and was already installed, so I stopped there. This is not a claim that they are worse |
 | VNC/RDP viewer (wayvnc, gnome-remote-desktop) | wayvnc not installed; not tested | A custom GTK4 viewer using damage-driven screencopy was built instead and measured (below) |
 | Virtual machines, containers | Not tested | Would not share the host GPU/compositor path cheaply; not needed for graphical isolation |
 | A second GNOME virtual desktop | Not tested (by design) | Same pointer, same keyboard focus, same Shell: not isolation |
@@ -54,7 +54,7 @@ All numbers below were measured on the development workstation (16 cores, NVIDIA
 * `nvidia-smi pmon` lists the workspace's `labwc` as a Graphics process (4 MB framebuffer) and a Vulkan app (`vkcube --wsi wayland`) running inside the workspace as `C+G` with 7 to 11 % SM and 19 MB, while the same listing for a `gpu=off` workspace does not contain the compositor.
 * The integration test `GpuAcceleration` asserts both PIDs appear in `nvidia-smi pmon`.
 
-Aurora (the other test machine) has an Intel iGPU without a working NVIDIA driver, so GPU numbers were not taken there.
+The second test machine has an Intel iGPU without a working NVIDIA driver, so GPU numbers were not taken there.
 
 ### Viewer transport
 

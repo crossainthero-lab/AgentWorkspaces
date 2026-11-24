@@ -13,4 +13,4 @@
 * **Manual takeover** blocks agents that go through the daemon/MCP/CLI. It cannot stop a process that talks to the workspace socket directly.
 * **Daemon restarts** keep workspaces running and re-adopt them (metadata is under `$XDG_RUNTIME_DIR`, so they do not survive logout or reboot). Adoption was exercised in a unit test, not in a real compositor restart test.
 * **Gnotch**: the API (docs/api.md) was written to the stated needs; I did not run Gnotch against it.
-* **The shared test machine Aurora** was unreachable when I tried to run the unit tests there (SSH connection timeout); all test runs were on the workstation.
+* **The second (remote) test machine** was unreachable when I tried to run the unit tests there (SSH connection timeout); all test runs were on the workstation.

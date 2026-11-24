@@ -46,7 +46,7 @@ The test harness (`tests/harness.py`) provides **HostSim**, the stand-in desktop
 * A real read-only probe of the live desktop's pointer is not possible without privileges on GNOME Wayland (no unprivileged pointer-position API; `org.gnome.Shell.Introspect.GetWindows` is denied; `/dev/input` needs the `input` group). The host-untouched claim therefore rests on the structural audit and the stand-in desktop test, not on watching your real pointer.
 * Qt, GTK3, Firefox; Intel/AMD GPUs; multi-monitor viewer placement; long-running stability; audio.
 * Running Gnotch against the API.
-* Aurora: unreachable when attempted (SSH connection timeout), so no run there.
+* Second test machine: unreachable when attempted (SSH connection timeout), so no run there.
 
 ## GNOME extension tests
 

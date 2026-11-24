@@ -46,7 +46,7 @@ layout_rows === -1`). A horizontal layout therefore cannot produce a vertical sl
 | Tiling Shell 18.0 | `Main.wm.addKeybinding` for its own keys (move/span/focus window up/down/left/right, ...). Defaults: `move-window-up` = `<Super>Up`, others empty. None default to Ctrl+Alt. No workspace-layout or switch-animation changes. |
 | desktop-cube (v35) | No keybindings. Replaces the prototype methods `WorkspaceAnimationController._prepareWorkspaceSwitch` and `_finishWorkspaceSwitch`, so **every** animated workspace switch becomes a horizontal cube rotation. A normal switch to a "below" workspace would be drawn as a cube turn, not a vertical move. |
 | V-Shell (disabled) | Rewrites `org.gnome.desktop.wm.keybindings` (adds Super+PageUp/Down to up/down or left/right), calls `override_workspace_layout` (vertical or horizontal), replaces `Meta.Workspace.prototype.get_neighbor`, ships its own switch animation. With it on, Ctrl+Alt+Up/Down already mean "workspace above/below". |
-| ctrl-w-close-except-browsers@codex | enabled, but not present in `~/.local/share/gnome-shell/extensions` and not inspected. |
+| one further enabled extension | enabled in the live session but not present in `~/.local/share/gnome-shell/extensions`; not inspected. |
 
 Consequences for the design:
 
