@@ -240,15 +240,15 @@ class Matrix(unittest.TestCase):
     def test_xwayland_xmessage(self):
         ws = self.mk("cmp-x11")
         t0 = time.monotonic()
-        r = C.call("workspace.launch", workspace=ws, argv=["xmessage", "-default", "yes", "-buttons", "yes:10,no:20",
-                                                           "pick"])
+        r = C.call("workspace.launch", workspace=ws, argv=["xmessage", "-print", "-buttons", "yes:10", "pick"])
         win, _ = first_window(ws, 20)
         self.assertIsNotNone(win)
         self.assertEqual(win["kind"], "x11")
         t_first = time.monotonic() - t0
         self.measure(ws, "X11 (Athena)", "xmessage", "-", "xwayland", t_first)
-        C.call("window.action", workspace=ws, window=win["id"], action="focus")
-        C.call("input.key", workspace=ws, combo="Return")
+        # the only button sits at the bottom left of the (maximized) window: a real click through XWayland
+        g = win["geometry"]
+        C.call("input.click", workspace=ws, x=g["x"] + 20, y=g["y"] + g["height"] - 14)
         self.assertTrue(K.wait_for(lambda: "yes" in open(r["log"]).read(), 6), open(r["log"]).read())
 
     @unittest.skipUnless(K.have("xeyes"), "xeyes not installed")

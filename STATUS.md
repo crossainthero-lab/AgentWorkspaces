@@ -4,3 +4,4 @@
 * Done and tested in isolation only: GNOME Shell extension (headless isolated shell, stand-ins for daemon/viewer).
 * Not done: see `docs/limitations.md` and `docs/testing.md` ("Not tested").
 * Security branch (`feat/security`): API v2 with per-workspace credentials, human-only grants, routing identity checks, optional bubblewrap sandbox, reliability tests. See `docs/security-model.md`.
+* Browsers/compat branch (`feat/browsers-compat`): browser discovery and launch (throwaway, agent and human-authorised profile copies through the grants layer), one merged Wayland + private-XWayland window list with move/resize, per-workspace private PipeWire audio with capture and human-only host routing, application compatibility matrix run for real. See `docs/browsers.md`, `docs/windows.md`, `docs/audio.md`, `docs/compatibility.md`. Not tested: any real browser profile of the user, real speakers.

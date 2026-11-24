@@ -80,3 +80,30 @@ The test harness (`tests/harness.py`) provides **HostSim**, the stand-in desktop
 ## GNOME extension tests
 
 `gnome-extension/tests/run_isolated.py`: an isolated headless GNOME Shell with a private session bus and a private stand-in system bus (so it cannot reach the real GDM/logind). Results are in [gnome-extension.md](gnome-extension.md): 29/29 main checks, 7/7 co-existence with copies of desktop-cube and Tiling Shell, 5/5 prefs checks, with stand-in daemon and viewer rather than the real ones.
+
+## Windows, audio, browsers and application compatibility
+
+New unit tests (no compositor, no browser, no PipeWire): `tests/unit/test_x11_windows.py` (X11 client against a
+fake X server incl. refusal of a display not served by the workspace's compositor; merged window list rules),
+`test_browsers.py` (discovery in a fake home, argument/URL policy, host-lock states, allow-list copy that never
+modifies the original, shredding, ownership of writable profiles, auth policy of the new methods),
+`test_audio_pure.py`, `test_mcp_ext.py`.
+
+New REAL integration tests (real compositors, real apps; a throw-away fake HOME for the daemon and CLI, so no real
+browser profile is ever read):
+
+```bash
+python3 -m unittest tests.integration.test_windows_audio_real -v     # windows + audio
+AW_TEST_FIREFOX=/path/to/non-snap/firefox python3 -m unittest tests.integration.test_browsers_real -v
+AW_TEST_FIREFOX=... AW_TEST_ELECTRON_BIN=/path/to/stock/electron AW_COMPAT_REPORT=report.json \
+  python3 -m unittest tests.integration.test_compat_real -v          # the matrix in compatibility.md
+```
+
+| Test class | What it really does |
+|---|---|
+| `Windows` | a real GTK4 window (Wayland) and a real GTK3 window on XWayland with solid banner colours: after `window.set_geometry/move/resize` the banner's bounding box in the screenshot equals the reported rectangle; maximize/fullscreen/minimize/focus/close for both kinds; X11 geometry survives compositor reconfigure; announced (`xmessage`) and unannounced (`xeyes`) X11 windows listed once; the host X display is refused |
+| `Audio` | tone from `pw-cat` and from `ffmpeg -f pulse` captured at the right frequency from the workspace sink; host PipeWire graph identical before/after and no `/dev/snd` fd in the workspace; audio off = no socket; a workspace credential may only record into its own dir; routing to a stand-in "host" PipeWire is refused without a terminal and works through the CLI in a real pty |
+| `ChromeProfiles` | throwaway profile inside the workspace dir, native Wayland, no debug flag, no TCP listener, real clicks/typing reach the page, profile deleted with the workspace; agent profile keeps a cookie across restarts and is refused (`E_PROFILE_BUSY`) in a second workspace; forbidden arguments/URLs |
+| `AuthorizedProfile` | fixture "host" profile built by real Chrome; agent can only request; `profile authorize` refuses without a terminal, with a wrong confirmation, while the host profile is locked (live and stale lock, lock untouched, original byte-identical); authorised copy has no `Login Data`, is 0700, the session works in the workspace; revoke and workspace destroy remove it; the generic grant flow (request, denial, approval, expiry, revocation, wildcard refusal) with the CLI in real pseudo-terminals |
+| `FirefoxProfiles`, `SnapFirefox` | Firefox 160 vendor tarball: agent profile + cookie persistence; the Ubuntu snap is detected and refused |
+| `Matrix` | see compatibility.md |

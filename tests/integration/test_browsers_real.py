@@ -75,10 +75,18 @@ def run_cli_in_pty(args, answers=(), timeout=30):
             if not chunk:
                 break
             out += chunk
-            if (b"? [y/N]" in chunk or b"anything else cancels:" in chunk) and answers:
+            if (b"? [y/N]" in chunk or b"cancels)" in chunk or b"cancels:" in chunk) and answers:
                 os.write(fd, (answers.pop(0) + "\n").encode())
     try:
-        _, status = os.waitpid(pid, 0)
+        end2 = time.monotonic() + 3
+        done, status = os.waitpid(pid, os.WNOHANG)
+        while done == 0 and time.monotonic() < end2:
+            time.sleep(0.1)
+            done, status = os.waitpid(pid, os.WNOHANG)
+        if done == 0:                      # still waiting for input: the prompt was not recognised
+            os.kill(pid, signal.SIGKILL)
+            _, status = os.waitpid(pid, 0)
+            out += b"\n[test: killed, prompt not answered]"
     except ChildProcessError:
         status = 0
     return os.waitstatus_to_exitcode(status), out.decode(errors="replace")

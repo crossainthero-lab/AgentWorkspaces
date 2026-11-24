@@ -17,7 +17,7 @@ Three small processes in the workspace's systemd slice, all inside its private r
 They run with `DBUS_SYSTEM_BUS_ADDRESS` pointing at nothing (no rtkit, no logind) and a private `HOME`/XDG
 tree under `<workspace>/audio`. Measured idle cost: about 9.5 MiB PSS for the three processes together
 (pipewire 2.9, wireplumber 4.3, pipewire-pulse 2.3 MiB) and no measurable CPU; creating a workspace with
-audio takes about 0.4 s longer to be ready.
+audio was ready in 0.42 s in one `stop`+`start` measurement (compositor, bus and audio daemons together).
 
 Apps find the server through the private `XDG_RUNTIME_DIR`. The launcher also sets `PULSE_SERVER` to the
 workspace's own socket (or to a dead path when audio is off) and `PULSE_CLIENTCONFIG` with
