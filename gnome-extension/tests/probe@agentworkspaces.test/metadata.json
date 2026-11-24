@@ -1,0 +1,1 @@
+{"uuid": "probe@agentworkspaces.test", "name": "AgentWorkspaces test probe", "description": "Test-only: run JS and take screenshots over the PRIVATE session bus of an isolated shell. Never install on a real desktop.", "shell-version": ["50"]}
