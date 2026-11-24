@@ -48,6 +48,31 @@ layout_rows === -1`). A horizontal layout therefore cannot produce a vertical sl
 | V-Shell (disabled) | Rewrites `org.gnome.desktop.wm.keybindings` (adds Super+PageUp/Down to up/down or left/right), calls `override_workspace_layout` (vertical or horizontal), replaces `Meta.Workspace.prototype.get_neighbor`, ships its own switch animation. With it on, Ctrl+Alt+Up/Down already mean "workspace above/below". |
 | one further enabled extension | enabled in the live session but not present in `~/.local/share/gnome-shell/extensions`; not inspected. |
 
+### What was checked about Desktop Cube (the user's session has it enabled)
+
+Read from its source (`desktop-cube@schneegans.github.com` v35) and checked in the isolated shell:
+
+* It registers **no keybindings** and uses the vertical axis only for mouse-drag pitch. Ctrl+Alt+Up/Down are free of it.
+* Its hook is a monkey patch of `WorkspaceAnimationController.prototype._prepareWorkspaceSwitch` and `_finishWorkspaceSwitch`
+  (it re-parents a skybox and connects `notify::progress` on every monitor group between the two). Anything that
+  starts only one of the two would leave the cube half-set-up.
+* The extension's own switch never calls either: its instance override of `animateSwitch` returns before
+  `_prepareWorkspaceSwitch` runs, so the cube is neither entered nor left half-way. Verified by wrapping the patched
+  method in the shell and counting calls: 0 after Ctrl+Alt+Down + Ctrl+Alt+Up, 1 after Ctrl+Alt+Right, 2 after
+  Ctrl+Alt+Left; afterwards no switch is in flight (`_switchData` empty) and the window group is untransformed
+  (`translation_y = 0`, `rotation_angle_y = 0`, opacity 255). The skybox option was off in the developer's settings, so
+  the skybox re-parenting itself was **not** exercised.
+* Visible result (frames in `gnome-extension/media/cube-left-right-frames.png` and `slide-enter-frames.png`):
+  Ctrl+Alt+Left/Right turn the cube; Ctrl+Alt+Down/Up slide vertically.
+
+### V-Shell (vertical-workspaces)
+
+Enabled privately next to this extension with the developer's own V-Shell settings (these keep a horizontal workspace
+layout): `layout_rows` stays 1, Ctrl+Alt+Down enters, Ctrl+Alt+Up returns, Ctrl+Alt+Right navigates, no JS errors. With a
+V-Shell *vertical* layout the code passes the keys to the neighbour switch instead (so V-Shell keeps Ctrl+Alt+Down for
+"workspace below"); that branch was **not** run against a real vertical V-Shell layout. Change `enter-shortcut` in the
+preferences if that is your setup.
+
 Consequences for the design:
 
 * No default accelerator conflict with Tiling Shell or desktop-cube.
@@ -66,6 +91,9 @@ Consequences for the design:
   switch with GNOME's animation suppressed, then ease the clones out and the live `window_group` in along Y over
   250 ms (GNOME's own duration), `EASE_OUT_CUBIC`. Skipped if animations are off or the Overview is open. The top
   bar and dash stay in place, like in a normal workspace change.
+* **From the Activities overview**: Ctrl+Alt+Down and Ctrl+Alt+Up are also registered for the overview. The extension
+  closes the overview first (waits for its `hidden` signal, 0.9 s fallback), then travels with the vertical slide; it
+  never leaves the shell in an overview of the other workspace.
 * **Keys**: the extension registers its own `enter-shortcut` / `return-shortcut` (own schema, editable in prefs).
   `Main.wm.setCustomKeybindingHandler` on GNOME's `switch-to-workspace-up/down` was considered (no settings
   change, nothing to restore) and rejected: it replaces the handler for *all* accelerators of that action, and it
@@ -77,6 +105,14 @@ Consequences for the design:
   after a crash). Conflicts with any other binding (other `org.gnome.*` keys, schemas of the other enabled
   extensions) are listed in `conflicts` and shown in prefs; they are never edited.
 * Left/Right, `move-to-workspace-*` and every other key are never touched.
+* **The viewer is the UI.** The extension draws nothing of its own. It asks the daemon for the viewer
+  (`workspace.enter` with `maximized: true` and **no workspace name**: the viewer opens on the workspace you used last,
+  else the most recently active one) using the admin credential, which it reads from
+  `$XDG_RUNTIME_DIR/agent-workspaces/admin.token` (docs/api.md, Authentication). It exports a tiny session-bus
+  interface `dev.agentworkspaces.ShellExtension1` (`Enter()`, `Return()`) that the viewer's "Back to desktop" button
+  calls; the button is shown only while that bus name exists. Without the extension everything else works.
+* The viewer window is marked suspended by GNOME while you are on another workspace; the viewer then stops capturing and
+  painting (docs/viewer.md).
 
 ## 4. Test evidence
 
@@ -108,6 +144,45 @@ Last run, full suite: **29/29 PASS**. `--coexist` (desktop-cube + Tiling Shell l
 | with desktop-cube + Tiling Shell enabled: enter/return still slide vertically (not the cube), Right still switches; a Tiling Shell key set to Ctrl+Alt+Down is reported as `org.gnome.shell.extensions.tilingshell.move-window-up (not modified)` and left unchanged | PASS |
 | changing `enter-shortcut` (the write the prefs window makes) re-binds live: Ctrl+Alt+E enters, GNOME's Ctrl+Alt+Down is restored; setting it back takes it over again | PASS |
 
+### Real-stack run (`gnome-extension/tests/run_real.py`): 53/53 PASS
+
+Same isolation, but **no stand-ins**: the real daemon (with SA3's auth layer), two real workspaces (headless labwc, each
+running the GTK4 test app `tests/apps/gtk_probe.py`, whose own event log is the oracle), and the real viewer started by
+the daemon at the extension's request. The shell loads copies of the developer's own extensions (Desktop Cube, Tiling
+Shell, Blur my Shell, Just Perfection, User Themes, Ubuntu Dock) with their settings read once from `dconf dump` and
+loaded into the private keyfile. Pointer clicks are synthesised inside the private compositor and land on the viewer
+window.
+
+| check | result |
+|---|---|
+| extension ACTIVE (state 1) with the six other extensions ACTIVE; no JS errors in the shell log | PASS |
+| GNOME's Ctrl+Alt+Up/Down removed while enabled, Left/Right untouched; disable restores them exactly | PASS |
+| Ctrl+Alt+Down: daemon starts the real viewer, maximized, on the agent GNOME workspace; it attaches to one workspace | PASS |
+| overview, switching workspace in the viewer: old one detached, new one attached, both keep running | PASS |
+| "You": workspace goes manual, agent calls fail with `E_PAUSED`, my key events reach the app inside the workspace | PASS |
+| a scripted client that hits `E_PAUSED` waits; "Agent" releases and it resumes typing | PASS |
+| "Paused": agent rejected, my keys not forwarded | PASS |
+| approval request: badge, Approve and Deny buttons resolve it; grant request (`browser_profile`): "Allow for 15 minutes" grants it through the viewer as the human channel | PASS |
+| New workspace dialog creates a running workspace and selects it; sidebar collapses; Stop, Start, Close (cancel keeps it, confirm destroys) from the menu | PASS |
+| closing the viewer window detaches (viewers 0), every workspace keeps running, the agent can still drive it; re-enter reopens on the last workspace | PASS |
+| "Back to desktop" button returns to the personal workspace (extension D-Bus `Return`) | PASS |
+| Super opens the Activities overview (real key event); Ctrl+Alt+Down from inside it closes the overview and enters; Ctrl+Alt+Up from inside the overview on the agent workspace returns to the previous personal workspace with the overview closed; Ctrl+Alt+Down from the normal desktop enters again | PASS |
+| the agent taskbar shows its orange accent; only the workspace's own two windows are listed and your desktop lists none of them; clicking its entries focuses the window; an agent `window.action focus` moves the highlight (event driven) | PASS |
+| the orange agent pointer is drawn at the agent's real position (within 12 px of the mapped position), is not in the agent's own screenshot, fades after the agent is idle and is hidden on Paused | PASS |
+| Desktop Cube: patched method called for Left/Right, never for enter/return; nothing left in flight afterwards | PASS |
+
+Demo video of the same stack: `docs/media/demo-enter-leave-agent-workspace.mp4` (36 s, made by
+`gnome-extension/tests/demo_video.py`): personal desktop with two windows; Ctrl+Alt+Right/Left turn the Desktop Cube;
+Super opens the Activities overview; Ctrl+Alt+Down from inside it slides vertically into the viewer; there the agent
+focuses the calculator and the editor, glides its (orange) pointer to buttons, clicks 7 x 6 = and types the result,
+while the taskbar highlight follows the focus; Ctrl+Alt+Up returns; the work has progressed on the second visit; the cube
+still turns. The "agent" in it is a **scripted AgentWorkspaces client** (the same daemon API an MCP agent uses, with the
+workspace credential), **not a model-driven agent**. A real model run through the agent integration
+(`agent-workspaces integrate claude-code run ...`) needs the developer's signed-in agent CLI and network, and an earlier
+signed-out CLI opened browser login tabs on the real screen, so it was deliberately not driven from this harness.
+Frames: `gnome-extension/media/overview-animation-frames.png`, `slide-enter-frames.png`, `slide-return-frames.png`,
+`cube-left-right-frames.png`.
+
 Screenshots (from the isolated shell): `gnome-extension/media/shell-enter.png` (agent workspace with the stand-in
 viewer, workspace indicator showing three workspaces) and `gnome-extension/media/prefs.png` (preferences window; the
 explanatory text is the conflict/replace notice produced by a deliberately added foreign binding).
@@ -126,6 +201,9 @@ explanatory text is the conflict/replace notice produced by a deliberately added
   stops personal windows being put on it.
 * If the original workspace has no windows GNOME removes it while you are away; Return then goes to a
   neighbour. The extension adopts an existing viewer window's workspace only if it is not the one you are on.
+* Not tested: real Wayland/NVIDIA display output (the isolated shell is headless with a virtual monitor), multi-monitor,
+  fractional scaling, a real model-driven agent, and the **first launch cost** beyond the isolated run (0.4 s from key
+  press to viewer window there, warm disk cache).
 * Uses private Shell API (`Main.wm._workspaceAnimation`, `Main.extensionManager`); GNOME 50 only. If those
   disappear the slide is skipped (GNOME's own switch runs) and the log says so.
 * The slide moves everything in `window_group` on every monitor (workspaces span monitors here).

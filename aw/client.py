@@ -201,6 +201,32 @@ class Client:
                 uniq.append(w)
         return {"workspaces": uniq}
 
+    def subscribe(self, workspaces=None, types=None):
+        """Turn this connection into an event stream and wait for the daemon's acknowledgement (so nothing that
+        happens afterwards can be missed); read with next_event()."""
+        self.timeout = None
+        self.connect()
+        self.sock.settimeout(None)
+        ws0 = workspaces[0] if workspaces else None
+        creds = self.credentials(ws0)
+        if not creds:
+            raise self._no_credentials(ws0)
+        rid = self._send("events.subscribe", {"workspaces": workspaces or [], "types": types or []}, creds[0].token)
+        while True:
+            msg = json.loads(self._readline())
+            if msg.get("id") == rid:
+                if not msg.get("ok", True):
+                    e = msg.get("error") or {}
+                    raise ApiError(e.get("code", "E_UNKNOWN"), e.get("message", ""))
+                return
+
+    def next_event(self) -> Dict[str, Any]:
+        """Block until the next event arrives (ApiError E_DISCONNECTED when the daemon goes away)."""
+        while True:
+            msg = json.loads(self._readline())
+            if "event" in msg:
+                return msg
+
     def events(self, workspaces=None, types=None) -> Iterator[Dict[str, Any]]:
         self.timeout = None
         self.connect()

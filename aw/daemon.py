@@ -508,7 +508,8 @@ class Daemon:
             w, h, rgb = _downscale(w, h, rgb, max_w)
         from .session import encode_png
         png = encode_png(w, h, rgb)
-        self.mgr.note_action(ws, "screenshot", self._actor(p, pr))
+        if not p.get("quiet"):   # quiet: a viewer thumbnail, not an action (keeps "activity" honest)
+            self.mgr.note_action(ws, "screenshot", self._actor(p, pr))
         out: Dict[str, Any] = {"width": w, "height": h, "bytes": len(png), "format": "png",
                                "capture_ms": round((time.perf_counter() - t0) * 1000, 1),
                                "workspace": ws.name, "workspace_id": ws.id}
@@ -555,30 +556,36 @@ class Daemon:
         elif method == "clipboard.set":
             s.set_clipboard(str(p["text"]))
             kind = "clipboard"
-        self.mgr.note_action(ws, kind, actor)
+        self.mgr.note_action(ws, kind, actor, (s.pos[0], s.pos[1]) if kind in ("move", "click", "drag", "scroll") else None)
         res = {"ok": True, "pointer": {"x": s.pos[0], "y": s.pos[1]}}
         if method.startswith("window."):
             res["window"] = wres
         return res
 
     def _enter(self, p):
-        ws = self._ws(p)
-        if ws.state != "running":
-            raise ManagerError("E_NOT_RUNNING", f"workspace {ws.name!r} is {ws.state}")
-        if p.get("takeover"):
-            self.mgr.set_input_mode(ws.id, "manual", "entered by user")
-        self.bus.emit("workspace.enter_requested", {"id": ws.id, "name": ws.name})
+        ws = self._ws(p) if p.get("workspace") else None     # no workspace: the viewer opens where you left off
+        if ws is not None:
+            if ws.state != "running":
+                raise ManagerError("E_NOT_RUNNING", f"workspace {ws.name!r} is {ws.state}")
+            if p.get("takeover"):
+                self.mgr.set_input_mode(ws.id, "manual", "entered by user")
+            self.bus.emit("workspace.enter_requested", {"id": ws.id, "name": ws.name})
         env = p.get("display_env") or {}
         if not env.get("WAYLAND_DISPLAY") and not os.environ.get("WAYLAND_DISPLAY"):
             return {"launched": False, "reason": "no host display known; run `agent-workspaces enter` "
                     "from a session terminal or pass display_env"}
         e = {k: v for k, v in os.environ.items()}
+        if env.get("XDG_RUNTIME_DIR") and env["XDG_RUNTIME_DIR"] != os.environ.get("XDG_RUNTIME_DIR"):
+            # the desktop that asked lives in another runtime dir (another session): never hand it this
+            # daemon's session bus
+            e.pop("DBUS_SESSION_BUS_ADDRESS", None)
         e.update({k: v for k, v in env.items() if k in ("WAYLAND_DISPLAY", "DISPLAY", "XDG_RUNTIME_DIR",
                                                        "DBUS_SESSION_BUS_ADDRESS")})
-        viewer = [sys.executable, "-m", "aw.viewer", ws.name]
+        viewer = [sys.executable, "-m", "aw.viewer"] + ([ws.name] if ws else []) + \
+                 (["--maximized"] if p.get("maximized") else [])
         proc = subprocess.Popen(viewer, env=e, cwd=os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
                                 stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
-                                stderr=open(os.path.join(ws.dir, "viewer.log"), "ab"), start_new_session=True)
+                                stderr=open(os.path.join(paths.base_dir(), "viewer.log"), "ab"), start_new_session=True)
         return {"launched": True, "pid": proc.pid}
 
 
@@ -652,6 +659,7 @@ class Handler(socketserver.StreamRequestHandler):
                     if req.get("token") is not None:
                         # per-request credential (stateless clients); authenticates this request only
                         st = dict(state)
+                        st["viewer_of"] = state.setdefault("viewer_of", [])   # shared: attach counts live per connection
                         try:
                             st["principal"] = self.daemon.creds.authenticate(req["token"], pid)
                         except AuthError as e:

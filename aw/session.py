@@ -83,6 +83,7 @@ class WorkspaceSession:
         # raises if the socket is missing or (with expect_pid) served by another process: fail closed
         self.conn = wl.Connection(socket_path, expect_pid=expect_pid)
         self.epoch = time.monotonic_ns()         # distinguishes this connection's toplevel ids from a later one's
+        self.on_windows = None                   # called (from the session thread) when a toplevel appears, changes or closes
         self.socket_path = socket_path
         self.lock = threading.RLock()
         self.keymap = xkb.Keymap(layout)
@@ -539,13 +540,21 @@ class WorkspaceSession:
             def st(arr):
                 info["state"] = list(struct.unpack(f"<{len(arr) // 4}I", arr))
             h.on("state", st)
-            h.on("done", lambda: info.__setitem__("ready", True))
-            h.on("closed", lambda: info.update(closed=True))
+            h.on("done", lambda: (info.__setitem__("ready", True), self._windows_changed()))
+            h.on("closed", lambda: (info.update(closed=True), self._windows_changed()))
             h.on("output_enter", lambda o: None)
             h.on("output_leave", lambda o: None)
             h.on("parent", lambda p: None)
         self.toplevel_mgr.on("toplevel", on_toplevel)
         self.toplevel_mgr.on("finished", lambda: None)
+
+    def _windows_changed(self):
+        cb = self.on_windows
+        if cb:
+            try:
+                cb()
+            except Exception:
+                pass
 
     def toplevels_snapshot(self) -> List[Dict[str, Any]]:
         """Windows as last reported by the compositor (no round trip; safe to call often)."""

@@ -77,7 +77,15 @@ The test harness (`tests/harness.py`) provides **HostSim**, the stand-in desktop
 * A hostile same-user process (see [security-model.md](security-model.md): not defended against).
 * Second test machine: unreachable when attempted (SSH connection timeout), so no run there.
 
-## GNOME extension tests
+## Isolated GNOME Shell, real stack
+
+`python3 gnome-extension/tests/run_real.py [--plain] [--media DIR]`: 53 checks with the real daemon, real workspaces, the real
+viewer and the developer's extension set in a private headless GNOME Shell; `demo_video.py` records the demo video;
+`measure_gs.py` prints the numbers in [measurements.md](measurements.md). Details: [gnome-extension.md](gnome-extension.md).
+They use the user's systemd manager only to create workspace scopes (as the integration tests do), nothing on the real
+screen, no write to the real dconf (the user's extension settings are only *read* with `dconf dump`).
+
+## GNOME extension tests (earlier, with stand-ins)
 
 `gnome-extension/tests/run_isolated.py`: an isolated headless GNOME Shell with a private session bus and a private stand-in system bus (so it cannot reach the real GDM/logind). Results are in [gnome-extension.md](gnome-extension.md): 29/29 main checks, 7/7 co-existence with copies of desktop-cube and Tiling Shell, 5/5 prefs checks, with stand-in daemon and viewer rather than the real ones.
 

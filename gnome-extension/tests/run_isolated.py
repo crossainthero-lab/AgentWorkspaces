@@ -211,7 +211,7 @@ class FakeDaemon(threading.Thread):
                     env = {"PATH": "/usr/bin:/bin", "HOME": HOME, "XDG_RUNTIME_DIR": RT, "WAYLAND_DISPLAY": DISPLAY_NAME,
                            "GDK_BACKEND": "wayland", "NO_AT_BRIDGE": "1", "GSETTINGS_BACKEND": "memory"}
                     assert os.path.exists(f"{RT}/{DISPLAY_NAME}"), "isolated shell socket missing; refusing to launch"
-                    p = subprocess.Popen(["/usr/bin/python3", f"{HERE}/standin_viewer.py", req["params"]["workspace"]],
+                    p = subprocess.Popen(["/usr/bin/python3", f"{HERE}/standin_viewer.py", req["params"].get("workspace", "demo")],
                                          env=env, stdin=subprocess.DEVNULL, stdout=open(f"{BASE}/viewer.log", "ab"),
                                          stderr=subprocess.STDOUT, start_new_session=True)
                     PROCS.append(("standin-viewer", p))

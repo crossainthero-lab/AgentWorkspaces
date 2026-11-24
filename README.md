@@ -16,7 +16,7 @@ Each workspace is a separate headless Wayland compositor (labwc/wlroots) running
 |---|---|
 | `agent-workspaces` CLI + daemon | create, rename, assign to an agent, list, launch apps, screenshot, windows, click/move/type/key/scroll, display info, window actions, pause/resume agent input, enter, destroy |
 | MCP server (stdio) | screenshot, windows, launch app, mouse, keyboard, scroll, window actions, display info, status. Bound to the workspace assigned to the calling agent |
-| Viewer window | a normal GTK4 window on your desktop showing a workspace; "Take over" pauses the agent and forwards your mouse and keyboard. No GNOME extension needed |
+| Viewer window | one GTK4 window for all workspaces: sidebar, live overview, Agent / Paused / You control ("You" forwards your mouse and keyboard), approvals and grants, create / stop / close. No GNOME extension needed ([docs/viewer.md](docs/viewer.md)) |
 | Optional GNOME extension | Ctrl+Alt+Down enters the AgentWorkspaces workspace, Ctrl+Alt+Up returns. Separate, opt-in, restores your previous shortcuts. See [gnome-extension/](gnome-extension/README.md) |
 | Local API v1 | JSON lines over a unix socket, with events. Spec: [docs/api.md](docs/api.md) |
 | Browsers, windows, audio | `launch-browser` (private throwaway/agent profiles; a copy of your signed-in profile only after you approve it in a terminal), one window list for Wayland and XWayland windows with move/resize, a private audio sink per workspace you can record: [browsers](docs/browsers.md), [windows](docs/windows.md), [audio](docs/audio.md), [compatibility](docs/compatibility.md) |
@@ -41,7 +41,7 @@ Remove everything with `./uninstall.sh` (`--stop-workspaces`, `--remove-integrat
 
 ## Documentation
 
-[architecture](docs/architecture.md) · [isolation model](docs/isolation-model.md) · [security model](docs/security-model.md) · [API](docs/api.md) · [compatibility](docs/compatibility.md) · [browsers](docs/browsers.md) · [windows](docs/windows.md) · [audio](docs/audio.md) · [agent integrations](docs/integrations.md) · [GNOME extension](docs/gnome-extension.md) · [measurements](docs/measurements.md) · [testing](docs/testing.md) · [troubleshooting](docs/troubleshooting.md) · [limitations](docs/limitations.md) · [compatibility matrix](docs/compatibility-matrix.md)
+[architecture](docs/architecture.md) · [isolation model](docs/isolation-model.md) · [security model](docs/security-model.md) · [API](docs/api.md) · [compatibility](docs/compatibility.md) · [browsers](docs/browsers.md) · [windows](docs/windows.md) · [audio](docs/audio.md) · [agent integrations](docs/integrations.md) · [viewer](docs/viewer.md) · [GNOME extension](docs/gnome-extension.md) · [measurements](docs/measurements.md) · [testing](docs/testing.md) · [troubleshooting](docs/troubleshooting.md) · [limitations](docs/limitations.md) · [compatibility matrix](docs/compatibility-matrix.md)
 
 ## License
 

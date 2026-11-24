@@ -56,7 +56,41 @@ Method: the viewer runs inside the **stand-in desktop** (a headless labwc with t
 | agent pointer move to changed pixels in the viewer window (read from the stand-in desktop) | median 17.0 ms, p95 33.3 ms, min 16.5, max 33.5 |
 | viewer CPU while the workspace pointer moves about 60 times a second for 5 s | 37.9 % of one core, 56 MiB PSS |
 
-The 38 % figure is software rendering in the stand-in desktop plus the Python frame copy (a full 1280x720 frame per update); on a GPU-composited GNOME session it is expected to be lower, but that was **not measured**, because no test may open a window on your real desktop. The viewer's input path (your pointer/keys to the workspace) was verified functionally, but its latency was not measured.
+The 38 % figure (old viewer, stand-in desktop) is software rendering in the stand-in desktop plus the Python frame copy (a full 1280x720 frame per update); on a GPU-composited GNOME session it is expected to be lower, but that was **not measured**, because no test may open a window on your real desktop. The viewer's input path (your pointer/keys to the workspace) was verified functionally, but its latency was not measured.
+
+## Viewer inside an isolated GNOME Shell (new viewer)
+
+Method: `gnome-extension/tests/measure_gs.py`. One headless GNOME Shell 50.1 (virtual 1600x900 monitor, private buses,
+the developer's extension set loaded: Desktop Cube, Tiling Shell, Blur my Shell, Just Perfection, User Themes, Ubuntu
+Dock, plus this extension), the real daemon, one real workspace (1280x720, `gpu=auto`) running the GTK4 test app, the real
+viewer maximized on its own GNOME workspace. Same workstation as above (RTX 4060 Ti, driver 595.99.02). CPU is the delta
+of `utime+stime` of the exact PID over the interval, in percent of one core. One run per row (two runs of the whole script
+were made; the second is shown, the first differed by less than a few points). This is a **headless virtual monitor**: no
+physical display, no scanout, so "real desktop" figures could differ.
+
+| | viewer | isolated gnome-shell |
+|---|---|---|
+| idle, 10 s | 0.3 % | 0.7 % |
+| agent moves the pointer ~65 times a second for 8 s, viewer visible (30 fps cap, orange marker following) | 37.7 % | 4.7 % |
+| same motion, viewer on another GNOME workspace (suspended) | 1.5 % | 2.5 % |
+| PSS idle / busy | 117 / 128 MiB | 269 / 266 MiB |
+
+The same busy run before the 30 fps cap and the suspend handling measured 63.5 % for the viewer. The workspace
+(compositor + app + private bus, systemd slice) was at 0.13 % CPU and 218 MiB while idle.
+
+Latency, agent action to viewer: time from just before the agent's `input.move` API call until the viewer main loop
+hands the first newer frame to GTK (30 moves 450 ms apart, monotonic clock shared between processes): median 18.3 ms, p95
+20.7 ms, max 20.8 ms. Since the viewer captures without the workspace cursor, that frame is the app's repaint (the test
+app redraws a label on pointer motion), one 60 Hz compositor frame after the move; an earlier build that captured the
+cursor measured 1.8 to 3 ms for the cursor-only frame. The orange marker does not wait for a frame: it follows the
+daemon's `workspace.activity` event (its own latency was not measured). Excluded: GTK's render, the shell's composite and
+scanout (at most one 60 Hz frame on the virtual monitor). Input in the other direction (your keys to the workspace) was
+verified functionally; its latency was not measured.
+
+Hardware acceleration, verified in this environment only: the viewer's GTK renderer is `VulkanRenderer`; the maps of the
+viewer and of the isolated gnome-shell contain the NVIDIA GL/EGL libraries, and `nvidia-smi pmon` lists both processes.
+The workspace compositor is accelerated as in the GPU section below. Whether a real GNOME session on a physical monitor
+uses the same path was **not** tested.
 
 ## GPU
 
