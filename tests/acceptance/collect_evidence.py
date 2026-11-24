@@ -46,8 +46,8 @@ def main(pairs):
         if any("/" in (t or "") and "Text Editor" in (t or "") for t in (r.get("workspace_state") or {}).get("windows", [])):
             mask_title_path(os.path.join(d, "final.png"), os.path.join(dst, "final-screenshot.png"))
         lines = open(os.path.join(d, "agent.stdout"), errors="replace").read().splitlines()
-        kind = "claude" if r["agent"] == "claude-code" else "codex"
-        out, usage = (transcript.claude if kind == "claude" else transcript.codex)(lines)
+        kind = {"claude-code": "claude", "codex": "codex", "antigravity": "antigravity", "hermes": "hermes"}[r["agent"]]
+        out, usage = getattr(transcript, kind)(lines)
         with open(os.path.join(dst, "transcript.txt"), "w") as f:
             f.write(f"prompt: {r['prompt']}\n\n" + "\n".join(out) + "\n\nUSAGE " + json.dumps(usage) + "\n")
         ws = r.get("workspace_state") or {}

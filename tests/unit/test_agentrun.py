@@ -56,7 +56,7 @@ class Plans(unittest.TestCase):
 
     def test_unknown_agent_not_implemented(self):
         with self.assertRaises(NotImplementedError):
-            agentrun.plan("hermes", "x")
+            agentrun.plan("other", "x")
 
 
 class Apps(unittest.TestCase):

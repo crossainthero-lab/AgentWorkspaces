@@ -75,6 +75,51 @@ def list_command(agent: str) -> List[str]:
 SKILL_ROOT = {"claude-code": ".claude/skills", "codex": ".codex/skills"}
 
 
+BLOCK_BEGIN = "<!-- agent-workspaces:begin (managed by `agent-workspaces integrate`; removed by uninstall) -->"
+BLOCK_END = "<!-- agent-workspaces:end -->"
+# Global memory/rules files, for agents that read one (Antigravity: ~/.gemini/GEMINI.md, see its changelog).
+RULES_FILE = {"antigravity": ".gemini/GEMINI.md"}
+
+
+def managed_block(text: str) -> str:
+    return f"{BLOCK_BEGIN}\n{text.strip()}\n{BLOCK_END}\n"
+
+
+def rules_path(agent: str, home: Optional[str] = None) -> Optional[str]:
+    rel = RULES_FILE.get(agent)
+    return os.path.join(home or os.path.expanduser("~"), rel) if rel else None
+
+
+def _install_rules(agent: str, dry: bool) -> Optional[str]:
+    rp = rules_path(agent)
+    if not rp:
+        return None
+    cur = open(rp).read() if os.path.exists(rp) else ""
+    if BLOCK_BEGIN in cur:
+        return f"{rp} already has the managed block; left untouched"
+    if dry:
+        return f"would append a managed block to {rp}"
+    os.makedirs(os.path.dirname(rp), exist_ok=True)
+    with open(rp, "w") as f:
+        f.write(cur + ("\n" if cur and not cur.endswith("\n") else "") + managed_block(INSTRUCTIONS))
+    return f"appended a managed block to {rp} (removed again by 'uninstall'; the rest of the file is untouched)"
+
+
+def _remove_rules(agent: str) -> None:
+    rp = rules_path(agent)
+    if not rp or not os.path.exists(rp):
+        return
+    cur = open(rp).read()
+    a, b = cur.find(BLOCK_BEGIN), cur.find(BLOCK_END)
+    if a < 0 or b < 0:
+        return
+    rest = (cur[:a] + cur[b + len(BLOCK_END):].lstrip("\n")).rstrip("\n")
+    if rest.strip():
+        open(rp, "w").write(rest + "\n")
+    else:
+        os.remove(rp)
+
+
 def skill_path(agent: str = "claude-code", home: Optional[str] = None) -> Optional[str]:
     rel = SKILL_ROOT.get(agent)
     return os.path.join(home or os.path.expanduser("~"), rel, NAME, "SKILL.md") if rel else None
@@ -124,6 +169,9 @@ def run(args) -> int:
         if dry:
             print("would run: " + " ".join(cmd))
             print(_write_skill(agent, True) or "no skill for this agent")
+            rn = _install_rules(agent, True)
+            if rn:
+                print(rn)
             return 0
         # hermes asks "Enable all tools? [Y/n/select]" after probing the server: answer yes for all of them
         r = subprocess.run(cmd, capture_output=True, text=True, timeout=90,
@@ -134,6 +182,9 @@ def run(args) -> int:
         print(f"{agent}: registered MCP server '{NAME}' (AW_AGENT_KIND={AGENTS[agent]['kind']})")
         note = _write_skill(agent, False)
         print(note or "this agent has no skill folder support here; the MCP server sends the instructions itself")
+        rn = _install_rules(agent, False)
+        if rn:
+            print(rn)
         print("Nothing else to do: on its first graphical request the agent gets (or re-attaches to) its own "
               f"workspace named {AGENTS[agent]['kind']}-<project>. Undo with: agent-workspaces integrate {agent} uninstall")
         return 0
@@ -145,6 +196,7 @@ def run(args) -> int:
                            input="y\n" if agent == "hermes" else "")
         if r.returncode != 0:
             print((r.stderr or r.stdout).strip(), file=sys.stderr)
+        _remove_rules(agent)
         sp = skill_path(agent)
         if sp and os.path.exists(sp) and open(sp).read() == SKILL_MD:   # only remove what we wrote
             os.remove(sp)

@@ -15,8 +15,8 @@ def main(all_runs=False):
         r = json.load(open(f))
         d = r["run_dir"]
         lines = open(os.path.join(d, "agent.stdout"), errors="replace").read().splitlines()
-        kind = "claude" if r["agent"] == "claude-code" else "codex"
-        _, usage = (transcript.claude if kind == "claude" else transcript.codex)(lines)
+        kind = {"claude-code": "claude", "codex": "codex", "antigravity": "antigravity", "hermes": "hermes"}[r["agent"]]
+        _, usage = getattr(transcript, kind)(lines)
         ws = r.get("workspace_state") or {}
         u = ws.get("usage") or {}
         rows.append({"dir": os.path.basename(d), "agent": r["agent"], "task": r.get("task", "?"), "s": r["seconds"],

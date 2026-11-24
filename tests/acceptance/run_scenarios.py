@@ -35,7 +35,7 @@ def main(specs):
                 noinst = item.endswith(":noinstr")
                 prompt = harness.PROMPTS[task].format(dir=fm)
                 r = harness.run_agent(agent, prompt, common.BASE, task, os.path.join(out, f"{agent}-{task}-{int(time.time())}"),
-                                      timeout=240, instructions=not noinst, extra_env={"AW_APP_DENY": "agentdock,waydroid,steam"})
+                                      timeout=float(os.environ.get("AW_ACC_TIMEOUT", "240")), instructions=not noinst, extra_env={"AW_APP_DENY": "agentdock,waydroid,steam"})
                 r["task"] = task
                 r["parallel_with"] = [g for g in group if g != item]
                 r["home_files"] = harness.home_files(r["home"]) if r.get("home") else None

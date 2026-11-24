@@ -80,10 +80,65 @@ def codex(lines):
     return out, usage
 
 
+def antigravity(lines):
+    out, usage = [], None
+    for l in lines:
+        try:
+            m = json.loads(l)
+        except ValueError:
+            continue
+        ev = m.get("event")
+        if ev == "init":
+            ini = m.get("init", {})
+            out.append(f"[init] model={ini.get('model')} tools={len(ini.get('tools', []))} (incl. its own shell and browser tools; "
+                       "only mcp(agent-workspaces/*) is allowed in headless mode)")
+        elif ev == "step_update":
+            s = m["step_update"]
+            ti = s.get("tool_info") or {}
+            if s["state"] == "DONE" and s["step_type"] == "tool":
+                p = ti.get("parameters") or {}
+                if s.get("tool_name") == "call_mcp_tool":
+                    out.append(f"  call {p.get('ToolName')} {clean(json.dumps(p.get('Arguments')), 120)} -> {clean(ti.get('output') or '', 110)}")
+                elif s.get("tool_name") != "update_steps":
+                    out.append(f"  [{s.get('tool_name')}] {clean(json.dumps(p), 140)} -> {clean(ti.get('output') or 'denied/none', 80)}")
+        elif ev == "result":
+            r = m.get("result", {})
+            if r.get("response"):
+                out.append("agent: " + clean(r["response"]))
+            usage = {"turns": r.get("num_turns"), "duration_s": r.get("duration_seconds"), **(r.get("usage") or {})}
+    return out, usage
+
+
+def hermes(lines):
+    out, usage = [], None
+    for l in lines:
+        try:
+            m = json.loads(l)
+        except ValueError:
+            continue
+        t = m.get("type")
+        if t == "system":
+            out.append(f"[init] model={m.get('model')}")
+        elif t == "tool_use":
+            out.append(f"  call {m['name'].replace('mcp__agent_workspaces__', '')} {clean(json.dumps(m.get('input')), 130)}")
+        elif t == "tool_result":
+            o = m.get("output") or ""
+            try:
+                o = json.loads(o).get("result", o) if o.startswith("{") else o
+            except (ValueError, AttributeError):
+                pass
+            img = "<image as file path: MEDIA tag>" if "MEDIA:" in str(o) else ""
+            o = re.sub(r"MEDIA:\S+", "", str(o))
+            out.append(f"  -> {img} {clean(o, 110)}")
+        elif t == "result":
+            out.append("agent: " + clean(m.get("text", ""), 400))
+    return out, usage
+
+
 if __name__ == "__main__":
     d = sys.argv[1]
     lines = open(os.path.join(d, "agent.stdout"), errors="replace").read().splitlines()
-    kind = sys.argv[2] if len(sys.argv) > 2 else ("claude" if "claude" in d else "codex")
-    out, usage = (claude if kind == "claude" else codex)(lines)
+    kind = sys.argv[2] if len(sys.argv) > 2 else ("claude" if "claude" in d else "antigravity" if "antigravity" in d else "hermes" if "hermes" in d else "codex")
+    out, usage = {"claude": claude, "codex": codex, "antigravity": antigravity, "hermes": hermes}[kind](lines)
     print("\n".join(out))
     print("USAGE", json.dumps(usage))

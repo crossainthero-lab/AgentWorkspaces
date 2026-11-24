@@ -68,6 +68,7 @@ def run_agent(agent: str, prompt: str, base: str, project: str, run_dir: str, mo
     name = ws_name or f"{agentrun.ig.AGENTS[agent]['kind']}-{project}"
 
     env_names: set = set()
+    dbus_vals: set = set()
 
     def audit_env():
         """Names of environment variables seen in every process of the agent's process group."""
@@ -80,7 +81,10 @@ def run_agent(agent: str, prompt: str, base: str, project: str, run_dir: str, mo
                 with open(f"/proc/{d}/environ", "rb") as f:
                     for kv in f.read().split(b"\0"):
                         if b"=" in kv:
-                            env_names.add(kv.split(b"=", 1)[0].decode(errors="replace"))
+                            nm = kv.split(b"=", 1)[0].decode(errors="replace")
+                            env_names.add(nm)
+                            if nm == "DBUS_SESSION_BUS_ADDRESS":
+                                dbus_vals.add(kv.split(b"=", 1)[1].decode(errors="replace"))
             except (OSError, ProcessLookupError):
                 continue
 
@@ -144,7 +148,12 @@ def run_agent(agent: str, prompt: str, base: str, project: str, run_dir: str, mo
                            "exit_code": proc.returncode,
                            "agent_cpu_seconds_children": round((cpu1.children_user + cpu1.children_system) - (cpu0.children_user + cpu0.children_system), 2), "timed_out": timed_out, "seconds": round(dur, 1),
                            "workspace": name, "run_dir": run_dir, "shots": shots,
-                           "agent_env_host_display_vars": sorted(env_names & HOST_VARS),
+                           # DBUS_SESSION_BUS_ADDRESS only counts when it is the host's own bus (antigravity gets the
+                           # address of a filtering proxy that exposes org.freedesktop.secrets only)
+                           "agent_env_host_display_vars": sorted(
+                               (env_names & HOST_VARS) - ({"DBUS_SESSION_BUS_ADDRESS"} if not any(
+                                   v.endswith(f"/run/user/{os.getuid()}/bus") for v in dbus_vals) else set())),
+                           "agent_dbus_addresses": sorted(v.replace(os.path.expanduser("~"), "~") for v in dbus_vals),
                            "agent_env_names_seen": len(env_names),
                            "agent_peak_pss_mib_incl_mcp_server": peak["pss_mib"], "agent_peak_processes": peak["procs"]}
     try:
@@ -157,6 +166,7 @@ def run_agent(agent: str, prompt: str, base: str, project: str, run_dir: str, mo
         res["home"] = os.path.join(base, w["id"], "home")
     except Exception as e:
         res["workspace_error"] = str(e)
+    res["dbus_proxy_calls"] = plan.keyring_summary()
     plan.close()
     out_f.close()
     err_f.close()

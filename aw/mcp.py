@@ -39,7 +39,10 @@ INSTRUCTIONS = (
     "xdotool, ydotool, wtype, grim, gnome-screenshot, xdg-open or any other computer-use tool or GUI launch "
     "against the host session, and never change DISPLAY / WAYLAND_DISPLAY. If a call fails with E_PAUSED the "
     "human has taken over the workspace: stop sending input, wait, then poll workspace_status until "
-    "input_mode is 'agent'. If your model cannot see images, use describe_screen instead of screenshot."
+    "input_mode is 'agent'. Never guess what is on the screen: look at the screenshot first. Some clients do not "
+    "show the image inline but store it as a file (a note like 'Resource offloaded to file://...' or the 'also "
+    "saved as' path in the result): then open that image file (read_file / view_file) before you answer. If "
+    "your model cannot see images, use describe_screen instead of screenshot."
 )
 
 WS = {"type": "string", "description": "Workspace name or id. Leave out: your own workspace is used."}
