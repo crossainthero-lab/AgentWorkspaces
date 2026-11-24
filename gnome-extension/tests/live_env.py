@@ -138,6 +138,91 @@ class ScriptedAgent(threading.Thread):
             c.close()
 
 
+class DemoAgent(threading.Thread):
+    """Scripted client for the demo (NOT a model): works in a floating workspace that has a calculator at
+    (60,70) 380x560 and a text editor behind it. It uses the workspace's own credential and the same API an MCP
+    agent uses: focus a window, glide the pointer, click buttons, type. The pointer positions are real
+    `input.move` calls in small steps, so the viewer's orange marker follows real positions."""
+
+    BUTTONS = {"7": (104, 481), "8": (176, 481), "9": (248, 481), "4": (104, 529), "5": (176, 529), "6": (248, 529),
+               "1": (104, 577), "2": (176, 577), "3": (248, 577), "0": (104, 625), "+": (320, 577), "*": (320, 481),
+               "-": (320, 529), "=": (392, 601), "C": (104, 433)}
+    EDITOR_TEXT = (720, 320)
+    JOBS = [("7*6=", "7 x 6 = 42"), ("8+5=", "8 + 5 = 13"), ("9*9=", "9 x 9 = 81"), ("4+3=", "4 + 3 = 7")]
+
+    def __init__(self, ws, glide_s=0.45, step_s=0.04):
+        super().__init__(daemon=True)
+        self.ws, self.glide_s, self.step_s = ws, glide_s, step_s
+        self.stop_flag = False
+        self.pos = (640.0, 360.0)
+        self.clicks = 0
+        self.focus_calls = 0
+        self.errors = []
+        self.paused_rejections = 0
+
+    def _call(self, c, method, **kw):
+        while not self.stop_flag:
+            try:
+                return c.call(method, workspace=self.ws, **kw)
+            except ApiError as e:
+                if e.code == "E_PAUSED":          # the human has control: wait, never fight
+                    self.paused_rejections += 1
+                    time.sleep(0.3)
+                    continue
+                self.errors.append(str(e))
+                raise
+        raise RuntimeError("stopped")
+
+    def glide(self, c, x, y):
+        x0, y0 = self.pos
+        n = max(4, int(self.glide_s / self.step_s))
+        for i in range(1, n + 1):
+            t = i / n
+            t = t * t * (3 - 2 * t)                 # ease in/out
+            self._call(c, "input.move", x=x0 + (x - x0) * t, y=y0 + (y - y0) * t)
+            time.sleep(self.step_s)
+        self.pos = (x, y)
+
+    def click(self, c, x, y):
+        self.glide(c, x, y)
+        time.sleep(0.12)
+        self._call(c, "input.click", x=x, y=y)
+        self.clicks += 1
+        time.sleep(0.3)
+
+    def window_id(self, c, needle):
+        for w in self._call(c, "window.list")["windows"]:
+            if needle in ((w.get("app_id") or "") + (w.get("title") or "")):
+                return w["id"]
+
+    def focus(self, c, needle):
+        wid = self.window_id(c, needle)
+        if wid is not None:
+            self._call(c, "window.action", window=wid, action="focus")
+            self.focus_calls += 1
+            time.sleep(0.4)
+
+    def run(self):
+        c = Client(autostart=False, role="agent", workspace=self.ws)
+        try:
+            for keys, note in (self.JOBS * 50):
+                if self.stop_flag:
+                    return
+                self.focus(c, "Calculator")
+                self.click(c, *self.BUTTONS["C"])
+                for k in keys:
+                    self.click(c, *self.BUTTONS[k])
+                time.sleep(0.8)
+                self.focus(c, "TextEditor")
+                self.click(c, *self.EDITOR_TEXT)
+                self._call(c, "input.type", text=note + "\n")
+                time.sleep(1.0)
+        except (ApiError, RuntimeError, OSError):
+            pass
+        finally:
+            c.close()
+
+
 def wait_for(pred, timeout=10.0, step=0.1):
     end = time.monotonic() + timeout
     while time.monotonic() < end:

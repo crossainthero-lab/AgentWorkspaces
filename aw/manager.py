@@ -540,6 +540,7 @@ echo "$DISPLAY" > {shlex.quote(ws.dir)}/display.tmp && mv {shlex.quote(ws.dir)}/
                                    f"socket (pid {peer}) is not the workspace's compositor "
                                    f"(pid {ws.compositor_pid}); refusing")
             s.aw_ino, s.aw_peer = st.st_ino, peer
+            s.on_windows = lambda ws=ws: self._windows_changed(ws)
             self.sessions[ws.id] = s
             return s
 
@@ -665,12 +666,36 @@ echo "$DISPLAY" > {shlex.quote(ws.dir)}/display.tmp && mv {shlex.quote(ws.dir)}/
             "viewers": ws.viewers, "created_at": ws.created_at,
         }
 
-    def note_action(self, ws: Workspace, kind: str, actor: str):
+    def _windows_changed(self, ws: Workspace):
+        """Event `window.changed`, debounced to one per 150 ms burst, from the compositor's own toplevel events."""
+        t = getattr(self, "_win_timers", None)
+        if t is None:
+            t = self._win_timers = {}
+        with self.lock:
+            if ws.id in t:
+                return
+            def fire(wid=ws.id):
+                with self.lock:
+                    t.pop(wid, None)
+                w = self.workspaces.get(wid)
+                if w is not None:
+                    self.emit("window.changed", {"id": w.id, "name": w.name})
+            tm = threading.Timer(0.15, fire)
+            tm.daemon = True
+            t[ws.id] = tm
+            tm.start()
+
+    def note_action(self, ws: Workspace, kind: str, actor: str, pos=None):
+        """pos: the pointer position (logical output pixels) after a pointer action, so that a viewer can show
+        where THAT actor's pointer is without polling."""
         now = time.time()
         ws.last_action, ws.last_action_at = f"{actor}:{kind}", now
         if kind in ("click", "move", "drag", "type", "key", "scroll"):
             ws.last_input_at = now
-        self.emit("workspace.activity", {"id": ws.id, "name": ws.name, "actor": actor, "action": kind, "at": now})
+        ev = {"id": ws.id, "name": ws.name, "actor": actor, "action": kind, "at": now}
+        if pos is not None:
+            ev["x"], ev["y"] = round(pos[0], 1), round(pos[1], 1)
+        self.emit("workspace.activity", ev)
 
     def shutdown_sessions(self):
         with self.lock:

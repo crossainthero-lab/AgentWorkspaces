@@ -19,7 +19,7 @@ import time
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 from gnome_session import Session, REALISTIC_COPY, REALISTIC_SYSTEM, UUID  # noqa: E402
-from live_env import Daemon, ScriptedAgent, PROBE_APP, wait_for  # noqa: E402
+from live_env import Daemon, DemoAgent, PROBE_APP, wait_for  # noqa: E402
 from record import record, extract_frames  # noqa: E402
 
 CUBE = "desktop-cube@schneegans.github.com"
@@ -68,11 +68,16 @@ def main():
         # ---- a real daemon, a real workspace with a real app, a scripted client
         d = Daemon(s).start()
         c = d.client()
-        c.call("workspace.create", name="research", agent_kind="claude-code", width=1280, height=720)
+        c.call("workspace.create", name="research", agent_kind="claude-code", width=1280, height=720, window_policy="floating")
+        c.call("workspace.launch", workspace="research", argv=["gnome-calculator"])
+        assert wait_for(lambda: c.call("window.list", workspace="research")["windows"], 25), "calculator did not appear"
+        time.sleep(1.5)
         c.call("workspace.launch", workspace="research", argv=["gnome-text-editor"])
-        assert wait_for(lambda: c.call("window.list", workspace="research")["windows"], 25), "editor did not appear"
-        time.sleep(2.0)
-        c.call("input.click", workspace="research", x=640, y=360)
+        assert wait_for(lambda: len(c.call("window.list", workspace="research")["windows"]) >= 2, 25), "editor did not appear"
+        time.sleep(1.5)
+        calc = next(w for w in c.call("window.list", workspace="research")["windows"] if "alculator" in w["title"])
+        c.call("window.set_geometry", workspace="research", window=calc["id"], x=60, y=70, width=380, height=560, agent_kind="human")
+        time.sleep(1.0)
 
         # ---- the personal desktop: ordinary windows
         s.launch(["gnome-text-editor", "--new-window"], "ed.log")
@@ -113,9 +118,9 @@ def main():
 
         # ---- the recording
         marks = {}
-        agent = ScriptedAgent("research", word_delay=0.28, line_pause=1.4)
+        agent = DemoAgent("research")
         with record(s, out, fps=30) as rec:
-            time.sleep(2.0)                                   # personal desktop
+            time.sleep(2.0)                                   # personal desktop, ordinary windows
             marks["cube"] = time.monotonic() - rec._t0
             s.chord("Control_L", "Alt_L", "Right")            # cube
             time.sleep(1.8)
@@ -125,20 +130,29 @@ def main():
             check("Ctrl+Alt+Left moved back to workspace 0 (cube)", s.state()["active"] == 0)
             agent.start()
             time.sleep(0.8)
+            marks["super"] = time.monotonic() - rec._t0
+            s.chord("Super_L")                                # GNOME's Activities overview animates in
+            check("Super opened the Activities overview", bool(wait_for(lambda: s.state()["overview"], 5, 0.1)))
+            time.sleep(2.2)
             marks["down"] = time.monotonic() - rec._t0
-            s.chord("Control_L", "Alt_L", "Down")             # into AgentWorkspaces: vertical slide
-            time.sleep(7.5)                                   # the user watches the agent type
-            n_in = agent.typed
+            s.chord("Control_L", "Alt_L", "Down")             # from inside the overview to the agent workspace
+            check("Ctrl+Alt+Down from the overview reached the viewer with the overview closed",
+                  bool(wait_for(lambda: s.state()["active"] != 0 and not s.state()["overview"], 5, 0.1)))
+            time.sleep(9.5)                                   # the user watches the agent work
+            n_in = (agent.clicks, agent.focus_calls)
             marks["up"] = time.monotonic() - rec._t0
             s.chord("Control_L", "Alt_L", "Up")               # back
             time.sleep(2.5)
-            check("Ctrl+Alt+Up returned to workspace 0", s.state()["active"] == 0)
-            time.sleep(3.0)                                   # agent keeps working while not visible
-            s.chord("Control_L", "Alt_L", "Down")             # second visit
-            time.sleep(4.5)
-            check("the agent kept typing while the workspace was not visible", agent.typed > n_in, f"{n_in} -> {agent.typed} chars")
+            check("Ctrl+Alt+Up returned to workspace 0 with the overview closed", s.state()["active"] == 0 and not s.state()["overview"])
+            time.sleep(2.5)                                   # the agent keeps working while not visible
+            marks["down2"] = time.monotonic() - rec._t0
+            s.chord("Control_L", "Alt_L", "Down")             # second visit, from the normal desktop
+            time.sleep(6.5)
+            check("the agent kept working while the workspace was not visible", agent.clicks > n_in[0],
+                  f"clicks {n_in[0]} -> {agent.clicks}, focus calls {n_in[1]} -> {agent.focus_calls}")
             s.chord("Control_L", "Alt_L", "Up")
             time.sleep(2.0)
+            marks["cube2"] = time.monotonic() - rec._t0
             s.chord("Control_L", "Alt_L", "Right")            # the cube still works afterwards
             time.sleep(1.8)
             s.chord("Control_L", "Alt_L", "Left")
@@ -147,9 +161,10 @@ def main():
         RES["video"] = rec.info
         print("marks (s after recording start; the video starts ~0.4 s earlier):", json.dumps(marks))
         if strips:
-            for name in ("cube", "down", "up"):
+            for name in ("cube", "super", "down", "up"):
                 t0 = marks[name] + 0.4
-                frames = extract_frames(out, os.path.join(strips, name), [round(t0 + 0.06 * i, 3) for i in range(0, 14)])
+                step = 0.1 if name == "super" else 0.06
+                frames = extract_frames(out, os.path.join(strips, name), [round(t0 + step * i, 3) for i in range(0, 14)])
                 subprocess.run(["ffmpeg", "-v", "error", "-y", "-pattern_type", "glob", "-i", os.path.join(strips, name, "frame-*.png"),
                                 "-vf", "scale=400:-1,tile=4x2", "-frames:v", "1", os.path.join(strips, f"strip-{name}.png")], check=True)
         # ---- cube state is intact

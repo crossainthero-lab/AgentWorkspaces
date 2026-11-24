@@ -229,7 +229,8 @@ event stream (you may still send requests on it). Each event:
 | `workspace.assigned` | `{id,name,agent}` |
 | `workspace.destroyed` | `{id,name}` |
 | `workspace.input_mode` | `{id,name,input_mode,reason}` |
-| `workspace.activity` | `{id,name,actor,action,at}` (actor `agent`/`human`; action `click`, `type`, `screenshot`, ...) |
+| `workspace.activity` | `{id,name,actor,action,at,x?,y?}` (actor `agent`/`human`; action `click`, `type`, `screenshot`, ...). `x`,`y`: the pointer position in logical output pixels after a pointer action (`move`, `click`, `drag`, `scroll`), so a viewer can draw where the agent's pointer is without polling |
+| `window.changed` | `{id,name}`: a toplevel appeared, changed title or state, or closed (from the compositor's own events, debounced to one per 150 ms). Read the new list with `window.list`. X11-only windows that the compositor does not announce raise no event |
 | `workspace.enter_requested` | `{id,name}` |
 | `workspace.warning` | `{id,message}` |
 | `input.rejected` | `{id,name,reason:"manual_takeover"}` |

@@ -29,6 +29,11 @@ gi.require_version("Gtk", "4.0")
 gi.require_version("Gdk", "4.0")
 from gi.repository import Gdk, Gio, GLib, Gtk, Pango  # noqa: E402
 
+try:
+    import cairo  # noqa: E402  (python3-gi-cairo): needed only for the agent-pointer overlay
+except ImportError:  # pragma: no cover
+    cairo = None
+
 from . import paths  # noqa: E402
 from .client import ApiError, Client  # noqa: E402
 from .session import SessionError, WorkspaceSession  # noqa: E402
@@ -75,6 +80,12 @@ headerbar togglebutton:checked { background: alpha(white, 0.2); }
 .aw-thumb { background: #050505; border-radius: 11px 11px 0 0; }
 .aw-approvals { background: #161616; border-bottom: 1px solid alpha(white, 0.12); padding: 8px 12px; }
 .aw-error { color: #ff8a80; }
+.aw-taskbar { background: #140e08; border-top: 2px solid #ff7a00; padding: 3px 8px; min-height: 34px; }
+.aw-taskbar button { padding: 2px 10px; border-radius: 6px; min-height: 26px; background: transparent; box-shadow: none; }
+.aw-taskbar button:hover { background: alpha(white, 0.08); }
+.aw-taskbar button.aw-focused { background: alpha(white, 0.14); box-shadow: inset 0 -2px #ff7a00; }
+.aw-taskbar button.aw-min label { opacity: 0.5; }
+.aw-taskbar .aw-who { padding-right: 8px; margin-right: 4px; border-right: 1px solid alpha(white, 0.14); }
 """
 
 ACTION_PAST = {"click": "clicked", "move": "moved the pointer", "drag": "dragged", "type": "typed", "key": "pressed keys",
@@ -211,6 +222,195 @@ def default_approval_view(viewer: "Viewer", a: Dict[str, Any], ws_name: str) -> 
                          ("Approve", lambda: viewer.resolve_approval(a["id"], "approved"))])
 
 
+# ---- the agent's pointer, drawn by the viewer ------------------------------------------------------------------------
+# A viewer-side overlay: it is never part of the workspace's pixels, so it cannot appear in an agent's screenshot
+# (screen.screenshot has its own `cursor` option for the workspace's own cursor). Positions are the real pointer
+# positions the daemon reports with each pointer action (`workspace.activity` x/y); only the in-between frames are
+# interpolated. Orange is used for this pointer and for the agent taskbar's accent line, nowhere else.
+
+ORANGE = (1.0, 0.478, 0.0)
+MARKER_HOLD_S = 4.0       # how long the pointer stays after the agent last moved it
+MARKER_FADE_S = 0.6
+TYPING_HOLD_S = 1.2
+
+
+MSIZE, MPAD = 64, 32      # the marker is a small widget (arrow tip at MPAD, MPAD) that the overlay moves around
+
+
+class AgentMarker(Gtk.DrawingArea):
+    def __init__(self, viewer: "Viewer"):
+        super().__init__(can_target=False, can_focus=False, halign=Gtk.Align.START, valign=Gtk.Align.START,
+                         visible=False)
+        self.set_content_width(MSIZE)
+        self.set_content_height(MSIZE)
+        self.v = viewer
+        self.target = None        # workspace logical pixels
+        self.shown = None
+        self.last_move = 0.0
+        self.last_click = 0.0
+        self.last_type = 0.0
+        self.alpha = 0.0
+        self.tick_id = 0
+        self.fade_src = 0
+        self.last_t = 0.0
+        self.set_draw_func(self.draw)
+
+    def clear(self):
+        self.target = self.shown = None
+        self.alpha = 0.0
+        self.set_visible(False)
+
+    def agent_moved(self, x, y, click=False):
+        now = time.monotonic()
+        if self.shown is None or now - self.last_move > MARKER_HOLD_S + MARKER_FADE_S:
+            self.shown = (x, y)
+        self.target = (x, y)
+        self.last_move = now
+        if click:
+            self.last_click = now
+        self.alpha = 1.0
+        if self.fade_src:
+            GLib.source_remove(self.fade_src)
+        self.fade_src = GLib.timeout_add(int(MARKER_HOLD_S * 1000) + 40, self._begin_fade)   # wake up once to fade out
+        self._start()
+
+    def _begin_fade(self):
+        self.fade_src = 0
+        self._start()
+        return False
+
+    def agent_typed(self):
+        self.v.show_typing()
+
+    def _start(self):
+        self.set_visible(True)
+        if not self.tick_id and self.get_mapped():
+            self.last_t = time.monotonic()
+            self.tick_id = self.add_tick_callback(self.tick)
+        self.queue_draw()
+
+    def tick(self, widget, clock):
+        now = time.monotonic()
+        dt, self.last_t = now - self.last_t, now
+        busy = False
+        if self.target and self.shown:
+            k = 1 - pow(2.718281828, -dt / 0.055)       # exponential ease towards the real position
+            dx, dy = self.target[0] - self.shown[0], self.target[1] - self.shown[1]
+            if abs(dx) + abs(dy) > 0.3:
+                self.shown = (self.shown[0] + dx * k, self.shown[1] + dy * k)
+                busy = True
+            else:
+                self.shown = self.target
+        idle = now - self.last_move
+        if self.target:
+            if idle > MARKER_HOLD_S:
+                self.alpha = max(0.0, 1 - (idle - MARKER_HOLD_S) / MARKER_FADE_S)
+                busy = busy or self.alpha > 0
+            if self.alpha <= 0:
+                self.target = self.shown = None
+        busy = busy or (now - self.last_click < 0.4)
+        self.v.live_overlay.queue_allocate()          # the overlay places the marker from `shown`
+        self.queue_draw()
+        if not busy:
+            self.tick_id = 0
+            if not self.target:
+                self.set_visible(False)
+            return False
+        return True
+
+    def draw(self, area, cr, w, h):
+        if cairo is None or not self.shown or self.alpha <= 0 or self.v.control_state() != "agent":
+            return
+        now = time.monotonic()
+        x = y = MPAD
+        r = now - self.last_click
+        if r < 0.4:                      # a click: one expanding ring, then gone
+            t = r / 0.4
+            cr.set_source_rgba(*ORANGE, 0.8 * (1 - t) * self.alpha)
+            cr.set_line_width(1.5)
+            cr.arc(x, y, 5 + 16 * t, 0, 6.2832)
+            cr.stroke()
+        cr.translate(x, y)
+        cr.move_to(0, 0)
+        for px, py in ((0, 16.5), (4.2, 12.6), (7.2, 19.5), (9.9, 18.4), (7.0, 11.8), (12.2, 11.8)):
+            cr.line_to(px, py)
+        cr.close_path()
+        cr.set_source_rgba(*ORANGE, self.alpha)
+        cr.fill_preserve()
+        cr.set_source_rgba(0, 0, 0, 0.55 * self.alpha)
+        cr.set_line_width(1.0)
+        cr.stroke()
+
+
+class Taskbar(Gtk.Box):
+    """The agent environment's own taskbar: only the windows inside THIS workspace (Wayland and its private
+    XWayland, from the daemon's window service). The orange line and the agent's name mark it as the agent's world,
+    next to your own dock, which never lists these windows."""
+
+    def __init__(self, viewer: "Viewer"):
+        super().__init__(orientation=Gtk.Orientation.HORIZONTAL, spacing=2)
+        self.v = viewer
+        self.add_css_class("aw-taskbar")
+        self.who = Gtk.Box(spacing=6)
+        self.who.add_css_class("aw-who")
+        self.who_icon_hint = None
+        self.who_icon = Gtk.Box()
+        self.who_dim = Gtk.Label(label="Agent")
+        self.who_dim.add_css_class("aw-sub")
+        self.who_name = Gtk.Label()
+        self.who_name.add_css_class("aw-title")
+        self.who.append(self.who_icon)
+        self.who.append(self.who_dim)
+        self.who.append(self.who_name)
+        self.append(self.who)
+        self.items = Gtk.Box(spacing=2)
+        self.append(self.items)
+        self.empty = Gtk.Label(label="No windows yet")
+        self.empty.add_css_class("aw-sub")
+        self.sig = None
+        self.set_tooltip_text("The agent's workspace: only windows inside it. Click one to focus it (as you, through the API).")
+
+    def update(self, ws, windows):
+        hint = ws["agent"].get("icon_hint", "none")
+        if hint != self.who_icon_hint:
+            self.who_icon_hint = hint
+            c = self.who_icon.get_first_child()
+            if c:
+                self.who_icon.remove(c)
+            self.who_icon.append(agent_icon(hint, 16))
+        label = ws["agent"].get("label") or "Agent"
+        self.who_name.set_text(label)
+        self.who_dim.set_visible("agent" not in label.lower())      # "Hermes Agent" already says it
+        sig = [(w["id"], w.get("title"), w.get("focused"), w.get("minimized")) for w in windows]
+        if sig == self.sig:
+            return
+        self.sig = sig
+        c = self.items.get_first_child()
+        while c:
+            n = c.get_next_sibling()
+            self.items.remove(c)
+            c = n
+        if not windows:
+            self.items.append(self.empty)
+        for w in windows:
+            b = Gtk.Button()
+            box = Gtk.Box(spacing=6)
+            theme = Gtk.IconTheme.get_for_display(Gdk.Display.get_default())
+            app = w.get("app_id") or ""
+            box.append(Gtk.Image.new_from_icon_name(app if app and theme.has_icon(app) else "window-symbolic"))
+            lbl = Gtk.Label(label=w.get("title") or app or "Window", ellipsize=Pango.EllipsizeMode.END,
+                            max_width_chars=22)
+            box.append(lbl)
+            b.set_child(box)
+            b.set_tooltip_text(f"{w.get('title') or app}" + (" (minimised)" if w.get("minimized") else ""))
+            if w.get("focused"):
+                b.add_css_class("aw-focused")
+            if w.get("minimized"):
+                b.add_css_class("aw-min")
+            b.connect("clicked", lambda _b, w=w: self.v.focus_window(w))
+            self.items.append(b)
+
+
 # ---- live feed of one workspace --------------------------------------------------------------------------------
 
 class Feed:
@@ -242,7 +442,7 @@ class Feed:
                 continue
             try:
                 t0 = time.monotonic()
-                fr = self.cap.capture_native(wait_damage=True, timeout=2.0, cursor=True)
+                fr = self.cap.capture_native(wait_damage=True, timeout=2.0, cursor=False)
             except SessionError:
                 if self.running:
                     GLib.idle_add(self.v.feed_lost, self, "Lost connection to the workspace")
@@ -311,6 +511,8 @@ class Viewer(Gtk.Application):
         self._syncing = False
         self._refresh_src = 0
         self._last_frame_at = 0.0
+        self._last_texts = 0.0
+        self._ticks = 0
         self.dbg: List[str] = []
         self.load_state()
 
@@ -543,6 +745,14 @@ class Viewer(Gtk.Application):
         self.msg_box.append(self.msg)
         self.msg_box.append(self.msg_btn)
         self.live_overlay.add_overlay(self.msg_box)
+        self.marker = AgentMarker(self)
+        self.live_overlay.add_overlay(self.marker)
+        self.live_overlay.connect("get-child-position", self.child_position)
+        self.typing = Gtk.Label(halign=Gtk.Align.START, valign=Gtk.Align.END, margin_start=10, margin_bottom=8,
+                                visible=False, can_target=False)
+        self.typing.set_markup('<span foreground="#ff7a00">\u25cf</span> <span alpha="75%">Agent typing</span>')
+        self.live_overlay.add_overlay(self.typing)
+        self._typing_src = 0
         self.msg_btn.connect("clicked", self.on_msg_button)
         self.texture_size = (0, 0)
         mc = Gtk.EventControllerMotion()
@@ -557,7 +767,13 @@ class Viewer(Gtk.Application):
                                        Gtk.EventControllerScrollFlags.DISCRETE)
         sc.connect("scroll", self.on_scroll)
         self.pic.add_controller(sc)
-        return self.live_overlay
+        self.taskbar = Taskbar(self)
+        self.windows: List[Dict[str, Any]] = []
+        page = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        page.append(self.live_overlay)
+        page.append(self.taskbar)
+        self.live_overlay.set_vexpand(True)
+        return page
 
     def build_empty(self) -> Gtk.Widget:
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=14, halign=Gtk.Align.CENTER,
@@ -704,7 +920,20 @@ class Viewer(Gtk.Application):
             if w:
                 w.setdefault("activity", {}).update(last_action=f"{d.get('actor')}:{d.get('action')}",
                                                     last_action_at=d.get("at"))
-                self.refresh_texts()
+                now = time.monotonic()
+                if d.get("action") != "move" or now - self._last_texts > 0.25:
+                    self._last_texts = now
+                    self.refresh_texts()
+                if d.get("id") == self.sel and d.get("actor") == "agent":
+                    if d.get("x") is not None:
+                        self.marker.agent_moved(d["x"], d["y"], click=d.get("action") == "click")
+                    elif d.get("action") in ("type", "key"):
+                        self.marker.agent_typed()
+                if d.get("id") == self.sel and (d.get("action") == "click" or str(d.get("action", "")).startswith("window.")):
+                    self.schedule_windows(400)
+        elif t == "window.changed":
+            if d.get("id") == self.sel:
+                self.schedule_windows()
         elif t.startswith(("workspace.", "approval.", "grant.", "viewer.")) or t == "input.rejected":
             if t == "workspace.input_mode":
                 w = self.ws.get(d.get("id"))
@@ -765,6 +994,9 @@ class Viewer(Gtk.Application):
             self.controlling = False
             self.pic.set_paintable(None)
             self.texture_size = (0, 0)
+            self.marker.clear()
+            self.windows = []
+            self.taskbar.sig = None
         self.sel = ws_id
         self.mode = "live"
         if ws_id in self.ws:
@@ -813,6 +1045,9 @@ class Viewer(Gtk.Application):
     def tick(self):
         if self.win and self.win.is_visible():
             self.refresh_texts()
+            self._ticks += 1
+            if self._ticks % 4 == 0:     # safety net for X11-only windows, which raise no toplevel events
+                self.refresh_windows()
         return self.alive
 
     def update_view(self):
@@ -863,6 +1098,7 @@ class Viewer(Gtk.Application):
         running = bool(live and w["state"] == "running")
         self.ctl.set_visible(live)
         self.ctl.set_sensitive(running)
+        self.taskbar.set_visible(running)
         self.clip_btn.set_visible(live)
         self.menu_btn.set_visible(bool(w))
         for n, enabled in (("start-ws", bool(w and w["state"] in ("stopped", "failed"))),
@@ -871,6 +1107,9 @@ class Viewer(Gtk.Application):
         if w and w.get("input_mode") != "manual":
             self.controlling = False
         st = self.control_state()
+        if st != "agent":
+            self.marker.clear()          # the agent cannot move its pointer now; nothing to show
+            self.typing.set_visible(False)
         if self.feed:
             self.feed.min_dt = 0 if st == "you" else OBSERVE_DT
         self._syncing = True
@@ -927,6 +1166,7 @@ class Viewer(Gtk.Application):
         if self.suspended:
             self.feed.active.clear()
         self.msg_show(None)
+        self.refresh_windows()
         if METRICS:
             self.dbg.append(f"renderer={type(self.win.get_native().get_renderer()).__name__}")
 
@@ -1147,6 +1387,92 @@ class Viewer(Gtk.Application):
                     GLib.idle_add(lambda: self.win.get_clipboard().set(t) or False)
             threading.Thread(target=work, daemon=True).start()
         return self.alive
+
+    # ---- the agent's pointer and the agent taskbar -------------------------------------------------------------
+    def ws_to_overlay(self, lx, ly, widget):
+        """Workspace logical pixels -> coordinates inside `widget` (the inverse of map_xy)."""
+        tw, th = self.texture_size
+        if not tw:
+            return None
+        ww, wh = self.pic.get_width(), self.pic.get_height()
+        if self.fit:
+            s = min(ww / tw, wh / th)
+            ox, oy = (ww - tw * s) / 2, (wh - th * s) / 2
+        else:
+            s, ox, oy = 1.0, 0.0, 0.0
+        sc = (self.current() or {}).get("display", {}).get("scale", 1.0) or 1.0
+        px, py = lx * sc * s + ox, ly * sc * s + oy
+        try:
+            r = self.pic.translate_coordinates(widget, px, py)
+        except TypeError:
+            return None
+        if not r:
+            return None
+        return tuple(r[-2:])
+
+    def child_position(self, overlay, child, rect):
+        """Place the agent marker at the agent's (interpolated) pointer position."""
+        if child is not self.marker or not self.marker.shown:
+            return False
+        pt = self.ws_to_overlay(*self.marker.shown, overlay)
+        if not pt:
+            return False
+        rect.x, rect.y, rect.width, rect.height = int(pt[0]) - MPAD, int(pt[1]) - MPAD, MSIZE, MSIZE
+        return True
+
+    def show_typing(self):
+        """Agent typing: a quiet note in the corner for a moment, only while it happens."""
+        if self.control_state() != "agent":
+            return
+        self.typing.set_visible(True)
+        if self._typing_src:
+            GLib.source_remove(self._typing_src)
+
+        def hide():
+            self._typing_src = 0
+            self.typing.set_visible(False)
+            return False
+        self._typing_src = GLib.timeout_add(int(TYPING_HOLD_S * 1000), hide)
+
+    _win_src = 0
+
+    def schedule_windows(self, delay_ms: int = 250):
+        if self._win_src:
+            return
+        def go():
+            self._win_src = 0
+            self.refresh_windows()
+            return False
+        self._win_src = GLib.timeout_add(delay_ms, go)
+
+    def refresh_windows(self):
+        w = self.current()
+        if not w or w["state"] != "running" or self.suspended or self.stack.get_visible_child_name() != "live":
+            return
+        wid = w["id"]
+        self.rpc("window.list", ok=lambda r: self.set_windows(wid, r.get("windows", [])), err=lambda e: None, workspace=wid)
+
+    def set_windows(self, wid, wins):
+        if wid == self.sel and wid in self.ws:
+            self.windows = wins
+            self.taskbar.update(self.ws[wid], wins)
+
+    def focus_window(self, win):
+        """A click on a taskbar entry: the window API, as you (agent_kind "human"), so it also works while the agent
+        is paused. It does NOT pause the agent and does not move any pointer; if the agent is working in another
+        window it will find the focus changed (choose Paused first to avoid that)."""
+        w = self.current()
+        if not w:
+            return
+        wid = w["id"]
+
+        def focus(_r=None):
+            self.rpc("window.action", ok=lambda r: self.schedule_windows(80), workspace=wid, window=win["id"],
+                     action="focus", agent_kind="human")
+        if win.get("minimized"):
+            self.rpc("window.action", ok=focus, workspace=wid, window=win["id"], action="unminimize", agent_kind="human")
+        else:
+            focus()
 
     # ---- coordinate mapping ---------------------------------------------------------------------------------------------
     def map_xy(self, x, y):

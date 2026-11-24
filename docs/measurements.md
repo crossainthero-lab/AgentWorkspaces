@@ -70,20 +70,22 @@ physical display, no scanout, so "real desktop" figures could differ.
 
 | | viewer | isolated gnome-shell |
 |---|---|---|
-| idle, 10 s | 0.3 % | 0.8 % |
-| agent moves the pointer ~65 times a second for 8 s, viewer visible (30 fps cap) | 32.5 % | 2.7 % |
-| same motion, viewer on another GNOME workspace (suspended) | 2.0 % | 2.5 % |
-| PSS idle / busy | 126 / 138 MiB | 275 / 271 MiB |
+| idle, 10 s | 0.3 % | 0.7 % |
+| agent moves the pointer ~65 times a second for 8 s, viewer visible (30 fps cap, orange marker following) | 37.7 % | 4.7 % |
+| same motion, viewer on another GNOME workspace (suspended) | 1.5 % | 2.5 % |
+| PSS idle / busy | 117 / 128 MiB | 269 / 266 MiB |
 
 The same busy run before the 30 fps cap and the suspend handling measured 63.5 % for the viewer. The workspace
 (compositor + app + private bus, systemd slice) was at 0.13 % CPU and 218 MiB while idle.
 
 Latency, agent action to viewer: time from just before the agent's `input.move` API call until the viewer main loop
-hands the first newer frame to GTK (30 moves 450 ms apart, monotonic clock shared between processes): median 1.8 ms, p95
-2.8 ms, max 3.4 ms (the earlier run: median 3.1, p95 7.0, max 8.8). This is the frame in which the pointer moved
-(the capture includes the cursor); the repaint of the app's content follows in a later frame. It excludes GTK's render, the
-shell's composite and scanout (at most one 60 Hz frame on the virtual monitor). Input in the other direction (your keys to
-the workspace) was verified functionally; its latency was not measured.
+hands the first newer frame to GTK (30 moves 450 ms apart, monotonic clock shared between processes): median 18.3 ms, p95
+20.7 ms, max 20.8 ms. Since the viewer captures without the workspace cursor, that frame is the app's repaint (the test
+app redraws a label on pointer motion), one 60 Hz compositor frame after the move; an earlier build that captured the
+cursor measured 1.8 to 3 ms for the cursor-only frame. The orange marker does not wait for a frame: it follows the
+daemon's `workspace.activity` event (its own latency was not measured). Excluded: GTK's render, the shell's composite and
+scanout (at most one 60 Hz frame on the virtual monitor). Input in the other direction (your keys to the workspace) was
+verified functionally; its latency was not measured.
 
 Hardware acceleration, verified in this environment only: the viewer's GTK renderer is `VulkanRenderer`; the maps of the
 viewer and of the isolated gnome-shell contain the NVIDIA GL/EGL libraries, and `nvidia-smi pmon` lists both processes.

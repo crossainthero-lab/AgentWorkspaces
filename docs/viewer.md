@@ -19,6 +19,21 @@ of your desktop; it needs no extension and uses the daemon API with the admin cr
 * **Agent | Paused | You**: one setting, who has input. *Paused* rejects the agent's input (`E_PAUSED`) and you only watch.
   *You* rejects it too and forwards your mouse and keyboard; a white frame marks it. *Agent* gives control back and a
   waiting agent continues. Keys and buttons held when you leave *You* or lose focus are released inside the workspace.
+* **The agent's pointer** (orange): the agent has full mouse and keyboard control of its workspace, so while it works the
+  viewer draws a small orange arrow where *its* pointer is, with a ring when it clicks, and a quiet "Agent typing" note in
+  the corner while it types. Positions are the real pointer positions the daemon reports with each pointer action
+  (`workspace.activity` `x`,`y`); only the frames in between are interpolated (about 55 ms ease). It fades out after 4 s
+  without movement and is hidden while the workspace is Paused or You control it. It is drawn by the viewer on top of the
+  picture, so it is **never part of the workspace's pixels** and cannot appear in an agent's screenshot (the viewer also
+  captures without the workspace's own cursor). `screen.screenshot` keeps its own `cursor` option for the workspace's
+  cursor. Your own pointer is the one on your desktop.
+* **The agent's taskbar** (bottom, orange line): the windows inside *this* workspace only, Wayland and its private
+  XWayland (the daemon's window service, `window.list`), with the agent's icon hint and name. Your own dock never lists
+  them and this bar never lists yours. It follows `window.changed` events (plus a 4 s safety refresh while visible for
+  X11-only windows). Clicking an entry focuses that window through the window API **as you** (`agent_kind: "human"`):
+  it works in every mode, moves no pointer and does not pause the agent. If the agent is typing into another window it
+  will find the focus changed, so choose Paused first when that matters. The agent can focus windows through the same API
+  and the bar follows.
 * **Request bar** above the workspace: approvals (`approval.request`) with Deny / Approve, and human-only grants
   (`grant.request`: `browser_profile`, `host_clipboard`) with Deny / "Allow for 15 minutes". Grants are accepted by the
   daemon from the viewer because it is a human channel. To show another kind of request, register a renderer:
@@ -30,11 +45,15 @@ of your desktop; it needs no extension and uses the daemon API with the admin cr
   workspace left in Paused or You stays paused until someone chooses Agent; the sidebar shows it).
 * **New workspace**: name, agent, screen size. The name is validated before the daemon is asked.
 
+Demo: `docs/media/demo-enter-leave-agent-workspace.mp4` (made by `gnome-extension/tests/demo_video.py`; the agent in it is a
+scripted AgentWorkspaces client, not a model). Stills: `docs/media/viewer-agent-cursor.png`, `viewer-agent-taskbar.png`.
+
 Remembered between runs (`~/.config/agent-workspaces/viewer.json`): last workspace, sidebar state, fit.
 
 ## Cost
 
 * An idle workspace costs the viewer about 0 % CPU (damage-driven screencopy).
+* The viewer captures without the cursor, so a moving pointer alone does not cost a repaint; the orange marker is a small widget.
 * Frames are capped at 30 per second while you only watch, uncapped while you control (input latency).
 * While GNOME marks the window suspended (another GNOME workspace, minimised) the viewer stops capturing and painting
   completely; the workspace is unaffected. Measured numbers: [measurements.md](measurements.md).

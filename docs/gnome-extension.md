@@ -91,6 +91,9 @@ Consequences for the design:
   switch with GNOME's animation suppressed, then ease the clones out and the live `window_group` in along Y over
   250 ms (GNOME's own duration), `EASE_OUT_CUBIC`. Skipped if animations are off or the Overview is open. The top
   bar and dash stay in place, like in a normal workspace change.
+* **From the Activities overview**: Ctrl+Alt+Down and Ctrl+Alt+Up are also registered for the overview. The extension
+  closes the overview first (waits for its `hidden` signal, 0.9 s fallback), then travels with the vertical slide; it
+  never leaves the shell in an overview of the other workspace.
 * **Keys**: the extension registers its own `enter-shortcut` / `return-shortcut` (own schema, editable in prefs).
   `Main.wm.setCustomKeybindingHandler` on GNOME's `switch-to-workspace-up/down` was considered (no settings
   change, nothing to restore) and rejected: it replaces the handler for *all* accelerators of that action, and it
@@ -141,7 +144,7 @@ Last run, full suite: **29/29 PASS**. `--coexist` (desktop-cube + Tiling Shell l
 | with desktop-cube + Tiling Shell enabled: enter/return still slide vertically (not the cube), Right still switches; a Tiling Shell key set to Ctrl+Alt+Down is reported as `org.gnome.shell.extensions.tilingshell.move-window-up (not modified)` and left unchanged | PASS |
 | changing `enter-shortcut` (the write the prefs window makes) re-binds live: Ctrl+Alt+E enters, GNOME's Ctrl+Alt+Down is restored; setting it back takes it over again | PASS |
 
-### Real-stack run (`gnome-extension/tests/run_real.py`): 36/36 PASS
+### Real-stack run (`gnome-extension/tests/run_real.py`): 53/53 PASS
 
 Same isolation, but **no stand-ins**: the real daemon (with SA3's auth layer), two real workspaces (headless labwc, each
 running the GTK4 test app `tests/apps/gtk_probe.py`, whose own event log is the oracle), and the real viewer started by
@@ -163,11 +166,22 @@ window.
 | New workspace dialog creates a running workspace and selects it; sidebar collapses; Stop, Start, Close (cancel keeps it, confirm destroys) from the menu | PASS |
 | closing the viewer window detaches (viewers 0), every workspace keeps running, the agent can still drive it; re-enter reopens on the last workspace | PASS |
 | "Back to desktop" button returns to the personal workspace (extension D-Bus `Return`) | PASS |
+| Super opens the Activities overview (real key event); Ctrl+Alt+Down from inside it closes the overview and enters; Ctrl+Alt+Up from inside the overview on the agent workspace returns to the previous personal workspace with the overview closed; Ctrl+Alt+Down from the normal desktop enters again | PASS |
+| the agent taskbar shows its orange accent; only the workspace's own two windows are listed and your desktop lists none of them; clicking its entries focuses the window; an agent `window.action focus` moves the highlight (event driven) | PASS |
+| the orange agent pointer is drawn at the agent's real position (within 12 px of the mapped position), is not in the agent's own screenshot, fades after the agent is idle and is hidden on Paused | PASS |
 | Desktop Cube: patched method called for Left/Right, never for enter/return; nothing left in flight afterwards | PASS |
 
-Demo video of the same stack: `docs/media/demo-enter-leave-agent-workspace.mp4` (made by `gnome-extension/tests/demo_video.py`). The
-"agent" in it is a **scripted AgentWorkspaces client** (daemon API `input.type` with the workspace credential), not a
-model-driven agent.
+Demo video of the same stack: `docs/media/demo-enter-leave-agent-workspace.mp4` (36 s, made by
+`gnome-extension/tests/demo_video.py`): personal desktop with two windows; Ctrl+Alt+Right/Left turn the Desktop Cube;
+Super opens the Activities overview; Ctrl+Alt+Down from inside it slides vertically into the viewer; there the agent
+focuses the calculator and the editor, glides its (orange) pointer to buttons, clicks 7 x 6 = and types the result,
+while the taskbar highlight follows the focus; Ctrl+Alt+Up returns; the work has progressed on the second visit; the cube
+still turns. The "agent" in it is a **scripted AgentWorkspaces client** (the same daemon API an MCP agent uses, with the
+workspace credential), **not a model-driven agent**. A real model run through the agent integration
+(`agent-workspaces integrate claude-code run ...`) needs the developer's signed-in agent CLI and network, and an earlier
+signed-out CLI opened browser login tabs on the real screen, so it was deliberately not driven from this harness.
+Frames: `gnome-extension/media/overview-animation-frames.png`, `slide-enter-frames.png`, `slide-return-frames.png`,
+`cube-left-right-frames.png`.
 
 Screenshots (from the isolated shell): `gnome-extension/media/shell-enter.png` (agent workspace with the stand-in
 viewer, workspace indicator showing three workspaces) and `gnome-extension/media/prefs.png` (preferences window; the

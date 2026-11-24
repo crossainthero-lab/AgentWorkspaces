@@ -36,6 +36,26 @@ def check(name, ok, detail=""):
     print(("PASS " if ok else "FAIL ") + name + (f"   [{detail}]" if detail else ""), flush=True)
 
 
+def orange(path, box):
+    """Pixels close to the agent marker's colour (#ff7a00) inside box=(x0, y0, x1, y1). The calculator's own orange '='
+    key (#ed5b00) is deliberately outside the match."""
+    from PIL import Image
+    im = Image.open(path).convert("RGB").crop(box)
+    return sum(1 for r, g, b in im.get_flattened_data() if r >= 250 and 108 <= g <= 138 and b <= 12)
+
+
+def marker_bbox(path, box):
+    """Centre of the arrow tip: the top-left-most extent of the marker colour inside box."""
+    from PIL import Image
+    im = Image.open(path).convert("RGB")
+    x0, y0, x1, y1 = box
+    pts = [(x + x0, y + y0) for y in range(y1 - y0) for x in range(x1 - x0)
+           if (lambda p: p[0] >= 250 and 108 <= p[1] <= 138 and p[2] <= 12)(im.getpixel((x + x0, y + y0)))]
+    if not pts:
+        return None
+    return (min(p[0] for p in pts), min(p[1] for p in pts))
+
+
 def log_events(path):
     out = []
     if os.path.exists(path):
@@ -86,12 +106,19 @@ def main():
         assert wait_for(lambda: s.state()["windows"], 25)
         time.sleep(1.5)
 
-        # ---- enter
+        # ---- enter: first through GNOME's Activities overview (Super), to prove the key works from inside it
+        personal_ws = s.state()["active"]
+        s.chord("Super_L")
+        shown = wait_for(lambda: s.state()["overview"], 5, 0.1)
+        check("Super opens GNOME's Activities overview (real key event)", bool(shown))
+        time.sleep(1.2)
         s.chord("Control_L", "Alt_L", "Down")
         ok = wait_for(lambda: any(w["app_id"] == VIEWER for w in s.state()["windows"]), 20, 0.1)
-        check("Ctrl+Alt+Down: the daemon starts the real viewer on its own GNOME workspace", bool(ok))
+        check("Ctrl+Alt+Down from inside the overview: the daemon starts the real viewer on its own GNOME workspace", bool(ok))
         time.sleep(2.5)
         st = s.state()
+        check("the overview was closed on the way (not left open on the agent workspace)", st["overview"] is False and
+              st["active"] != personal_ws)
         vw = next(w for w in st["windows"] if w["app_id"] == VIEWER)
         check("viewer window is on the active (agent) workspace and maximized", vw["ws"] == st["active"] and vw["maximized"],
               json.dumps(vw))
@@ -192,7 +219,6 @@ def main():
         time.sleep(2.0)
         ws = {w["name"]: w for w in c.call("workspace.list")["workspaces"]}
         check("the new workspace is the one now attached", ws.get("notes", {}).get("viewers") == 1)
-        shot("viewer-new-workspace.png")
 
         # ---- sidebar collapses to an icon rail and back
         s.click(*UI["sidebar_toggle"])
@@ -291,9 +317,113 @@ def main():
         check("Close workspace (confirmed) destroys it", bool(got))
         time.sleep(1.5)
 
+        # ---- Super + Ctrl+Alt+Up from the agent workspace: back to the previous personal workspace, overview closed
+        s.chord("Super_L")
+        wait_for(lambda: s.state()["overview"], 5, 0.1)
+        time.sleep(1.0)
+        s.chord("Control_L", "Alt_L", "Up")
+        wait_for(lambda: s.state()["overview"] is False and s.state()["active"] == personal_ws, 6, 0.1)
+        time.sleep(1.2)
+        st = s.state()
+        check("Ctrl+Alt+Up from inside the overview returns to the previous personal workspace with the overview closed",
+              st["active"] == personal_ws and st["overview"] is False, f"active={st['active']} overview={st['overview']}")
+        s.chord("Control_L", "Alt_L", "Down")
+        time.sleep(2.0)
+        check("Ctrl+Alt+Down from the normal desktop enters again", s.state()["active"] != personal_ws)
+
+        # ---- the agent's world has its own taskbar and its own pointer marker
+        c.call("workspace.create", name="desk", agent_kind="claude-code", width=1280, height=720, window_policy="floating")
+        c.call("workspace.launch", workspace="desk", argv=["gnome-calculator"])
+        assert wait_for(lambda: c.call("window.list", workspace="desk")["windows"], 25)
+        time.sleep(1.5)
+        c.call("workspace.launch", workspace="desk", argv=["gnome-text-editor"])
+        assert wait_for(lambda: len(c.call("window.list", workspace="desk")["windows"]) >= 2, 25)
+        time.sleep(1.5)
+        calc = next(w for w in c.call("window.list", workspace="desk")["windows"] if "alculator" in w["title"])
+        edit = next(w for w in c.call("window.list", workspace="desk")["windows"] if "Editor" in w["title"])
+        c.call("window.set_geometry", workspace="desk", window=calc["id"], x=60, y=70, width=380, height=560, agent_kind="human")
+        time.sleep(1.0)
+        time.sleep(1.5)
+        s.click(120, 206)                              # the 'desk' row (third in the sidebar)
+        got = wait_for(lambda: c.call("workspace.get", workspace="desk")["viewers"] == 1, 8)
+        time.sleep(2.0)
+        check("the new workspace can be opened from its sidebar row", bool(got))
+        ag = d.agent_client("desk")
+        shot("viewer-agent-taskbar.png")
+        p = os.path.join(media, "viewer-agent-taskbar.png")
+        check("the agent taskbar shows its orange accent line", orange(p, (250, 850, 1600, 866)) > 800,
+              f"{orange(p, (250, 850, 1600, 866))} orange px in the taskbar's top line")
+        shell_titles = [w["title"] for w in s.state()["windows"]]
+        check("your own desktop lists none of the agent workspace's windows (only the personal calculator and the viewer)",
+              not any("Text Editor" in (t or "") for t in shell_titles) and sum("Calculator" in (t or "") for t in shell_titles) == 1,
+              str(shell_titles))
+        wl = c.call("window.list", workspace="desk")["windows"]
+        check("the workspace's window list holds exactly its own two windows", sorted(w["title"].split(" ")[0] for w in wl) ==
+              ["Calculator", "New"], str([w["title"] for w in wl]))
+        # clicking a taskbar entry focuses that window (as the human, through the window API)
+        s.click(627, 879)                              # the editor's entry
+        got = wait_for(lambda: next(w for w in c.call("window.list", workspace="desk")["windows"] if w["id"] == edit["id"])["focused"], 5)
+        check("clicking the editor's taskbar entry focuses it in the workspace", bool(got))
+        s.click(465, 879)                              # the calculator's entry
+        got = wait_for(lambda: next(w for w in c.call("window.list", workspace="desk")["windows"] if w["id"] == calc["id"])["focused"], 5)
+        check("clicking the calculator's taskbar entry focuses it", bool(got))
+        # the agent focuses a window through the API: the taskbar follows (event driven)
+        ag.call("window.action", workspace="desk", window=edit["id"], action="focus")
+        time.sleep(1.2)
+        s.shot(os.path.join(media, "_tb.png"))
+        tb = os.path.join(media, "_tb.png")
+        a, b = orange(tb, (520, 886, 740, 896)), orange(tb, (410, 886, 520, 896))
+        check("agent focus via the API moves the taskbar highlight to the editor", a > 80 and b < 20, f"editor underline={a}, calculator={b}")
+        ag.call("window.action", workspace="desk", window=calc["id"], action="focus")
+        time.sleep(1.2)
+        s.shot(tb)
+        a, b = orange(tb, (520, 886, 740, 896)), orange(tb, (410, 886, 520, 896))
+        check("and back to the calculator", b > 60 and a < 20, f"editor={a}, calculator underline={b}")
+        os.unlink(tb)
+        # the agent's pointer: a real position from the daemon, drawn by the viewer in orange
+        px, py = 104, 481                              # the '7' key
+        for i in range(1, 11):
+            ag.call("input.move", workspace="desk", x=300 + (px - 300) * i / 10, y=300 + (py - 300) * i / 10)
+            time.sleep(0.03)
+        ag.call("input.click", workspace="desk", x=px, y=py)
+        time.sleep(0.25)
+        s.shot(os.path.join(media, "viewer-agent-cursor.png"))
+        pc = os.path.join(media, "viewer-agent-cursor.png")
+        n_marker = orange(pc, (250, 80, 1600, 850))
+        check("the orange agent pointer is drawn in the viewer at the agent's real position", n_marker > 40, f"{n_marker} orange px")
+        mid = marker_bbox(pc, (250, 80, 1600, 850))
+        # where it should be: workspace (104,481) through the viewer's fit mapping
+        ww, wh = 1352, 776                             # the picture area: window minus sidebar, header, taskbar, 2 px frame
+        scale = min(ww / 1280, wh / 720)
+        exp_x = 246 + (ww - 1280 * scale) / 2 + 104 * scale
+        exp_y = 81 + (wh - 720 * scale) / 2 + 481 * scale
+        check("... at the right place (within 12 px of the mapped workspace position)",
+              mid and abs(mid[0] - exp_x) < 12 and abs(mid[1] - exp_y) < 14, f"found {mid}, expected about ({exp_x:.0f}, {exp_y:.0f})")
+        r = c.call("screen.screenshot", workspace="desk", inline=True)
+        import base64 as _b64
+        wsp = os.path.join(media, "_ws.png")
+        open(wsp, "wb").write(_b64.b64decode(r["base64"]))
+        check("the marker is not in the agent's own screenshot of the workspace", orange(wsp, (0, 0, 1280, 720)) == 0,
+              f"{orange(wsp, (0, 0, 1280, 720))} orange px")
+        os.unlink(wsp)
+        time.sleep(5.5)
+        s.shot(pc + ".idle.png")
+        n_idle = orange(pc + ".idle.png", (250, 80, 1600, 850))
+        os.unlink(pc + ".idle.png")
+        check("it fades away when the agent has not moved the pointer for a few seconds", n_idle == 0, f"{n_idle} orange px")
+        ag.call("input.move", workspace="desk", x=500, y=400)
+        time.sleep(0.3)
+        s.click(*UI["paused"])
+        time.sleep(0.8)
+        s.shot(pc + ".paused.png")
+        n_p = orange(pc + ".paused.png", (250, 80, 1600, 850))
+        os.unlink(pc + ".paused.png")
+        check("and is hidden as soon as the human pauses or takes over", n_p == 0, f"{n_p} orange px")
+        s.click(*UI["agent"])
+        time.sleep(0.6)
+
         # ---- Back to desktop button (extension D-Bus Return)
         origin = s.state()["active"]
-        shot("viewer-back-button.png")
         s.click(*UI["back"])
         time.sleep(1.6)
         check("the 'Back to desktop' button returns to the personal workspace", s.state()["active"] != origin,

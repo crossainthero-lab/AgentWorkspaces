@@ -497,7 +497,7 @@ class Daemon:
         elif method == "clipboard.set":
             s.set_clipboard(str(p["text"]))
             kind = "clipboard"
-        self.mgr.note_action(ws, kind, actor)
+        self.mgr.note_action(ws, kind, actor, (s.pos[0], s.pos[1]) if kind in ("move", "click", "drag", "scroll") else None)
         res = {"ok": True, "pointer": {"x": s.pos[0], "y": s.pos[1]}}
         if method.startswith("window."):
             res["window"] = wres

@@ -50,7 +50,7 @@ The test harness (`tests/harness.py`) provides **HostSim**, the stand-in desktop
 
 ## Isolated GNOME Shell, real stack
 
-`python3 gnome-extension/tests/run_real.py [--plain] [--media DIR]`: 36 checks with the real daemon, real workspaces, the real
+`python3 gnome-extension/tests/run_real.py [--plain] [--media DIR]`: 53 checks with the real daemon, real workspaces, the real
 viewer and the developer's extension set in a private headless GNOME Shell; `demo_video.py` records the demo video;
 `measure_gs.py` prints the numbers in [measurements.md](measurements.md). Details: [gnome-extension.md](gnome-extension.md).
 They use the user's systemd manager only to create workspace scopes (as the integration tests do), nothing on the real

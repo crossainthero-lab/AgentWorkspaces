@@ -280,10 +280,39 @@ export default class AgentWorkspacesExtension extends Extension {
             next.activate(global.get_current_time());
     }
 
+    // From the Activities overview (Super): close it first, then travel. The slide needs the normal workspace view,
+    // and leaving the shell in the overview of another workspace would be a surprise.
+    _afterOverview(fn) {
+        if (!Main.overview.visible && !Main.overview.animationInProgress) {
+            fn();
+            return;
+        }
+        let done = false;
+        let hid = 0;
+        let timer = 0;
+        const run = () => {
+            if (done)
+                return;
+            done = true;
+            if (hid)
+                Main.overview.disconnect(hid);
+            if (timer)
+                GLib.source_remove(timer);
+            fn();
+        };
+        hid = Main.overview.connect('hidden', run);
+        timer = GLib.timeout_add(GLib.PRIORITY_DEFAULT, 900, () => {
+            timer = 0;
+            run();
+            return GLib.SOURCE_REMOVE;
+        });
+        Main.overview.hide();
+    }
+
     _onEnter() {
         log('enter shortcut fired');
         try {
-            this.enter();
+            this._afterOverview(() => this.enter());
         } catch (e) {
             log(`enter failed: ${e}\n${e.stack}`);
         }
@@ -291,7 +320,7 @@ export default class AgentWorkspacesExtension extends Extension {
 
     _onReturn() {
         try {
-            this.leave();
+            this._afterOverview(() => this.leave());
         } catch (e) {
             log(`return failed: ${e}\n${e.stack}`);
         }

@@ -74,7 +74,7 @@ HOME/XDG dirs, GSETTINGS_BACKEND=keyfile, private session bus and a private stan
 logind and polkit are unreachable), installs the extension there only, injects key events inside that shell and
 prints PASS/FAIL per check. `--coexist` runs a shorter check next to desktop-cube and tilingshell (private copies).
 `python3 tests/run_real.py` is the same isolation with the real daemon, workspaces and viewer and the developer's own
-extension set (36 checks); `tests/demo_video.py OUT.mp4` records the demo; `tests/measure_gs.py` measures CPU, memory and latency.
+extension set (53 checks); `tests/demo_video.py OUT.mp4` records the demo; `tests/measure_gs.py` measures CPU, memory and latency.
 `--prefs out.png` opens the preferences window in the isolated shell and saves a screenshot. It uses
 `/run/user/$UID/aw-ext-test/` and removes it afterwards (`--keep` leaves it). Needs `gnome-shell`, `dbus-daemon`,
 `glib-compile-schemas`, python3-gi with Gtk 4. Nothing is sent to your running session.
