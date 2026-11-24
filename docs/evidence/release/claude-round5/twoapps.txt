@@ -1,0 +1,68 @@
+prompt: Open the calculator and a text editor. Work out 35 times 27 in the calculator, then type the result into the editor.
+model: haiku
+result: PASS
+verified by: expected 945 in an editor window title; windows ['945 (Draft) - Text Editor', 'Calculator']
+seconds: 25.0  exit: 0
+host display variables seen in the agent process group: ['DISPLAY', 'WAYLAND_DISPLAY', 'WAYLAND_SOCKET', 'XAUTHORITY']
+host wayland sockets unchanged: True
+
+[init] model=claude-haiku-5-5 mcp=[('agent-workspaces', 'connected')] builtin_tools=['Bash']
+  call launch_app {"app": "calculator"}
+  call launch_app {"app": "text editor"}
+  -> <image> | launched Calculator (app 1, pid 3926406) in workspace claude-code-r21895-twoapps; workspace 'claude-code-r2189...
+  -> <image> | launched Text Editor (app 2, pid 3926548) in workspace claude-code-r21895-twoapps; workspace 'claude-code-r218...
+agent: Both apps are open. Now I'll enter 35 × 27 in the calculator.
+  call mouse_click {"x": 503, "y": 590}
+  -> ok (pointer at 503,590)
+  call mouse_click {"x": 638, "y": 637}
+  -> ok (pointer at 638,637)
+agent: I clicked 5 before 3, so the calculator now has the digits in the wrong order. I'll check the display before continuing.
+  call screenshot {"region": [302, 380, 978, 460]}
+  -> E_SESSION: the connection to workspace 'claude-code-r21895-twoapps''s compositor failed; the operation may not...
+  call screenshot {}
+  -> <image> | workspace 'claude-code-r21895-twoapps' screen 1280x720 px (captured in 10.2 ms); also saved as <run>/wfd8af0/s...
+agent: The text editor is in front, so I'll bring the calculator back up.
+  call list_windows {}
+  -> [   {     "id": 3,     "kind": "wayland",     "title": "New Document (Draft) - Text Editor",     "app_id": "or...
+  call window_action {"window": 4, "action": "focus"}
+  call screenshot {}
+  -> ok
+  -> <image> | workspace 'claude-code-r21895-twoapps' screen 1280x720 px (captured in 23.7 ms); also saved as <run>/wfd8af0/s...
+agent: The calculator display is empty, so the earlier clicks did not reach it. I'll enter the expression again in the correct order: 3, 5, ×, 2, 7, =.
+  call mouse_click {"x": 638, "y": 637}
+  -> ok (pointer at 638,637)
+  call mouse_click {"x": 503, "y": 590}
+  -> ok (pointer at 503,590)
+  call mouse_click {"x": 775, "y": 542}
+  -> ok (pointer at 775,542)
+  call mouse_click {"x": 503, "y": 637}
+  -> ok (pointer at 503,637)
+  call mouse_click {"x": 367, "y": 542}
+  -> ok (pointer at 367,542)
+  call mouse_click {"x": 910, "y": 661}
+  call screenshot {}
+  -> ok (pointer at 910,661)
+  -> <image> | workspace 'claude-code-r21895-twoapps' screen 1280x720 px (captured in 13.5 ms); also saved as <run>/wfd8af0/s...
+agent: The expression reads 35×27, but no result is showing yet. I'll wait a moment and check again.
+  call wait {"seconds": 1}
+  call screenshot {"region": [302, 380, 978, 460]}
+  -> waited
+  -> E_SESSION: the connection to workspace 'claude-code-r21895-twoapps''s compositor failed; the operation may not...
+  call screenshot {}
+  -> <image> | workspace 'claude-code-r21895-twoapps' screen 1280x720 px (captured in 9.5 ms); also saved as <run>/wfd8af0/sh...
+agent: The calculator shows 35×27 = 945, which matches 35 × 27 = 945 by hand. Now I'll switch to the text editor and type the result.
+  call window_action {"window": 3, "action": "focus"}
+  -> E_NOT_FOUND: no such window 3
+  call list_windows {}
+  -> [   {     "id": 5,     "kind": "wayland",     "title": "New Document (Draft) - Text Editor",     "app_id": "or...
+  call window_action {"window": 5, "action": "focus"}
+  -> ok
+  call mouse_click {"x": 640, "y": 300}
+  call keyboard_type {"text": "945"}
+  -> ok (pointer at 640,300)
+  -> ok (pointer at 640,300)
+  call screenshot {}
+  -> <image> | workspace 'claude-code-r21895-twoapps' screen 1280x720 px (captured in 16.8 ms); also saved as <run>/wfd8af0/s...
+agent: Both apps are open. The calculator shows 35 × 27 = 945, and the text editor now contains "945".  The first attempt at the calculator entry put the digits in the wrong order, but the display was empty, so nothing had been...
+
+USAGE {"turns": 26, "cost_usd": 0.007689949999999999, "duration_ms": 23998, "input": 32, "cache_read": 304605, "cache_creation": 17351, "output": 2341}

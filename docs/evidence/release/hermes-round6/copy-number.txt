@@ -1,0 +1,26 @@
+prompt: The file <run>/data/inv/invoice-885.txt has an amount due. Open it in a text editor, find the amount, and then use the calculator to double it. What do I get?
+model: qwen3.8-27b-agent
+result: PASS
+verified by: expected 13610 in answer; windows ['invoice-885.txt (<run>/data/inv) - Text Editor', 'Calculator']
+seconds: 75.0  exit: 0
+host display variables seen in the agent process group: []
+host wayland sockets unchanged: True
+
+[init] model=qwen3.8-27b-agent
+  call terminal {"command": "export XDG_RUNTIME_DIR=<run>/rt/aw-guard WAYLAND_DISPLAY=aw-guard-no-wayland-display GDK_BACKEND=wayland QT_QPA_PLATF...
+  ->  {"output": "-rw-rw-r-- 1 <user> <user> 60 Nov 24 23:22 <run>/data/inv/invoice-885.txt", "exit_code": 0, "err...
+  call tool_describe {"names": ["mcp__agent_workspaces__launch_app", "mcp__agent_workspaces__screenshot", "mcp__agent_workspaces__keyboard_type", "mcp_...
+  ->  {"tools": {"mcp__agent_workspaces__launch_app": {"description": "Start a graphical program inside your workspa...
+  call launch_app {"app": "text editor", "args": ["<run>/data/inv/invoice-885.txt"]}
+  -> <image as file path: MEDIA tag> {"_multimodal": true, "content": [{"type": "text", "text": "{\"result\": \" Text Editor (app 1, pid 3951298) i...
+  call launch_app {"app": "calculator"}
+  -> <image as file path: MEDIA tag> {"_multimodal": true, "content": [{"type": "text", "text": "{\"result\": \" Calculator (app 2, pid 3951393) in...
+  call keyboard_type {"text": "6805*2"}
+  ->  ok (pointer at 0.0,0.0)
+  call keyboard_key {"combo": "Return"}
+  ->  ok (pointer at 0.0,0.0)
+  call screenshot {"region": [300, 390, 680, 220]}
+  -> <image as file path: MEDIA tag> {"_multimodal": true, "content": [{"type": "text", "text": "{\"result\": \" 'hermes-r23456-copy-number' screen...
+agent: Done. The invoice (opened in the Text Editor) shows:    Invoice   Customer: Brightwood Ltd   Amount due: 6805  I then used the Calculator to compute 6805 × 2, and the display reads 13610.  Answer: 13610
+
+USAGE null

@@ -1,0 +1,9 @@
+{
+  "uuid": "agent-workspaces@agentworkspaces.dev",
+  "name": "AgentWorkspaces",
+  "description": "Optional navigation for AgentWorkspaces: Ctrl+Alt+Down enters the agent workspace viewer on its own GNOME workspace, Ctrl+Alt+Up returns. The AgentWorkspaces service works without this extension.",
+  "shell-version": ["50"],
+  "settings-schema": "org.gnome.shell.extensions.agent-workspaces",
+  "url": "https://github.com/crossainthero-lab/AgentWorkspaces",
+  "version-name": "0.1.0"
+}

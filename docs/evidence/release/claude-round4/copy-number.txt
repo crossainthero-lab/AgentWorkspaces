@@ -1,0 +1,75 @@
+prompt: The file <run>/data/inv/invoice-206.txt has an amount due. Open it in a text editor, find the amount, and then use the calculator to double it. What do I get?
+model: haiku
+result: PASS
+verified by: expected 12124 in answer; windows ['Calculator', 'invoice-206.txt (<run>/data/inv) - Text Editor']
+seconds: 23.5  exit: 0
+host display variables seen in the agent process group: ['DISPLAY', 'WAYLAND_DISPLAY', 'WAYLAND_SOCKET', 'XAUTHORITY']
+host wayland sockets unchanged: True
+
+[init] model=claude-haiku-5-5 mcp=[('agent-workspaces', 'connected')] builtin_tools=['Bash']
+  call launch_app {"app": "text editor", "args": ["<run>/data/inv/invoice-206.txt"]}
+  -> <image> | launched Text Editor (app 1, pid 3825201) in workspace claude-code-r17632-copy-number; workspace 'claude-code-...
+agent: The amount due is 6062. Now I'll open the calculator.
+  call launch_app {"app": "calculator"}
+  -> <image> | launched Calculator (app 2, pid 3825243) in workspace claude-code-r17632-copy-number; workspace 'claude-code-r...
+  call mouse_click {"x": 503, "y": 590}
+  -> ok (pointer at 503,590)
+  call mouse_click {"x": 639, "y": 590}
+  -> ok (pointer at 639,590)
+  call mouse_click {"x": 367, "y": 686}
+  -> ok (pointer at 367,686)
+  call mouse_click {"x": 639, "y": 542}
+  -> ok (pointer at 639,542)
+  call mouse_click {"x": 775, "y": 542}
+  -> ok (pointer at 775,542)
+  call mouse_click {"x": 503, "y": 686}
+  call mouse_click {"x": 503, "y": 686}
+  -> ok (pointer at 503,686)
+  -> ok (pointer at 503,686)
+agent: I clicked the wrong keys. The sequence I entered was 5609 × 22 instead of 6062 × 2. I'll check the screen and clear it.
+  call screenshot {}
+  -> <image> | workspace 'claude-code-r17632-copy-number' screen 1280x720 px (captured in 9.3 ms); also saved as <run>/w29a3e...
+agent: The display shows "5609×." because my last two clicks hit the decimal point, not the 2. I'll clear it and enter 6062 × 2 with the correct keys.
+  call mouse_click {"x": 367, "y": 494}
+  -> ok (pointer at 367,494)
+  call mouse_click {"x": 639, "y": 590}
+  -> ok (pointer at 639,590)
+  call mouse_click {"x": 367, "y": 686}
+  -> ok (pointer at 367,686)
+  call mouse_click {"x": 639, "y": 590}
+  -> ok (pointer at 639,590)
+  call mouse_click {"x": 775, "y": 542}
+  call mouse_click {"x": 503, "y": 638}
+  -> ok (pointer at 775,542)
+  -> ok (pointer at 503,638)
+  call mouse_click {"x": 911, "y": 661}
+  call screenshot {}
+  -> ok (pointer at 911,661)
+  -> <image> | workspace 'claude-code-r17632-copy-number' screen 1280x720 px (captured in 9.7 ms); also saved as <run>/w29a3e...
+agent: The display shows 606 × 2. I left out one digit: 6062 needs a 2 after the 606. I'll clear and enter the full number.
+  call mouse_click {"x": 367, "y": 494}
+  -> ok (pointer at 367,494)
+  call mouse_click {"x": 639, "y": 590}
+  -> ok (pointer at 639,590)
+  call mouse_click {"x": 367, "y": 686}
+  -> ok (pointer at 367,686)
+  call mouse_click {"x": 639, "y": 590}
+  -> ok (pointer at 639,590)
+  call mouse_click {"x": 503, "y": 638}
+  -> ok (pointer at 503,638)
+  call mouse_click {"x": 775, "y": 542}
+  -> ok (pointer at 775,542)
+  call mouse_click {"x": 503, "y": 638}
+  call screenshot {}
+  -> ok (pointer at 503,638)
+  -> <image> | workspace 'claude-code-r17632-copy-number' screen 1280x720 px (captured in 11.7 ms); also saved as <run>/w29a3...
+agent: The expression now reads 6062 × 2. I'll press equals to confirm the result.
+  call mouse_click {"x": 911, "y": 661}
+  -> ok (pointer at 911,661)
+  call screenshot {"region": [302, 340, 978, 460]}
+  -> E_SESSION: the connection to workspace 'claude-code-r17632-copy-number''s compositor failed; the operation may...
+  call screenshot {}
+  -> <image> | workspace 'claude-code-r17632-copy-number' screen 1280x720 px (captured in 10.8 ms); also saved as <run>/w29a3...
+agent: Doubling the amount gives **12124**.  The invoice (`invoice-206.txt`) lists "Amount due: 6062" for Brightwood Ltd. I entered 6062 × 2 in the calculator and got 12124.  My first attempt had a couple of keypress mistakes (...
+
+USAGE {"turns": 30, "cost_usd": 0.006270100000000001, "duration_ms": 22576, "input": 20, "cache_read": 174850, "cache_creation": 14158, "output": 3376}

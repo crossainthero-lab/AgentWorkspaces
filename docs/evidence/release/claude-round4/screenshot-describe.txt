@@ -1,0 +1,14 @@
+prompt: Open the calculator, take a screenshot of it and describe what you see.
+model: haiku
+result: PASS
+verified by: calculator window True; description terms ['basic', 'keypad', 'display', 'equals', 'calculator']
+seconds: 7.3  exit: 0
+host display variables seen in the agent process group: ['DISPLAY', 'WAYLAND_DISPLAY', 'WAYLAND_SOCKET', 'XAUTHORITY']
+host wayland sockets unchanged: True
+
+[init] model=claude-haiku-5-5 mcp=[('agent-workspaces', 'connected')] builtin_tools=['Bash']
+  call launch_app {"app": "calculator", "screenshot": true}
+  -> <image> | launched Calculator (app 1, pid 3824862) in workspace claude-code-r17618-screenshot-describe; workspace 'claud...
+agent: I opened the Calculator and took a screenshot. It's saved at `<run>/w5a8360/shots/shot-01.png`.  The window is in **Basic** mode, shown in the title bar with a dropdown arrow. Its layout:  - **Top bar:** undo and redo ar...
+
+USAGE {"turns": 2, "cost_usd": 0.00113294, "duration_ms": 6432, "input": 4, "cache_read": 23424, "cache_creation": 3019, "output": 589}

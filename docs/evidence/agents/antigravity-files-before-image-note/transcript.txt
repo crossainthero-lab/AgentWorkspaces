@@ -1,0 +1,11 @@
+prompt: Open the file manager and look inside the folder <tmp>/inbox. Tell me which files are in it.
+
+[init] model=gemini-3.8-flash-low tools=60 (incl. its own shell and browser tools; only mcp(agent-workspaces/*) is allowed in headless mode)
+  call launch_app {"app": "file manager"} -> launched Files (app 1, pid 1136410) in workspace antigravity-files; workspace 'antigravity-files' screen 1280x...
+  call keyboard_key {"combo": "ctrl+l"} -> ok (pointer at 0.0,0.0)
+  call keyboard_type {"text": "<run>/inbox"} -> ok (pointer at 0.0,0.0)
+  call keyboard_key {"combo": "Return"} -> ok (pointer at 0.0,0.0)
+  call screenshot {} -> workspace 'antigravity-files' screen 1280x720 px (captured in 13.0 ms); also saved as <run>/wca4d34/shots/shot...
+agent: The file manager was opened and navigated to `<run>/inbox`.  The folder contains the following 3 files: - **`alpha.txt`** - **`beta.txt`** - **`gamma.txt`** 
+
+USAGE {"turns": 1, "duration_s": 24.917548149, "input_tokens": 24211, "output_tokens": 513, "thinking_tokens": 0, "cache_read_tokens": 54580, "total_tokens": 24724}

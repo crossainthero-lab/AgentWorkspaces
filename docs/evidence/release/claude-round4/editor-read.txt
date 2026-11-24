@@ -1,0 +1,14 @@
+prompt: Open <run>/data/notes/notes-318.txt in a text editor and tell me what the second line says.
+model: haiku
+result: PASS
+verified by: editor window for notes-318.txt: True; second line 'the jade door opens at 3:30' in answer: True
+seconds: 6.5  exit: 0
+host display variables seen in the agent process group: ['DISPLAY', 'WAYLAND_DISPLAY', 'WAYLAND_SOCKET', 'XAUTHORITY']
+host wayland sockets unchanged: True
+
+[init] model=claude-haiku-5-5 mcp=[('agent-workspaces', 'connected')] builtin_tools=['Bash']
+  call launch_app {"app": "text editor", "args": ["<run>/data/notes/notes-318.txt"]}
+  -> <image> | launched Text Editor (app 1, pid 3825021) in workspace claude-code-r17626-editor-read; workspace 'claude-code-...
+agent: The second line of `notes-318.txt` says: **the jade door opens at 3:30**  I opened the file in the Text Editor in my workspace. The full file has three lines: "Meeting memo", "the jade door opens at 3:30", and "Bring sna...
+
+USAGE {"turns": 2, "cost_usd": 0.00104996, "duration_ms": 5620, "input": 4, "cache_read": 23446, "cache_creation": 3208, "output": 347}

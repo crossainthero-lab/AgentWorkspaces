@@ -1,0 +1,39 @@
+{
+  "agent": "codex",
+  "model": "gpt-6-luna",
+  "prompt": "Open a text editor, write a short paragraph about autumn rain and save it as autumn.txt.",
+  "exit_code": 0,
+  "seconds": 32.4,
+  "workspace": "codex-editor",
+  "run_alongside": [],
+  "workspace_viewers_attached": 0,
+  "workspace_windows": [
+    "autumn.txt (<tmp>/editor) - Text Editor"
+  ],
+  "files_in_workspace_home": [],
+  "file_previews": {},
+  "host_display_variables_seen_in_agent_process_group": [],
+  "host_wayland_sockets_before_after": [
+    {
+      "host_sockets": [
+        "wayland-0"
+      ]
+    },
+    {
+      "host_sockets": [
+        "wayland-0"
+      ]
+    }
+  ],
+  "agent_peak_pss_mib_incl_mcp_server": 240.4,
+  "agent_cpu_seconds": 1.39,
+  "workspace_memory_mib": 209,
+  "workspace_cpu_seconds": 2.2,
+  "usage": {
+    "input_tokens": 293995,
+    "cached_input_tokens": 260480,
+    "cache_write_input_tokens": 0,
+    "output_tokens": 682,
+    "reasoning_output_tokens": 0
+  }
+}

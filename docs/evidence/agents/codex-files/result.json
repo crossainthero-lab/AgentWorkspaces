@@ -1,0 +1,39 @@
+{
+  "agent": "codex",
+  "model": "gpt-6-luna",
+  "prompt": "Open the file manager and look inside the folder <tmp>/inbox. Tell me which files are in it.",
+  "exit_code": 0,
+  "seconds": 30.7,
+  "workspace": "codex-files",
+  "run_alongside": [],
+  "workspace_viewers_attached": 0,
+  "workspace_windows": [
+    "inbox"
+  ],
+  "files_in_workspace_home": [],
+  "file_previews": {},
+  "host_display_variables_seen_in_agent_process_group": [],
+  "host_wayland_sockets_before_after": [
+    {
+      "host_sockets": [
+        "wayland-0"
+      ]
+    },
+    {
+      "host_sockets": [
+        "wayland-0"
+      ]
+    }
+  ],
+  "agent_peak_pss_mib_incl_mcp_server": 238.9,
+  "agent_cpu_seconds": 1.31,
+  "workspace_memory_mib": 217,
+  "workspace_cpu_seconds": 1.8,
+  "usage": {
+    "input_tokens": 218174,
+    "cached_input_tokens": 189312,
+    "cache_write_input_tokens": 0,
+    "output_tokens": 485,
+    "reasoning_output_tokens": 0
+  }
+}

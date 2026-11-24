@@ -1,0 +1,17 @@
+agent: hermes through its REAL configuration (no integration flags; host display and bus variables removed from the process)
+prompt: Open my browser and go to agdc.dev and tell me what the headline says.
+
+[init] model=
+  call tool_describe {"names": ["mcp__agent_workspaces__launch_browser", "mcp__agent_workspaces__describe_screen", "mcp__agent_workspaces__wait", "mcp_...
+  ->  {"tools": {"mcp__agent_workspaces__launch_browser": {"description": "Start a browser inside this workspace. De...
+  call launch_browser {"url": "https://agdc.dev"}
+  ->  launched google-chrome (app 1, pid 3960754), profile throwaway. Take a screenshot to see it.
+  call wait {"seconds": 4}
+  ->  waited
+  call screenshot {"max_width": 1400}
+  -> <image as file path: MEDIA tag>  workspace 'hermes-home' screen 1280x720 px (captured in 26.3 ms); also saved as /run/user/1000/agent-workspac...
+  call vision_analyze {"image_url": "~/.hermes/cache/images/img_e8f5ac98aff6.png", "question": "This is a browser window. What is the page's main headli...
+  ->  {   "success": true,   "analysis": "## Full description and explanation of the image\n\n**Overall context.** T...
+agent: Browser's open on agdc.dev. The headline reads:  **"One workspace. Every agent."**  It's the AgentDock site (Silver build) — subheadline below: "Claude Code, Codex, and Antigravity. All in one place." with a "Download AgentDock Silver" button and a macOS availability banner.
+
+USAGE null

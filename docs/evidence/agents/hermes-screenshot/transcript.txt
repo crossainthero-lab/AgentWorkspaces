@@ -1,0 +1,8 @@
+prompt: Open the calculator, take a screenshot of it and tell me what you see on its screen.
+
+[init] model=qwen3.6-35b-a3b
+  call launch_app {"app": "calculator"}
+  -> <image as file path: MEDIA tag> {"_multimodal": true, "content": [{"type": "text", "text": "{\"result\": \" Calculator (app 1, pid 3327481) in...
+agent: The calculator is open and ready. Here's what I see:  - **Mode selector** at the top: "Basic" (with a dropdown arrow, suggesting other modes are available) - **Display area**: A large blank rectangle at the top, with a text input bar below it showing just a cursor `|` — no numbers entered yet - **Button grid** (5 columns):   - **Row 1**: `C` (clear), `↑n` (up), `↓n` (down), `÷` (divide), `mod`   -...
+
+USAGE null

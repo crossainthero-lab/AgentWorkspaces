@@ -1,0 +1,30 @@
+prompt: Open a text editor, write a short paragraph about autumn rain and save it as autumn.txt.
+
+[init] model=claude-haiku-5-5 mcp=[('agent-workspaces', 'connected')] builtin_tools=[]
+  call launch_app {"app": "text editor"}
+  -> <image> | launched Text Editor (app 1, pid 1077886) in workspace claude-code-editor; workspace 'claude-code-editor' scre...
+  call keyboard_type {"text": "Autumn rain falls softly on the golden leaves, tapping gently against the windowpanes as the afternoon grows grey and quiet. The a...
+  call keyboard_key {"combo": "ctrl+s"}
+  -> ok (pointer at 0.0,0.0)
+  -> ok (pointer at 0.0,0.0)
+  call screenshot {}
+  -> <image> | workspace 'claude-code-editor' screen 1280x720 px (captured in 9.0 ms); also saved as <run>/w861e7b/shots/shot...
+agent: The save dialog is open with a default name. I'll replace it with autumn.txt.
+  call keyboard_key {"combo": "ctrl+a"}
+  -> ok (pointer at 0.0,0.0)
+  call keyboard_type {"text": "autumn.txt"}
+  -> ok (pointer at 0.0,0.0)
+  call keyboard_key {"combo": "Return"}
+  call screenshot {}
+  -> ok (pointer at 0.0,0.0)
+  -> <image> | workspace 'claude-code-editor' screen 1280x720 px (captured in 8.9 ms); also saved as <run>/w861e7b/shots/shot...
+agent: The name reads autumn.txt, but the dialog is still open. I'll click Save.
+  call mouse_click {"x": 1233, "y": 22}
+  call wait {"seconds": 1}
+  -> ok (pointer at 1233,22)
+  call screenshot {}
+  -> waited
+  -> <image> | workspace 'claude-code-editor' screen 1280x720 px (captured in 22.9 ms); also saved as <run>/w861e7b/shots/sho...
+agent: I wrote a short paragraph about autumn rain in the text editor and saved it as `autumn.txt`. The title bar shows the file name, and the editor's location line reads `~/`, so it's in your home folder in the workspace.  Th...
+
+USAGE {"turns": 12, "cost_usd": 0.004404450000000001, "duration_ms": 14928, "input": 12, "cache_read": 58985, "cache_creation": 16197, "output": 1148}

@@ -1,0 +1,7 @@
+prompt: Open the calculator, take a screenshot of it and tell me what you see on its screen.
+
+agent: I’ll open the calculator in my graphical workspace and inspect its screen.
+  call launch_app {"app": "calculator"} -> <image> | launched Calculator (app 1, pid 1088242) in workspace codex-screenshot; workspace 'codex-s...
+agent: The calculator is open in Basic mode. Its screen is blank, with the cursor ready for input. The keypad shows number keys and arithmetic operations.
+
+USAGE {"input_tokens": 78547, "cached_input_tokens": 66560, "cache_write_input_tokens": 0, "output_tokens": 168, "reasoning_output_tokens": 0}

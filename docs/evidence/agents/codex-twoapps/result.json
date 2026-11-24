@@ -1,0 +1,40 @@
+{
+  "agent": "codex",
+  "model": "gpt-6-luna",
+  "prompt": "Open the calculator and a text editor. Work out 17 times 23 in the calculator, then type the result into the text editor.",
+  "exit_code": 0,
+  "seconds": 31.3,
+  "workspace": "codex-twoapps",
+  "run_alongside": [],
+  "workspace_viewers_attached": 0,
+  "workspace_windows": [
+    "Calculator",
+    "391 (Draft) - Text Editor"
+  ],
+  "files_in_workspace_home": [],
+  "file_previews": {},
+  "host_display_variables_seen_in_agent_process_group": [],
+  "host_wayland_sockets_before_after": [
+    {
+      "host_sockets": [
+        "wayland-0"
+      ]
+    },
+    {
+      "host_sockets": [
+        "wayland-0"
+      ]
+    }
+  ],
+  "agent_peak_pss_mib_incl_mcp_server": 240.2,
+  "agent_cpu_seconds": 1.33,
+  "workspace_memory_mib": 264,
+  "workspace_cpu_seconds": 2.8,
+  "usage": {
+    "input_tokens": 219103,
+    "cached_input_tokens": 189568,
+    "cache_write_input_tokens": 0,
+    "output_tokens": 535,
+    "reasoning_output_tokens": 0
+  }
+}

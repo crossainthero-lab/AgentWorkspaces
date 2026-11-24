@@ -1,0 +1,14 @@
+prompt: Open the calculator, take a screenshot of it and describe what you see.
+model: haiku
+result: PASS
+verified by: calculator window True; description terms ['basic', 'keypad', 'buttons', 'display', 'calculator']
+seconds: 8.2  exit: 0
+host display variables seen in the agent process group: ['DISPLAY', 'WAYLAND_DISPLAY', 'WAYLAND_SOCKET', 'XAUTHORITY']
+host wayland sockets unchanged: True
+
+[init] model=claude-haiku-5-5 mcp=[('agent-workspaces', 'connected')] builtin_tools=['Bash']
+  call launch_app {"app": "calculator"}
+  -> <image> | launched Calculator (app 1, pid 3925629) in workspace claude-code-r21860-screenshot-describe; workspace 'claud...
+agent: The Calculator is open in your workspace, and the screenshot is saved at `<run>/w04dc55/shots/shot-01.png`.  It's a 1280×720 window in the **Basic** mode of GNOME Calculator:  - **Title bar:** "Basic" with a dropdown arr...
+
+USAGE {"turns": 2, "cost_usd": 0.0015983700000000002, "duration_ms": 7041, "input": 4, "cache_read": 20747, "cache_creation": 5270, "output": 673}

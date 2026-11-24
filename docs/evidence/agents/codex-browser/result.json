@@ -1,0 +1,41 @@
+{
+  "agent": "codex",
+  "model": "gpt-6-luna",
+  "prompt": "Open my browser and visit agdc.dev, then tell me what the page's main heading says.",
+  "exit_code": 0,
+  "seconds": 21.4,
+  "workspace": "codex-browser",
+  "run_alongside": [],
+  "workspace_viewers_attached": 0,
+  "workspace_windows": [
+    "AgentDock Silver \u2014 one workspace, every agent - Google Chrome"
+  ],
+  "files_in_workspace_home": [],
+  "file_previews": {},
+  "host_display_variables_seen_in_agent_process_group": [],
+  "host_wayland_sockets_before_after": [
+    {
+      "host_sockets": [
+        "wayland-0"
+      ]
+    },
+    {
+      "host_sockets": [
+        "wayland-0"
+      ]
+    }
+  ],
+  "dbus_calls_through_filtering_proxy": [],
+  "agent_dbus_addresses": [],
+  "agent_peak_pss_mib_incl_mcp_server": 252.9,
+  "agent_cpu_seconds": 1.24,
+  "workspace_memory_mib": 623,
+  "workspace_cpu_seconds": 5.3,
+  "usage": {
+    "input_tokens": 166542,
+    "cached_input_tokens": 150656,
+    "cache_write_input_tokens": 0,
+    "output_tokens": 464,
+    "reasoning_output_tokens": 0
+  }
+}

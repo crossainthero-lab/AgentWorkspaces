@@ -1,0 +1,8 @@
+prompt: Open the file manager and look inside the folder <tmp>/inbox. Tell me which files are in it.
+
+[init] model=claude-haiku-5-5 mcp=[('agent-workspaces', 'connected')] builtin_tools=[]
+  call launch_app {"app": "file manager", "args": ["<run>/inbox"]}
+  -> <image> | launched Files (app 1, pid 1079444) in workspace claude-code-files; workspace 'claude-code-files' screen 1280x...
+agent: The folder `<run>/inbox` is open in the file manager. It contains four items:  1. **archive** (folder) 2. **holiday.jpg** (image) 3. **invoice-2024.pdf** (PDF document) 4. **notes.txt** (text file)  I didn't open any of ...
+
+USAGE {"turns": 2, "cost_usd": 0.0008388600000000001, "duration_ms": 4676, "input": 4, "cache_read": 17766, "cache_creation": 2734, "output": 228}

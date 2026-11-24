@@ -1,0 +1,39 @@
+prompt: I need a quick note. Use a text editor to write two sentences on a quiet library and keep it under the file name library-170.txt.
+model: haiku
+result: PASS
+verified by: library-170.txt: 27 words, contains 'library': True
+seconds: 39.6  exit: 0
+host display variables seen in the agent process group: ['DISPLAY', 'WAYLAND_DISPLAY', 'WAYLAND_SOCKET', 'XAUTHORITY']
+host wayland sockets unchanged: True
+
+[init] model=claude-haiku-5-5 mcp=[('agent-workspaces', 'connected')] builtin_tools=['Bash']
+  call launch_app {"app": "text editor"}
+  -> <image> | launched Text Editor (app 1, pid 3824085) in workspace claude-code-r17565-editor-save-2; workspace 'claude-cod...
+  call keyboard_type {"text": "The quiet library was filled with the soft sound of turning pages. Sunlight drifted across the wooden tables as readers settled in...
+  call keyboard_key {"combo": "ctrl+s"}
+  -> ok (pointer at 0.0,0.0)
+  -> ok (pointer at 0.0,0.0)
+  call screenshot {}
+  -> <image> | workspace 'claude-code-r17565-editor-save-2' screen 1280x720 px (captured in 9.8 ms); also saved as <run>/wb0f...
+agent: The save dialog picked up the first words of the text as the file name. I'll replace it with the requested name.
+  call keyboard_key {"combo": "ctrl+a"}
+  -> ok (pointer at 0.0,0.0)
+  call keyboard_type {"text": "library-170.txt"}
+  -> ok (pointer at 0.0,0.0)
+  call screenshot {"max_width": 640}
+  -> <image> | workspace 'claude-code-r17565-editor-save-2' screen 640x360 px (captured in 16.9 ms); also saved as <run>/wb0f...
+  call keyboard_key {"combo": "Return"}
+  -> ok (pointer at 0.0,0.0)
+  call wait {"seconds": 1}
+  call screenshot {"max_width": 640}
+  -> waited
+  -> <image> | workspace 'claude-code-r17565-editor-save-2' screen 640x360 px (captured in 32.0 ms); also saved as <run>/wb0f...
+  call Bash {"command": "cat ~/library-170.txt", "description": "Print the saved note to verify its contents"}
+  -> Exit code 1 cat: ~/library-170.txt: No such file or directory
+  call Bash {"command": "find / -name 'library-170.txt' 2>/dev/null | head", "description": "Search filesystem for the saved note"}
+  -> <run>/wb0fa65/home/library-170.txt
+  call Bash {"command": "cat <run>/wb0fa65/home/library-170.txt", "description": "Print the saved note contents"}
+  -> The quiet library was filled with the soft sound of turning pages. Sunlight drifted across the wooden tables a...
+agent: I wrote the two-sentence note in the Text Editor and saved it as `library-170.txt`.  The text reads: "The quiet library was filled with the soft sound of turning pages. Sunlight drifted across the wooden tables as reader...
+
+USAGE {"turns": 14, "cost_usd": 0.00346688, "duration_ms": 38724, "input": 18, "cache_read": 136658, "cache_creation": 7005, "output": 1395}
