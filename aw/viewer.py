@@ -160,7 +160,7 @@ class Viewer(Gtk.Application):
     # ---- backend
     def connect_backend(self) -> bool:
         try:
-            self.api = Client(autostart=False)
+            self.api = Client(autostart=False, role="admin")
             self.info = self.api.call("workspace.get", workspace=self.ws_name)
             if self.info["state"] != "running":
                 self.show_message(f"Workspace is {self.info['state']}")
@@ -219,7 +219,7 @@ class Viewer(Gtk.Application):
 
     def event_loop(self):
         try:
-            c = Client(autostart=False)
+            c = Client(autostart=False, role="admin")
             for ev in c.events(workspaces=[self.info["id"]]):
                 t, d = ev["event"], ev["data"]
                 if t == "workspace.input_mode":

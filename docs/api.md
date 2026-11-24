@@ -1,4 +1,4 @@
-# AgentWorkspaces local API (version 1)
+# AgentWorkspaces local API (version 2)
 
 The daemon `agent-workspacesd` (started on demand by the CLI, or `agent-workspaces daemon`) exposes a
 versioned JSON API on a user-only unix socket. This is the interface for the CLI, the MCP server, and
@@ -7,8 +7,12 @@ for other programs such as Gnotch. It does not depend on GNOME Shell and does no
 * Socket: `$XDG_RUNTIME_DIR/agent-workspaces/api.sock` (directory mode 0700, socket mode 0600). Override the
   base directory with `AW_BASE_DIR` (tests, side-by-side instances).
 * Framing: one JSON object per line (`\n` terminated), UTF-8.
-* Version: every message carries `"v": 1`. Additive changes keep `v` at 1; breaking changes bump it.
-  `hello` returns `api_version`.
+* Version: every message carries `"v": 2`. Additive changes keep `v`; breaking changes bump it.
+  `hello` returns `api_version`. **Version 2 (breaking vs 1): every request except `hello` and `auth.login` must
+  be authenticated** (below). A v1 client that sends no credential gets `E_UNAUTHENTICATED`.
+  Other changes in 2: events match on workspace ids only; `app.started`/`app.exited` carry `id`;
+  `workspace.configure|pause|resume|start|stop|assign|enter`, `approval.resolve` and `viewer.attach` are no longer
+  callable with an agent credential; `workspace.list` with an agent credential lists only its own workspace.
 
 ## Request / response
 
@@ -20,6 +24,59 @@ for other programs such as Gnotch. It does not depend on GNOME Shell and does no
 
 `id` is any JSON value; it is echoed back. A workspace is addressed by `workspace` = its **name** or **id**.
 
+## Authentication
+
+The socket is `0600` in a `0700` directory and the daemon refuses any peer whose kernel-reported uid
+(`SO_PEERCRED`) is not its own. On top of that every request carries a credential (a token):
+
+| credential | file | bound to | scopes |
+|---|---|---|---|
+| workspace credential (default) | `<base>/<workspace id>/token` (0600) | one workspace id | `read screenshot input launch windows clipboard approval` |
+| issued / exchanged credential | printed once (`credential.issue`, `auth.exchange`); only its SHA-256 is stored | one workspace id | a subset you choose; optional expiry (1 s .. 24 h) |
+| admin credential (the human: CLI, viewer, panel extension) | `<base>/admin.token` (0600) | all workspaces | everything |
+
+* **Sending it.** Either put the token in the `token` field of each request
+  (`{"v":2,"id":1,"method":"workspace.list","params":{},"token":"awt1_..."}`), or send `auth.login {token}` once and the
+  connection stays authenticated. The token is never logged and never echoed back.
+* **Authorisation** happens before anything runs: credential -> workspace -> scope. A workspace credential used on
+  any other workspace, or on a reference that does not exist, gets `E_FORBIDDEN` ("this credential is bound to
+  workspace X"): it is never redirected to another workspace, a "default" or the first one, and cannot be used to
+  find out which other workspaces exist. `workspace` must always be given explicitly.
+* **Scopes.** `read` (workspace.get/usage, app.list, events, approvals/grants of its workspace), `screenshot`
+  (screen.*), `input` (input.*), `launch` (workspace.launch, app.kill), `windows` (window.list/action), `clipboard`
+  (the workspace's own clipboard), `approval` (approval.request, grant.request), `admin` (never in a default
+  credential: start/stop/configure/pause/resume/rename of its own workspace).
+* **Human-only methods** (admin credential only): `workspace.create|destroy|assign|enter`, `approval.resolve`,
+  `viewer.attach`, `credential.*`, `grant.resolve|revoke`, `audit.tail`. An agent cannot resume a takeover,
+  approve its own request, change the clipboard policy or grant itself anything. A workspace credential cannot
+  claim `agent_kind: "human"` to bypass manual takeover (only the admin credential can act as the human).
+* Methods that are not in the policy table (`aw/auth.py: POLICY`) are denied to every non-admin credential. Add a
+  new method to that table to make it reachable with an agent credential.
+* Failed authentication is slowed down and the connection is closed after 10 failures. Credentials can be rotated
+  (`credential.rotate`; the old token stops working at once, also on connections that are already open) and
+  revoked.
+
+### Credential lookup order (Python client `aw.client.Client`, used by the CLI, the MCP server and the viewer)
+
+Callers do not handle sockets or tokens: `Client()` finds the credential itself.
+
+1. role **agent** (`Client(role="agent")`, the MCP server): the `token=` argument; `AW_TOKEN`; the file named by
+   `AW_TOKEN_FILE`. If any of these is set it is final (nothing else is tried, and the admin credential is never
+   used). Otherwise: the token file of the workspace being addressed (`workspace` parameter of the call, else
+   `AW_WORKSPACE`) under `AW_BASE_DIR` (default `$XDG_RUNTIME_DIR/agent-workspaces`); otherwise the token files of
+   the workspaces assigned to `AW_AGENT_KIND`.
+2. role **admin** (the viewer): `token=`; `AW_ADMIN_TOKEN`; the file `AW_ADMIN_TOKEN_FILE`; `<base>/admin.token`.
+3. role **auto** (default, the CLI): as agent tiers `token=`/`AW_TOKEN`/`AW_TOKEN_FILE` if one is set (a configured
+   agent never silently becomes admin); otherwise as admin; otherwise the agent token files.
+
+Token files that are not owned by you with mode 0600 are refused (`E_INSECURE_CREDENTIAL_FILE`). With no credential
+at all the client raises `E_NO_CREDENTIALS` before talking to the daemon. Other languages (GJS, ...): read the
+token file and send the `token` field.
+
+Same-user limit: a process of yours can read your 0600 files, so these credentials separate agents that were only
+given a workspace token from each other and from the human's powers; they do not stop a hostile process that runs
+as you. See `docs/security-model.md`.
+
 ### Error codes
 
 | code | meaning |
@@ -30,19 +87,26 @@ for other programs such as Gnotch. It does not depend on GNOME Shell and does no
 | `E_ASSIGNMENT` | caller identified as agent kind X, workspace is assigned to Y |
 | `E_EXISTS`, `E_BAD_NAME`, `E_BAD_SIZE`, `E_BAD_AGENT`, `E_BAD_GPU`, `E_BAD_CLIPBOARD`, `E_BAD_POLICY`, `E_BAD_HOME` | validation |
 | `E_BAD_ARGS`, `E_BAD_REQUEST`, `E_UNKNOWN_METHOD` | malformed call |
+| `E_UNAUTHENTICATED`, `E_TOKEN_EXPIRED` | no / unknown / revoked / expired credential |
+| `E_FORBIDDEN` | the credential is not valid for that workspace, scope or method |
+| `E_GRANT_REQUIRED`, `E_NOT_HUMAN_CHANNEL`, `E_BAD_GRANT` | human-only grants (below) |
+| `E_ROUTING` | the compositor socket of the workspace failed the identity check; nothing was sent |
+| `E_BAD_SCOPE`, `E_BAD_TTL` | credential issue/exchange validation |
+| `E_NO_CREDENTIALS`, `E_INSECURE_CREDENTIAL_FILE`, `E_DISCONNECTED` | client side |
 | `E_START_FAILED`, `E_SESSION`, `E_IO`, `E_INTERNAL` | runtime failures |
 
 ## Caller identity (`agent_kind`)
 
-Input/screenshot/launch methods accept an optional `agent_kind`:
+With the **admin credential** (CLI) input/screenshot/launch methods accept an optional `agent_kind` claim. With a
+workspace credential the claim is ignored: the credential decides.
 
 * `"human"` (or `"actor":"human"`): the person. Allowed while the workspace is in manual takeover.
 * an agent kind (`claude-code`, `codex`, `antigravity`, `hermes`, `other`): the call is rejected with
   `E_ASSIGNMENT` when the workspace is assigned to a *different* kind, and with `E_PAUSED` during takeover.
 * omitted: treated as an agent (honours takeover), not assignment-checked.
 
-This is cooperative scoping, not authentication: any process of the same user can connect to the socket.
-See `docs/security-model.md`.
+`agent_kind` scoping is cooperative labelling for the human's CLI. Authentication and workspace binding (above) are
+what separate agents.
 
 ## Workspace object (`summary`)
 
@@ -68,8 +132,28 @@ See `docs/security-model.md`.
 
 ## Methods
 
-### Meta
-* `hello` -> `{api_version, daemon_version, agent_kinds, uptime, systemd_scopes}`
+### Meta and authentication
+* `hello` -> `{api_version, daemon_version, agent_kinds, uptime, systemd_scopes, auth}` (no credential needed)
+* `auth.login {token}` -> `{principal, api_version}`; `auth.whoami` -> `{kind, workspace, scopes, credential, expires_at}`
+* `auth.exchange {scopes?, ttl_seconds?, workspace? (admin only)}` -> `{token, credential, workspace, scopes, expires_at}`:
+  a short-lived credential (default 15 min, max 24 h, never longer than its parent) for the same workspace with the
+  same or fewer scopes and never `admin`. For handing to one MCP session / one sub-agent.
+* `credential.list|rotate|revoke|issue {workspace, ...}` (admin): `list` -> credentials without tokens plus the
+  token file path; `rotate` replaces the default token (`{admin:true}` rotates the admin token); `revoke {id?, all?}`;
+  `issue {scopes?, ttl_seconds?, label?}` returns the token once.
+* `audit.tail {n?}` (admin) -> `{events}`: who/what/which workspace/outcome, never parameters or contents.
+
+### Human-only grants (sensitive operations)
+Agents may only ask; a person decides through the CLI on a terminal, the viewer or GNOME Shell.
+* `grant.request {workspace, kind, resource?, detail?}` (scope `approval`) -> grant `{id, status:"pending"}`.
+  Kinds: `browser_profile` (use a copy of a signed-in browser profile; `resource` = profile name),
+  `host_clipboard`. Idempotent per (workspace, kind, resource).
+* `grant.check {workspace, kind, resource?}` -> `{granted, expires_at}`; `grant.list {workspace?, pending?}`.
+* `grant.resolve {id, decision:"granted"|"denied", ttl_seconds?}` and `grant.revoke {id}`: admin credential **and** a
+  human channel (peer has an interactive terminal, is the shipped viewer, or is GNOME Shell), else
+  `E_NOT_HUMAN_CHANNEL`. A grant lasts 15 minutes by default (max 8 h) and is bound to the workspace and resource.
+* Server code that performs a sensitive operation calls `Daemon.grants.require(ws_id, kind, resource)` first, which
+  raises `E_GRANT_REQUIRED` and logs the refused attempt. Events: `grant.requested`, `grant.resolved`.
 
 ### Workspaces
 * `workspace.list {agent_kind?}` -> `{workspaces:[summary]}` (with `agent_kind`, only workspaces assigned to
@@ -151,6 +235,7 @@ event stream (you may still send requests on it). Each event:
 
 ## Gnotch quick reference
 
+0. Read `<base>/admin.token` (API v2) and send it as the `token` field of every request (or `auth.login` once).
 1. Connect to `api.sock`, send `events.subscribe`, then `workspace.list` to render the current state.
 2. Show `name`, `agent.icon_hint`, `state`, `input_mode`, `activity.last_action`, `pending_approvals`.
 3. "Enter" button: `workspace.enter {workspace}` (add `takeover:true` to pause the agent at the same time).

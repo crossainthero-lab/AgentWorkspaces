@@ -106,6 +106,23 @@ def build_parser() -> argparse.ArgumentParser:
     ap_ = sub.add_parser("approvals"); ap_.add_argument("op", choices=["list", "approve", "deny", "request"])
     ap_.add_argument("arg", nargs="?"); ap_.add_argument("--workspace"); ap_.add_argument("--title", default="")
     sub.add_parser("mcp", help="run the MCP server on stdio").add_argument("--workspace")
+    tk = sub.add_parser("token", help="workspace credentials (the token itself is never printed unless 'issue')")
+    tk.add_argument("op", choices=["path", "list", "rotate", "issue", "revoke", "whoami"])
+    tk.add_argument("workspace", nargs="?", metavar="NAME")
+    tk.add_argument("--scopes", help="comma list (issue): read,screenshot,input,launch,windows,clipboard,approval")
+    tk.add_argument("--ttl", type=float, default=900, help="seconds (issue), default 900, max 86400")
+    tk.add_argument("--label", default="")
+    tk.add_argument("--id", help="credential id (revoke); without it all non-default credentials of the workspace")
+    tk.add_argument("--admin", action="store_true", help="rotate: the admin credential instead of a workspace's")
+    gr = sub.add_parser("grants", help="human authorisation of sensitive operations (interactive terminal only)")
+    gr.add_argument("op", choices=["list", "request", "approve", "deny", "revoke"])
+    gr.add_argument("arg", nargs="?", help="grant id (approve/deny/revoke) or kind (request)")
+    gr.add_argument("--workspace")
+    gr.add_argument("--resource", default="")
+    gr.add_argument("--detail", default="")
+    gr.add_argument("--ttl", type=float, default=900, help="seconds the grant lasts (approve), default 900")
+    au = sub.add_parser("audit", help="show the audit log (who did what; never contains secrets or contents)")
+    au.add_argument("-n", type=int, default=30)
     ig = sub.add_parser("integrate", help="opt-in agent integration (reversible)")
     ig.add_argument("agent", choices=["claude-code", "codex", "antigravity", "hermes"])
     ig.add_argument("action", choices=["status", "install", "uninstall", "show"])
@@ -130,6 +147,74 @@ def main(argv: Optional[List[str]] = None) -> int:
     except ApiError as e:
         print(f"error: {e.message} [{e.code}]", file=sys.stderr)
         return {"E_PAUSED": 3, "E_NOT_FOUND": 4, "E_NOT_RUNNING": 5, "E_ASSIGNMENT": 6}.get(e.code, 1)
+
+
+def _token(c: Client, args) -> int:
+    if args.op == "whoami":
+        _p(c.call("auth.whoami"))
+        return 0
+    if args.op == "rotate" and args.admin:
+        r = c.call("credential.rotate", admin=True)
+        print(f"admin credential rotated; new token in {r['token_file']}")
+        return 0
+    if not args.workspace:
+        print("token: a workspace name is required", file=sys.stderr)
+        return 2
+    if args.op == "path":
+        _p({"token_file": c.call("credential.list", workspace=args.workspace)["token_file"]})
+    elif args.op == "list":
+        _p(c.call("credential.list", workspace=args.workspace))
+    elif args.op == "rotate":
+        r = c.call("credential.rotate", workspace=args.workspace)
+        print(f"rotated; the old token no longer works. New token file: {r['token_file']}")
+    elif args.op == "revoke":
+        r = c.call("credential.revoke", workspace=args.workspace, **({"id": args.id} if args.id else {}))
+        print(f"revoked {r['revoked']} credential(s)")
+    elif args.op == "issue":
+        kw = {"scopes": args.scopes.split(",")} if args.scopes else {}
+        r = c.call("credential.issue", workspace=args.workspace, ttl_seconds=args.ttl, label=args.label, **kw)
+        # the one place a token is printed: stdout, on request. Put it in AW_TOKEN of the session that needs it.
+        print(r["token"])
+        print(f"# credential {r['credential']}, scopes {','.join(r['scopes'])}, expires_at {r['expires_at']}",
+              file=sys.stderr)
+    return 0
+
+
+def _grants(c: Client, args) -> int:
+    if args.op == "list":
+        _p(c.call("grant.list", **({"workspace": args.workspace} if args.workspace else {})))
+        return 0
+    if args.op == "request":
+        if not (args.workspace and args.arg):
+            print("grants request --workspace NAME KIND [--resource R]", file=sys.stderr)
+            return 2
+        _p(c.call("grant.request", workspace=args.workspace, kind=args.arg, resource=args.resource,
+                  detail=args.detail))
+        return 0
+    # approve / deny / revoke: a person at an interactive terminal, never a script or an agent
+    if not (sys.stdin.isatty() and sys.stdout.isatty()):
+        print("grants approve|deny|revoke need an interactive terminal: this decision is the user's.",
+              file=sys.stderr)
+        return 7
+    if not args.arg:
+        print("grant id required (see: agent-workspaces grants list)", file=sys.stderr)
+        return 2
+    g = next((x for x in c.call("grant.list")["grants"] if x["id"] == args.arg), None)
+    if g is None:
+        print(f"no grant {args.arg}", file=sys.stderr)
+        return 4
+    print(f"Workspace {g['workspace']} asks to: {g['description']}\n  kind: {g['kind']}"
+          f"{'  resource: ' + g['resource'] if g['resource'] else ''}\n  detail: {g['detail'] or '-'}")
+    word = {"approve": "yes", "deny": "no", "revoke": "revoke"}[args.op]
+    if input(f"Type '{word}' to {args.op} (anything else cancels): ").strip().lower() != word:
+        print("cancelled")
+        return 1
+    if args.op == "revoke":
+        _p(c.call("grant.revoke", id=args.arg))
+    else:
+        _p(c.call("grant.resolve", id=args.arg, decision="granted" if args.op == "approve" else "denied",
+                  ttl_seconds=args.ttl))
+    return 0
 
 
 def _caller_kw(args):
@@ -175,7 +260,8 @@ def _run(args) -> int:
                      width=int(w), height=int(h), scale=args.scale, gpu=args.gpu, clipboard=args.clipboard,
                      window_policy=args.window_policy, home=args.home, memory_max=args.memory_max,
                      start=not args.no_start, xwayland=not args.no_xwayland)
-        show(res, f"created workspace {res['name']} ({res['id']}) state={res['state']}")
+        show(res, f"created workspace {res['name']} ({res['id']}) state={res['state']}\n"
+                  f"credential file for the agent: {res['token_file']}")
         return 0
     if cmd == "rename":
         res = c.call("workspace.rename", workspace=args.workspace, name=args.new_name)
@@ -305,6 +391,14 @@ def _run(args) -> int:
                 print(json.dumps(ev), flush=True)
         except KeyboardInterrupt:
             pass
+        return 0
+    if cmd == "token":
+        return _token(c, args)
+    if cmd == "grants":
+        return _grants(c, args)
+    if cmd == "audit":
+        for ev in c.call("audit.tail", n=args.n)["events"]:
+            print(json.dumps(ev))
         return 0
     if cmd == "approvals":
         if args.op == "list":

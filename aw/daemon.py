@@ -20,7 +20,9 @@ import time
 import traceback
 from typing import Any, Dict, List, Optional
 
-from . import API_VERSION, __version__, paths
+from . import API_VERSION, __version__, auth, paths
+from .auth import AuthError, Principal
+from .grants import GrantError, GrantStore
 from .manager import AGENT_KINDS, Manager, ManagerError
 from .session import SessionError
 
@@ -63,7 +65,7 @@ class EventBus:
             if s["types"] and not any(typ == t or typ.startswith(t.rstrip("*")) and t.endswith("*")
                                       for t in s["types"]):
                 continue
-            if s["ws"] and not ({data.get("id"), data.get("name"), data.get("workspace")} & s["ws"]):
+            if s["ws"] and data.get("id") not in s["ws"]:     # match on the immutable id only, never on names
                 continue
             try:
                 s["q"].put_nowait(ev)
@@ -71,10 +73,21 @@ class EventBus:
                 pass
 
 
+# Methods whose successful use is written to the audit log (never with parameters).
+AUDITED = {"workspace.create", "workspace.destroy", "workspace.start", "workspace.stop", "workspace.pause",
+           "workspace.takeover", "workspace.resume", "workspace.configure", "workspace.assign", "workspace.rename",
+           "workspace.enter", "workspace.launch", "app.kill", "approval.request", "approval.resolve",
+           "credential.issue", "credential.rotate", "credential.revoke", "auth.exchange", "viewer.attach"}
+MAX_LINE = 16 * 1024 * 1024
+
+
 class Daemon:
     def __init__(self):
         self.bus = EventBus()
         self.mgr = Manager(emit=self.bus.emit)
+        self.creds = self.mgr.creds
+        self.audit = auth.AuditLog(paths.base_dir())
+        self.grants = GrantStore(paths.base_dir(), audit=self.audit, emit=self.bus.emit)
         self.approvals: Dict[str, Approval] = {}
         self._aseq = 0
         self.lock = threading.Lock()
@@ -82,23 +95,38 @@ class Daemon:
         self._watchers: Dict[str, threading.Thread] = {}
 
     # ---- helpers
+    def _resolve_id(self, ref: str) -> Optional[str]:
+        try:
+            return self.mgr.get(ref).id
+        except ManagerError:
+            return None
+
     def _ws(self, p) -> Any:
         ref = p.get("workspace")
         if not ref:
             raise ManagerError("E_BAD_ARGS", "missing 'workspace'")
         return self.mgr.get(ref)
 
-    def _check_assignment(self, ws, p):
-        """Cooperative scoping: an agent that identifies itself may only act on workspaces assigned
-        to its kind (or unassigned ones). Not a security boundary (see docs/security-model.md)."""
+    def _check_assignment(self, ws, p, pr: Optional[Principal] = None):
+        """Cooperative scoping for the ADMIN credential acting on behalf of an agent kind (CLI --as-agent).
+        A workspace credential is bound to its workspace by authorisation and needs no kind claim."""
+        if pr is not None and not pr.is_admin:
+            return
         kind = p.get("agent_kind")
         if kind and kind != "human" and ws.agent.get("kind") not in ("none", kind):
             raise ManagerError("E_ASSIGNMENT", f"workspace {ws.name!r} is assigned to "
                                f"{ws.agent.get('kind')}, not {kind}")
 
-    def _guard_input(self, ws, p):
-        actor = "human" if p.get("agent_kind") == "human" or p.get("actor") == "human" else "agent"
-        self._check_assignment(ws, p)
+    def _actor(self, p, pr: Optional[Principal]) -> str:
+        """'human' only for the admin credential that says so. A workspace credential is always an agent:
+        it cannot claim to be the person to bypass manual takeover."""
+        if pr is not None and pr.is_admin and (p.get("agent_kind") == "human" or p.get("actor") == "human"):
+            return "human"
+        return "agent"
+
+    def _guard_input(self, ws, p, pr: Optional[Principal] = None):
+        actor = self._actor(p, pr)
+        self._check_assignment(ws, p, pr)
         if actor == "agent" and ws.input_mode == "manual":
             self.bus.emit("input.rejected", {"id": ws.id, "name": ws.name, "reason": "manual_takeover"})
             raise ManagerError("E_PAUSED", f"workspace {ws.name!r} is in manual takeover: agent input is "
@@ -108,15 +136,111 @@ class Daemon:
     def _session(self, ws):
         return self.mgr.session(ws)
 
+    def _human_channel(self, conn_state) -> Optional[str]:
+        """Which human-only channel the caller is on, or None. Heuristics on the peer process (see
+        docs/security-model.md): an interactive terminal, the shipped viewer, GNOME Shell. A same-user
+        process can imitate them; an agent credential or MCP can not reach this code at all."""
+        if conn_state.get("human_channel"):     # set only by in-process (trusted) callers, never from the wire
+            return conn_state["human_channel"]
+        pid = conn_state.get("peer_pid")
+        if not pid:
+            return None
+        if auth.peer_has_tty(pid):
+            return "tty"
+        try:
+            with open(f"/proc/{pid}/cmdline", "rb") as f:
+                argv = f.read().split(b"\0")
+            if b"aw.viewer" in argv or any(a.endswith(b"aw/viewer.py") for a in argv):
+                return "viewer"
+            if os.path.basename(os.readlink(f"/proc/{pid}/exe")) == "gnome-shell":
+                return "gnome-shell"
+        except OSError:
+            pass
+        return None
+
+    def _audit_ctx(self, pr: Optional[Principal], conn_state) -> Dict[str, Any]:
+        return {"cred": pr.cred_id if pr else None, "who": pr.kind if pr else None,
+                "peer_pid": conn_state.get("peer_pid")}
+
+    # ---- authentication entry points
+    def _login(self, p, conn_state):
+        try:
+            pr = self.creds.authenticate(p.get("token"), conn_state.get("peer_pid"))
+        except AuthError as e:
+            self.audit.write("auth.failed", code=e.code, peer_pid=conn_state.get("peer_pid"))
+            raise ManagerError(e.code, e.message)
+        conn_state["principal"] = pr
+        return {"principal": pr.describe(), "api_version": API_VERSION}
+
+    def admin_state(self) -> Dict[str, Any]:
+        """Connection state of a trusted in-process caller acting as the admin credential (unit tests,
+        embedding). Never used on the wire."""
+        return {"principal": Principal("admin", None, auth.SCOPES, self.creds.admin_cred_id(), "admin"),
+                "human_channel": "in-process"}
+
+    def workspace_state(self, ws_ref: str, scopes=None) -> Dict[str, Any]:
+        """Connection state of an in-process caller holding the default credential of one workspace."""
+        wid = self._resolve_id(ws_ref)
+        rec = next((r for r in self.creds.by_hash.values() if r["ws"] == wid and r["kind"] == "default"), None)
+        return {"principal": Principal("workspace", wid, scopes or auth.AGENT_DEFAULT_SCOPES,
+                                       rec["id"] if rec else "none")}
+
     # ---- dispatch
     def handle(self, method: str, p: Dict[str, Any], conn_state: Dict[str, Any]) -> Any:
+        """Authorise, then dispatch. `conn_state["principal"]` is set by auth.login (or by the transport for
+        a per-request token). With no principal only `hello` and `auth.login` work: fail closed."""
+        if not isinstance(p, dict):
+            raise ManagerError("E_BAD_ARGS", "params must be an object")
+        if method == "auth.login":
+            return self._login(p, conn_state)
+        pr: Optional[Principal] = conn_state.get("principal")
+        try:
+            auth.authorize(pr, method, p, self._resolve_id, self.creds)
+        except AuthError as e:
+            self.audit.write("auth.denied", method=method, code=e.code, workspace=p.get("workspace")
+                             if isinstance(p.get("workspace"), str) else None, **self._audit_ctx(pr, conn_state))
+            raise ManagerError(e.code, e.message)
+        result = self._dispatch(method, p, conn_state, pr)
+        if method in AUDITED:
+            self.audit.write("request", method=method, workspace=p.get("workspace") if isinstance(
+                p.get("workspace"), str) else None, **self._audit_ctx(pr, conn_state))
+        return result
+
+    def _own(self, pr: Optional[Principal], ws_id: str) -> bool:
+        return pr is None or pr.is_admin or pr.ws_id == ws_id
+
+    def _dispatch(self, method: str, p: Dict[str, Any], conn_state: Dict[str, Any], pr: Optional[Principal]) -> Any:
         m = self.mgr
         if method == "hello":
             return {"api_version": API_VERSION, "daemon_version": __version__,
                     "agent_kinds": {k: v for k, v in AGENT_KINDS.items()}, "uptime": time.time() - self.started,
-                    "systemd_scopes": m.use_systemd}
+                    "systemd_scopes": m.use_systemd,
+                    "auth": {"required": True, "login": "auth.login", "per_request_field": "token"}}
+        if method == "auth.whoami":
+            return pr.describe()
+        if method == "auth.exchange":
+            try:
+                if pr.is_admin:
+                    wid = self._ws(p).id
+                    scopes, ttl = auth.downscope(Principal("workspace", wid, auth.AGENT_DEFAULT_SCOPES, "admin"),
+                                                 p.get("scopes"), p.get("ttl_seconds"))
+                else:
+                    wid = pr.ws_id
+                    scopes, ttl = auth.downscope(pr, p.get("scopes"), p.get("ttl_seconds"))
+                cid, tok, exp = self.creds.issue(wid, scopes, ttl, label=f"exchange:{pr.cred_id}")
+            except AuthError as e:
+                raise ManagerError(e.code, e.message)
+            return {"token": tok, "credential": cid, "workspace": wid, "scopes": scopes, "expires_at": exp}
+        if method.startswith("credential."):
+            return self._credential(method, p)
+        if method.startswith("grant."):
+            return self._grant(method, p, conn_state, pr)
+        if method == "audit.tail":
+            return {"events": self.audit.tail(int(p.get("n", 50)))}
         if method == "workspace.list":
             allw = [m.summary(w) for w in sorted(m.workspaces.values(), key=lambda w: w.created_at)]
+            if pr is not None and not pr.is_admin:
+                allw = [w for w in allw if w["id"] == pr.ws_id]      # a workspace credential sees only its own
             if p.get("agent_kind"):
                 allw = [w for w in allw if w["agent"]["kind"] in (p["agent_kind"], "none")]
             for w in allw:
@@ -136,14 +260,16 @@ class Daemon:
             return d
         if method == "workspace.create":
             allowed = ("agent_kind", "agent_label", "width", "height", "scale", "gpu", "clipboard",
-                       "window_policy", "home", "memory_max", "render_node", "xwayland")
+                       "window_policy", "home", "memory_max", "render_node", "xwayland", "sandbox")
             kw = {k: p[k] for k in allowed if k in p}
             ws = m.create(p.get("name", ""), start=p.get("start", True), **kw)
-            return m.summary(ws)
+            d = m.summary(ws)
+            d["token_file"] = self.creds.token_path(ws.id)
+            return d
         if method == "workspace.rename":
-            return m.summary(m.rename(p["workspace"], p.get("name", "")))
+            return m.summary(m.rename(self._ws(p).id, p.get("name", "")))
         if method == "workspace.assign":
-            return m.summary(m.assign(p["workspace"], p.get("agent_kind", "none"), p.get("agent_label", "")))
+            return m.summary(m.assign(self._ws(p).id, p.get("agent_kind", "none"), p.get("agent_label", "")))
         if method == "workspace.configure":
             ws = self._ws(p)
             keys = ("width", "height", "scale", "gpu", "clipboard", "window_policy", "memory_max")
@@ -154,19 +280,22 @@ class Daemon:
             m.stop(self._ws(p))
             return {"ok": True}
         if method == "workspace.destroy":
-            m.destroy(p["workspace"])
+            ws = self._ws(p)
+            m.destroy(ws.id)
+            self.grants.drop_workspace(ws.id)
+            self.approvals = {k: a for k, a in self.approvals.items() if a.workspace != ws.id}
             return {"ok": True}
         if method in ("workspace.pause", "workspace.takeover"):
-            return m.summary(m.set_input_mode(p["workspace"], "manual", p.get("reason", "")))
+            return m.summary(m.set_input_mode(self._ws(p).id, "manual", p.get("reason", "")))
         if method == "workspace.resume":
-            return m.summary(m.set_input_mode(p["workspace"], "agent"))
+            return m.summary(m.set_input_mode(self._ws(p).id, "agent"))
         if method == "workspace.usage":
             return m.usage(self._ws(p))
         if method == "workspace.enter":
             return self._enter(p)
         if method == "workspace.launch":
             ws = self._ws(p)
-            self._check_assignment(ws, p)
+            self._check_assignment(ws, p, pr)
             argv = p.get("argv")
             if not isinstance(argv, list) or not all(isinstance(a, str) for a in argv):
                 raise ManagerError("E_BAD_ARGS", "'argv' must be a list of strings")
@@ -179,23 +308,23 @@ class Daemon:
             m.kill_app(self._ws(p), int(p["app"]))
             return {"ok": True}
         if method == "screen.screenshot":
-            return self._screenshot(p)
+            return self._screenshot(p, pr)
         if method == "screen.info":
             ws = self._ws(p)
-            self._check_assignment(ws, p)
+            self._check_assignment(ws, p, pr)
             info = self._session(ws).display_info()
             info["workspace"] = ws.name
             info["x_display"] = ws.x_display
             return info
         if method == "window.list":
             ws = self._ws(p)
-            self._check_assignment(ws, p)
+            self._check_assignment(ws, p, pr)
             return {"windows": self._session(ws).list_windows()}
         if method in INPUT_METHODS:
-            return self._input(method, p)
+            return self._input(method, p, pr)
         if method == "clipboard.get":
             ws = self._ws(p)
-            self._check_assignment(ws, p)
+            self._check_assignment(ws, p, pr)
             return {"text": self._session(ws).get_clipboard()}
         if method == "viewer.attach":
             ws = self._ws(p)
@@ -205,7 +334,7 @@ class Daemon:
             return {"ok": True, "viewers": ws.viewers}
         if method == "approval.request":
             ws = self._ws(p)
-            self._check_assignment(ws, p)
+            self._check_assignment(ws, p, pr)
             with self.lock:
                 self._aseq += 1
                 a = Approval(f"a{self._aseq}", ws.id, p.get("title", "Agent needs input"),
@@ -216,11 +345,12 @@ class Daemon:
         if method == "approval.list":
             items = [a.to_json() for a in self.approvals.values()
                      if (not p.get("workspace") or a.workspace == self._ws(p).id)
+                     and self._own(pr, a.workspace)
                      and (not p.get("pending") or a.status == "pending")]
             return {"approvals": items}
         if method == "approval.get":
             a = self.approvals.get(p.get("id"))
-            if not a:
+            if not a or not self._own(pr, a.workspace):
                 raise ManagerError("E_NOT_FOUND", "no such approval")
             return a.to_json()
         if method == "approval.resolve":
@@ -236,9 +366,79 @@ class Daemon:
             return a.to_json()
         raise ManagerError("E_UNKNOWN_METHOD", f"unknown method {method!r}")
 
-    def _screenshot(self, p):
+    # ---- credentials (admin only; policy enforced before we get here)
+    def _credential(self, method: str, p):
+        if method == "credential.rotate" and p.get("admin"):
+            self.creds.rotate_admin()
+            return {"token_file": self.creds.admin_token_path, "note": "existing admin connections end now"}
         ws = self._ws(p)
-        self._check_assignment(ws, p)
+        try:
+            if method == "credential.list":
+                return {"credentials": self.creds.list(ws.id), "token_file": self.creds.token_path(ws.id)}
+            if method == "credential.rotate":
+                return {"token_file": self.creds.rotate(ws.id)}
+            if method == "credential.revoke":
+                n = self.creds.revoke(ws.id, p.get("id"), include_default=bool(p.get("all")))
+                return {"revoked": n}
+            if method == "credential.issue":
+                scopes = p.get("scopes") or list(auth.AGENT_DEFAULT_SCOPES)
+                cid, tok, exp = self.creds.issue(ws.id, scopes, p.get("ttl_seconds", auth.DEFAULT_TTL),
+                                                 label=str(p.get("label", "")))
+                return {"credential": cid, "token": tok, "workspace": ws.id, "scopes": scopes,
+                        "expires_at": exp}
+        except AuthError as e:
+            raise ManagerError(e.code, e.message)
+        raise ManagerError("E_UNKNOWN_METHOD", f"unknown method {method!r}")
+
+    # ---- human-only grants
+    def _grant(self, method: str, p, conn_state, pr: Optional[Principal]):
+        try:
+            if method == "grant.request":
+                ws = self._ws(p)
+                g = self.grants.request(ws.id, str(p.get("kind", "")), p.get("resource", ""), p.get("detail", ""))
+                return g.to_json()
+            if method == "grant.list":
+                wid = self._ws(p).id if p.get("workspace") else None
+                if pr is not None and not pr.is_admin:
+                    wid = pr.ws_id
+                return {"grants": self.grants.list(wid, bool(p.get("pending")))}
+            if method == "grant.check":
+                ws = self._ws(p)
+                g = self.grants.is_granted(ws.id, str(p.get("kind", "")), str(p.get("resource", "") or ""))
+                return {"granted": g is not None, "expires_at": g.expires if g else None}
+            # resolve / revoke: human channel only
+            channel = self._human_channel(conn_state)
+            if channel is None:
+                self.audit.write("grant.refused_channel", method=method, **self._audit_ctx(pr, conn_state))
+                raise ManagerError("E_NOT_HUMAN_CHANNEL", f"{method} is only accepted from a human channel: run "
+                                   "`agent-workspaces grants approve|deny|revoke` in an interactive terminal "
+                                   "or use the viewer")
+            if method == "grant.resolve":
+                g = self.grants.resolve(str(p.get("id", "")), str(p.get("decision", "")),
+                                        p.get("ttl_seconds"), channel)
+                return g.to_json()
+            if method == "grant.revoke":
+                return self.grants.revoke(str(p.get("id", "")), channel).to_json()
+        except GrantError as e:
+            raise ManagerError(e.code, e.message)
+        raise ManagerError("E_UNKNOWN_METHOD", f"unknown method {method!r}")
+
+    def _shot_path(self, ws, path: str, pr: Optional[Principal]) -> str:
+        """The admin credential may write a screenshot anywhere it can. A workspace credential may only write
+        inside <workspace>/shots (a relative name or an absolute path inside it): an agent must not be able to
+        overwrite arbitrary files of the user with a PNG."""
+        if pr is None or pr.is_admin:
+            return path
+        d = paths.ensure_private_dir(os.path.join(ws.dir, "shots"))
+        full = path if os.path.isabs(path) else os.path.join(d, path)
+        parent = os.path.realpath(os.path.dirname(full))
+        if parent != os.path.realpath(d) or os.path.basename(full) in ("", ".", ".."):
+            raise ManagerError("E_BAD_ARGS", f"a workspace credential may only write screenshots into {d}")
+        return os.path.join(parent, os.path.basename(full))
+
+    def _screenshot(self, p, pr: Optional[Principal] = None):
+        ws = self._ws(p)
+        self._check_assignment(ws, p, pr)
         s = self._session(ws)
         t0 = time.perf_counter()
         region = p.get("region")
@@ -248,22 +448,24 @@ class Daemon:
             w, h, rgb = _downscale(w, h, rgb, max_w)
         from .session import encode_png
         png = encode_png(w, h, rgb)
-        self.mgr.note_action(ws, "screenshot", "human" if p.get("agent_kind") == "human" else "agent")
+        self.mgr.note_action(ws, "screenshot", self._actor(p, pr))
         out: Dict[str, Any] = {"width": w, "height": h, "bytes": len(png), "format": "png",
                                "capture_ms": round((time.perf_counter() - t0) * 1000, 1),
                                "workspace": ws.name, "workspace_id": ws.id}
         path = p.get("path")
         if path:
-            with open(path, "wb") as f:
+            path = self._shot_path(ws, str(path), pr)
+            fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW, 0o600)
+            with os.fdopen(fd, "wb") as f:
                 f.write(png)
             out["path"] = path
         if p.get("inline", not path):
             out["base64"] = base64.b64encode(png).decode()
         return out
 
-    def _input(self, method: str, p):
+    def _input(self, method: str, p, pr: Optional[Principal] = None):
         ws = self._ws(p)
-        actor = self._guard_input(ws, p)
+        actor = self._guard_input(ws, p, pr)
         s = self._session(ws)
         kind = method.split(".", 1)[1]
         if method == "input.move":
@@ -334,11 +536,16 @@ class Handler(socketserver.StreamRequestHandler):
     daemon: Daemon
 
     def handle(self):
-        state: Dict[str, Any] = {}
+        try:
+            pid, uid, _gid = auth.peer_cred(self.request)
+        except OSError:
+            return
+        state: Dict[str, Any] = {"peer_pid": pid}
         wlock = threading.Lock()
         sub = None
         pump: Optional[threading.Thread] = None
         q: "queue.Queue" = queue.Queue(maxsize=1000)
+        failures = 0
 
         def send(obj):
             data = (json.dumps(obj, separators=(",", ":")) + "\n").encode()
@@ -346,58 +553,99 @@ class Handler(socketserver.StreamRequestHandler):
                 self.wfile.write(data)
                 self.wfile.flush()
 
+        def err(rid, code, message):
+            send({"v": API_VERSION, "id": rid, "ok": False, "error": {"code": code, "message": message}})
+
         try:
-            for raw in self.rfile:
+            while True:
+                raw = self.rfile.readline(MAX_LINE + 1)
+                if not raw:
+                    break
+                if len(raw) > MAX_LINE:
+                    err(None, "E_BAD_REQUEST", "request too large")
+                    break
                 raw = raw.strip()
                 if not raw:
                     continue
                 try:
                     req = json.loads(raw)
                     rid, method, params = req.get("id"), req["method"], req.get("params") or {}
-                except (ValueError, KeyError, TypeError):
-                    send({"v": API_VERSION, "id": None, "ok": False,
-                          "error": {"code": "E_BAD_REQUEST", "message": "invalid JSON request"}})
+                    if not isinstance(method, str) or not isinstance(params, dict):
+                        raise TypeError
+                except (ValueError, KeyError, TypeError, AttributeError):
+                    err(None, "E_BAD_REQUEST", "invalid JSON request")
                     continue
                 try:
+                    st = state
+                    if req.get("token") is not None:
+                        # per-request credential (stateless clients); authenticates this request only
+                        st = dict(state)
+                        try:
+                            st["principal"] = self.daemon.creds.authenticate(req["token"], pid)
+                        except AuthError as e:
+                            self.daemon.audit.write("auth.failed", code=e.code, peer_pid=pid, method=method)
+                            raise ManagerError(e.code, e.message)
                     if method == "events.subscribe":
+                        pr = st.get("principal")
+                        try:
+                            auth.authorize(pr, method, params, self.daemon._resolve_id, self.daemon.creds)
+                        except AuthError as e:
+                            self.daemon.audit.write("auth.denied", method=method, code=e.code,
+                                                    **self.daemon._audit_ctx(pr, st))
+                            raise ManagerError(e.code, e.message)
                         if sub is None:
                             ids = []
                             for ref in params.get("workspaces") or []:
-                                try:
-                                    ids.append(self.daemon.mgr.get(ref).id)   # names may change; ids do not
-                                except ManagerError:
-                                    ids.append(ref)
+                                wid = self.daemon._resolve_id(ref)
+                                if pr is not None and not pr.is_admin and wid != pr.ws_id:
+                                    raise ManagerError("E_FORBIDDEN", "a workspace credential can only "
+                                                       "subscribe to its own workspace")
+                                ids.append(wid or ref)
+                            if pr is not None and not pr.is_admin:
+                                ids = [pr.ws_id]          # always filtered to the bound workspace
                             sub = self.daemon.bus.subscribe(q, ids, params.get("types"))
 
-                            def run():
+                            def run(principal=pr):
                                 while True:
                                     ev = q.get()
                                     if ev is None:
                                         return
                                     try:
+                                        if principal is not None:
+                                            self.daemon.creds.still_valid(principal)
                                         send(ev)
+                                    except AuthError:
+                                        try:
+                                            send({"v": API_VERSION, "event": "auth.revoked",
+                                                  "data": {"reason": "credential revoked or expired"}})
+                                        except OSError:
+                                            pass
+                                        return
                                     except OSError:
                                         return
                             pump = threading.Thread(target=run, daemon=True)
                             pump.start()
                         send({"v": API_VERSION, "id": rid, "ok": True, "result": {"subscribed": True}})
                         continue
-                    result = self.daemon.handle(method, params, state)
+                    result = self.daemon.handle(method, params, st)
+                    failures = 0
                     send({"v": API_VERSION, "id": rid, "ok": True, "result": result})
                 except ManagerError as e:
-                    send({"v": API_VERSION, "id": rid, "ok": False, "error": {"code": e.code, "message": e.message}})
+                    if e.code in ("E_UNAUTHENTICATED", "E_TOKEN_EXPIRED"):
+                        failures += 1
+                        time.sleep(min(0.1 * failures, 1.0))      # slow down guessing
+                    err(rid, e.code, e.message)
+                    if failures >= 10:
+                        break
                 except SessionError as e:
-                    send({"v": API_VERSION, "id": rid, "ok": False,
-                          "error": {"code": "E_SESSION", "message": str(e)}})
+                    err(rid, "E_SESSION", str(e))
                 except (KeyError, ValueError, TypeError) as e:
-                    send({"v": API_VERSION, "id": rid, "ok": False,
-                          "error": {"code": "E_BAD_ARGS", "message": f"bad arguments: {e!r}"}})
+                    err(rid, "E_BAD_ARGS", f"bad arguments: {e!r}")
                 except OSError as e:
-                    send({"v": API_VERSION, "id": rid, "ok": False, "error": {"code": "E_IO", "message": str(e)}})
+                    err(rid, "E_IO", str(e))
                 except Exception as e:  # keep the daemon alive
                     traceback.print_exc()
-                    send({"v": API_VERSION, "id": rid, "ok": False,
-                          "error": {"code": "E_INTERNAL", "message": repr(e)}})
+                    err(rid, "E_INTERNAL", repr(e))
         except (ConnectionError, OSError):
             pass
         finally:
@@ -414,6 +662,19 @@ class Handler(socketserver.StreamRequestHandler):
 class Server(socketserver.ThreadingMixIn, socketserver.UnixStreamServer):
     daemon_threads = True
     allow_reuse_address = True
+    audit: Optional[auth.AuditLog] = None
+
+    def verify_request(self, request, client_address):
+        """Kernel-verified peer check: only processes of the daemon's own user may talk to the API."""
+        try:
+            pid, uid, _ = auth.peer_cred(request)
+        except OSError:
+            return False
+        if uid != os.getuid():
+            if self.audit:
+                self.audit.write("auth.refused_uid", peer_uid=uid, peer_pid=pid)
+            return False
+        return True
 
 
 def serve(foreground: bool = True) -> int:
@@ -434,6 +695,7 @@ def serve(foreground: bool = True) -> int:
     Handler.daemon = d
     old = os.umask(0o177)
     srv = Server(sock, Handler)
+    srv.audit = d.audit
     os.umask(old)
     os.chmod(sock, 0o600)
     stop = threading.Event()

@@ -19,12 +19,13 @@ import secrets
 import shlex
 import shutil
 import signal
+import stat
 import subprocess
 import threading
 import time
 from typing import Any, Callable, Dict, List, Optional
 
-from . import appenv, paths
+from . import appenv, auth, paths
 from .session import SessionError, WorkspaceSession
 
 AGENT_KINDS = {
@@ -37,6 +38,7 @@ AGENT_KINDS = {
 }
 
 NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9 _.\-]{0,39}$")
+ID_LIKE_RE = re.compile(r"^w[0-9a-f]{6}$")   # names that look like ids would make references ambiguous
 
 
 class ManagerError(Exception):
@@ -133,7 +135,9 @@ class Manager:
         self.sessions: Dict[str, WorkspaceSession] = {}
         self.use_systemd = _systemd_available()
         paths.ensure_private_dir(paths.base_dir())
+        self.creds = auth.CredentialStore(paths.base_dir())
         self._adopt()
+        threading.Thread(target=self._watch_compositors, name="aw-watch", daemon=True).start()
 
     # ---- persistence / adoption
     def _save(self, ws: Workspace):
@@ -161,6 +165,17 @@ class Manager:
                     app["running"] = False
             self.workspaces[ws.id] = ws
             self._save(ws)
+            self.creds.ensure_workspace(ws.id)
+
+    def _watch_compositors(self):
+        """A compositor that dies for any reason (crash, kill, OOM) is noticed within a second, also for
+        workspaces adopted after a daemon restart (which have no Popen to wait on)."""
+        while True:
+            time.sleep(1.0)
+            for ws in list(self.workspaces.values()):
+                if ws.state == "running" and ws.compositor_pid and not _alive(ws.compositor_pid,
+                                                                              ws.compositor_start):
+                    self._on_compositor_exit(ws, ws.compositor_pid)
 
     # ---- lookup
     def get(self, ref: str) -> Workspace:
@@ -180,8 +195,9 @@ class Manager:
                height: int = 720, scale: float = 1.0, gpu: str = "auto", clipboard: str = "isolated",
                window_policy: str = "maximized", home: str = "private", memory_max: Optional[str] = None,
                start: bool = True, render_node: Optional[str] = None, xwayland: bool = True) -> Workspace:
-        if not NAME_RE.match(name or ""):
-            raise ManagerError("E_BAD_NAME", "name must be 1-40 chars: letters, digits, space, _ . -")
+        if not NAME_RE.match(name or "") or ID_LIKE_RE.match(name):
+            raise ManagerError("E_BAD_NAME", "name must be 1-40 chars: letters, digits, space, _ . - "
+                               "(and must not look like a workspace id)")
         if agent_kind not in AGENT_KINDS:
             raise ManagerError("E_BAD_AGENT", f"agent kind must be one of {sorted(AGENT_KINDS)}")
         if gpu not in ("auto", "off"):
@@ -205,6 +221,7 @@ class Manager:
             self.workspaces[wid] = ws
             paths.ensure_private_dir(ws.dir)
             self._save(ws)
+            self.creds.ensure_workspace(wid)
         self.emit("workspace.created", self.summary(ws))
         if start:
             self.start(ws)
@@ -345,40 +362,56 @@ echo "$DISPLAY" > {shlex.quote(ws.dir)}/display.tmp && mv {shlex.quote(ws.dir)}/
         with self.lock:
             if ws.compositor_pid != pid:
                 return
+            unexpected = ws.state == "running"
             sess = self.sessions.pop(ws.id, None)
             ws.compositor_pid = None
             ws.state = "stopped" if ws.state != "failed" else "failed"
             self._save(ws)
         if sess:
             sess.close()
-        self.emit("workspace.state", {"id": ws.id, "name": ws.name, "state": ws.state})
+        if unexpected:
+            # The compositor died under us (crash, kill, OOM). Its apps cannot work any more and its private
+            # session bus would be orphaned: remove them now so recovery starts from a clean slate.
+            self._kill_processes(ws)
+            with self.lock:
+                for a in ws.apps.values():
+                    a["running"] = False
+                self._save(ws)
+        self.emit("workspace.state", {"id": ws.id, "name": ws.name, "state": ws.state,
+                                      "reason": "compositor_exited" if unexpected else "stopped"})
 
     # ---- stop / destroy
+    def _kill_processes(self, ws: Workspace):
+        """Stop every process of this workspace: its systemd slice, then the exact pids we started."""
+        if self.use_systemd:
+            subprocess.run(["systemctl", "--user", "stop", ws.slice], env=self._host_bus_env(),
+                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=30)
+        pids = [ws.compositor_pid, getattr(ws, "_bus_pid", None)] + [
+            a.get("pid") for a in ws.apps.values() if _alive(a.get("pid"), a.get("start"))]
+        pids = [p for p in pids if p]
+        for pid in pids:
+            if _proc_start(pid):
+                try:
+                    os.killpg(pid, signal.SIGTERM)
+                except (ProcessLookupError, PermissionError):
+                    pass
+        deadline = time.monotonic() + 5
+        while time.monotonic() < deadline and any(_proc_start(p) for p in pids):
+            time.sleep(0.1)
+        for pid in pids:  # last resort, exact pids we started
+            if _proc_start(pid):
+                try:
+                    os.killpg(pid, signal.SIGKILL)
+                except (ProcessLookupError, PermissionError):
+                    pass
+
     def stop(self, ws: Workspace):
         with self.lock:
             sess = self.sessions.pop(ws.id, None)
             if sess:
                 sess.close()
             ws.state = "stopping"
-        if self.use_systemd:
-            subprocess.run(["systemctl", "--user", "stop", ws.slice], env=self._host_bus_env(),
-                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=30)
-        pids = [ws.compositor_pid] + [a.get("pid") for a in ws.apps.values()]
-        for pid in pids:
-            if pid and _proc_start(pid):
-                try:
-                    os.killpg(pid, signal.SIGTERM)
-                except (ProcessLookupError, PermissionError):
-                    pass
-        deadline = time.monotonic() + 5
-        while time.monotonic() < deadline and any(p and _proc_start(p) for p in pids):
-            time.sleep(0.1)
-        for pid in pids:  # last resort, exact pids we started
-            if pid and _proc_start(pid):
-                try:
-                    os.killpg(pid, signal.SIGKILL)
-                except (ProcessLookupError, PermissionError):
-                    pass
+        self._kill_processes(ws)
         with self.lock:
             ws.state = "stopped"
             ws.compositor_pid = None
@@ -392,13 +425,14 @@ echo "$DISPLAY" > {shlex.quote(ws.dir)}/display.tmp && mv {shlex.quote(ws.dir)}/
         self.stop(ws)
         with self.lock:
             self.workspaces.pop(ws.id, None)
+            self.creds.drop_workspace(ws.id)
         shutil.rmtree(ws.dir, ignore_errors=True)
         self.emit("workspace.destroyed", {"id": ws.id, "name": ws.name})
 
     # ---- mutation
     def rename(self, ref: str, new_name: str) -> Workspace:
         ws = self.get(ref)
-        if not NAME_RE.match(new_name or ""):
+        if not NAME_RE.match(new_name or "") or ID_LIKE_RE.match(new_name):
             raise ManagerError("E_BAD_NAME", "invalid name")
         with self.lock:
             if any(w.name.lower() == new_name.lower() and w.id != ws.id for w in self.workspaces.values()):
@@ -464,17 +498,53 @@ echo "$DISPLAY" > {shlex.quote(ws.dir)}/display.tmp && mv {shlex.quote(ws.dir)}/
         return ws
 
     # ---- sessions
+    def verify_routing(self, ws: Workspace) -> os.stat_result:
+        """Prove, before EVERY screenshot/input/window call, that the socket we are about to use is the live
+        compositor of THIS workspace and nothing else. Raises ManagerError; never falls back to anything.
+
+        Checks: workspace state; socket path is exactly <base>/<id>/rt/wayland-0 with no symlink in the
+        last components; it is a socket owned by us; the recorded compositor pid is alive AND has the recorded
+        start time (pid reuse); a dead compositor is recorded as stopped (stale socket file)."""
+        if ws.state != "running":
+            raise ManagerError("E_NOT_RUNNING", f"workspace {ws.name!r} is {ws.state}")
+        expected = os.path.join(paths.ws_rt(ws.id), "wayland-0")
+        if ws.socket != expected or os.path.realpath(os.path.dirname(expected)) != os.path.join(
+                os.path.realpath(paths.base_dir()), ws.id, "rt"):
+            raise ManagerError("E_ROUTING", f"workspace {ws.name!r}: compositor socket path is not the "
+                               "workspace's own runtime directory; refusing")
+        if not _alive(ws.compositor_pid, ws.compositor_start):
+            self._on_compositor_exit(ws, ws.compositor_pid)
+            raise ManagerError("E_NOT_RUNNING", f"workspace {ws.name!r}: its compositor is gone (crashed or "
+                               "killed); the socket file is stale. Run workspace.start to recover")
+        try:
+            st = os.lstat(expected)
+        except OSError:
+            raise ManagerError("E_NOT_RUNNING", f"workspace {ws.name!r}: compositor socket is missing")
+        if not stat.S_ISSOCK(st.st_mode) or st.st_uid != os.getuid():
+            raise ManagerError("E_ROUTING", f"workspace {ws.name!r}: {expected} is not a socket owned by you")
+        return st
+
     def session(self, ws: Workspace) -> WorkspaceSession:
         with self.lock:
+            st = self.verify_routing(ws)
             s = self.sessions.get(ws.id)
             if s is not None and s.alive:
-                return s
-            if ws.state != "running":
-                raise ManagerError("E_NOT_RUNNING", f"workspace {ws.name!r} is {ws.state}")
+                if getattr(s, "aw_ino", None) == st.st_ino and getattr(s, "aw_peer", None) == ws.compositor_pid:
+                    return s
+                # the socket was replaced or belongs to another process: drop the old connection
+                s.close()
+                self.sessions.pop(ws.id, None)
             try:
                 s = WorkspaceSession(ws.socket, ws.xkb_layout)
             except Exception as e:
                 raise ManagerError("E_SESSION", f"cannot connect to workspace compositor: {e}")
+            peer = auth.peer_cred(s.conn.sock)[0]
+            if peer != ws.compositor_pid:
+                s.close()
+                raise ManagerError("E_ROUTING", f"workspace {ws.name!r}: the process behind its compositor "
+                                   f"socket (pid {peer}) is not the workspace's compositor "
+                                   f"(pid {ws.compositor_pid}); refusing")
+            s.aw_ino, s.aw_peer = st.st_ino, peer
             self.sessions[ws.id] = s
             return s
 
@@ -532,9 +602,9 @@ echo "$DISPLAY" > {shlex.quote(ws.dir)}/display.tmp && mv {shlex.quote(ws.dir)}/
                     a["running"] = False
                     a["exit_code"] = code
                     self._save(ws)
-            self.emit("app.exited", {"workspace": ws.name, "n": n, "exit_code": code})
+            self.emit("app.exited", {"id": ws.id, "workspace": ws.name, "n": n, "exit_code": code})
         threading.Thread(target=reap, daemon=True).start()
-        self.emit("app.started", {"workspace": ws.name, "n": n, "argv": argv})
+        self.emit("app.started", {"id": ws.id, "workspace": ws.name, "n": n, "argv": argv})
         return {"app": n, "pid": p.pid, "log": logp, "argv": argv}
 
     def kill_app(self, ws: Workspace, n: int):
@@ -586,7 +656,8 @@ echo "$DISPLAY" > {shlex.quote(ws.dir)}/display.tmp && mv {shlex.quote(ws.dir)}/
             "activity": {"last_action": ws.last_action, "last_action_at": ws.last_action_at or None,
                          "idle_seconds": (now - ws.last_action_at) if ws.last_action_at else None,
                          "window_count": len(wins), "focused_window": focused["title"] if focused else None},
-            "apps": [{"n": a["n"], "pid": a["pid"], "argv": a["argv"], "running": a.get("running", False)}
+            "apps": [{"n": a["n"], "pid": a["pid"], "argv": a["argv"],
+                      "running": bool(a.get("running", False)) and _alive(a.get("pid"), a.get("start"))}
                      for a in ws.apps.values()],
             "viewers": ws.viewers, "created_at": ws.created_at,
         }

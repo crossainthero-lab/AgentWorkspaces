@@ -20,7 +20,7 @@ class Base(unittest.TestCase):
         from aw import daemon, paths
         self.paths = paths
         self.daemon = daemon.Daemon()
-        self.st = {}
+        self.st = self.daemon.admin_state()
 
     def tearDown(self):
         shutil.rmtree(self.base, ignore_errors=True)
@@ -70,7 +70,7 @@ class WorkspaceMetadata(Base):
         self.call("workspace.create", name="keep", start=False, agent_kind="hermes")
         from aw import daemon
         d2 = daemon.Daemon()
-        names = [w["name"] for w in d2.handle("workspace.list", {}, {})["workspaces"]]
+        names = [w["name"] for w in d2.handle("workspace.list", {}, d2.admin_state())["workspaces"]]
         self.assertEqual(names, ["keep"])
 
     def test_agent_filter_in_list(self):
@@ -172,7 +172,7 @@ class SocketFraming(Base):
             self.assertEqual(oct(os.stat(sock).st_mode & 0o777), "0o600")
             from aw.client import Client, ApiError
             c = Client(sock, autostart=False)
-            self.assertEqual(c.call("hello")["api_version"], 1)
+            self.assertEqual(c.call("hello")["api_version"], 2)
             w = c.call("workspace.create", name="s", start=False)
             self.assertEqual(w["name"], "s")
             with self.assertRaises(ApiError) as cm:
@@ -203,7 +203,7 @@ class SocketFraming(Base):
 
     def test_viewer_attach_counts_per_connection(self):
         self.call("workspace.create", name="v", start=False)
-        st = {}
+        st = self.daemon.admin_state()
         self.daemon.handle("viewer.attach", {"workspace": "v"}, st)
         self.assertEqual(self.daemon.mgr.get("v").viewers, 1)
 

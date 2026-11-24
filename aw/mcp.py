@@ -88,7 +88,7 @@ class Server:
     def __init__(self, default_workspace: Optional[str] = None):
         self.kind = os.environ.get("AW_AGENT_KIND") or None
         self.default_ws = default_workspace or os.environ.get("AW_WORKSPACE") or None
-        self.client = Client()
+        self.client = Client(role="agent", workspace=self.default_ws)
 
     # ---- workspace resolution
     def _resolve(self, args: Dict[str, Any]) -> str:
