@@ -1,0 +1,8 @@
+prompt: Open my browser and visit agdc.dev, then tell me what the page's main heading says.
+
+[init] model=claude-haiku-5-5 mcp=[('agent-workspaces', 'connected')] builtin_tools=[]
+  call launch_app {"app": "browser", "args": ["https://agdc.dev"]}
+  -> <image> | launched Google Chrome (app 1, pid 1078944) in workspace claude-code-browser; workspace 'claude-code-browser' ...
+agent: The main heading on agdc.dev reads **"One workspace. Every agent."** The subheading below it says "Claude Code, Codex, and Antigravity. All in one place."
+
+USAGE {"turns": 2, "cost_usd": 0.0008306100000000001, "duration_ms": 6347, "input": 4, "cache_read": 17751, "cache_creation": 2711, "output": 221}

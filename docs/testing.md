@@ -107,3 +107,16 @@ AW_TEST_FIREFOX=... AW_TEST_ELECTRON_BIN=/path/to/stock/electron AW_COMPAT_REPOR
 | `AuthorizedProfile` | fixture "host" profile built by real Chrome; agent can only request; `profile authorize` refuses without a terminal, with a wrong confirmation, while the host profile is locked (live and stale lock, lock untouched, original byte-identical); authorised copy has no `Login Data`, is 0700, the session works in the workspace; revoke and workspace destroy remove it; the generic grant flow (request, denial, approval, expiry, revocation, wildcard refusal) with the CLI in real pseudo-terminals |
 | `FirefoxProfiles`, `SnapFirefox` | Firefox 160 vendor tarball: agent profile + cookie persistence; the Ubuntu snap is detected and refused |
 | `Matrix` | see compatibility.md |
+## Real agent acceptance tests (`tests/acceptance/`)
+
+These run the **real agent CLIs with real models** against a real daemon and real headless workspaces. They cost tokens (a few cents per run with the cheapest models) and need the agents to be signed in, so they are not part of the normal test run.
+
+```bash
+python3 -m tests.acceptance.run_scenarios claude-code:browser codex:files "claude-code:twoapps+codex:twoapps"
+python3 -m tests.acceptance.summarise            # table of the newest run per scenario
+python3 tests/acceptance/transcript.py .scratch/runs/<run> claude   # sanitised transcript
+```
+
+Tasks (`harness.PROMPTS`) are ordinary requests that do not mention AgentWorkspaces, commands or workspaces. Each agent runs with an environment built from scratch (no `DISPLAY`, `WAYLAND_DISPLAY`, `WAYLAND_SOCKET`, `XAUTHORITY`, `DBUS_SESSION_BUS_ADDRESS`; private empty `XDG_RUNTIME_DIR`; `BROWSER=/bin/true`), its own shell tool removed where the agent allows it, and a time limit; processes are stopped by exact process group. The harness audits the environment names of every process in the agent's group, and compares the host's Wayland sockets before and after. A `+` runs scenarios at the same time in separate workspaces. Results, screenshots and transcripts are in [compatibility-matrix.md](compatibility-matrix.md) and `docs/evidence/agents/`.
+
+Also: `tests/integration/test_mcp_agent_tools_real.py` drives every agent-facing MCP tool (no LLM) against a real compositor and a probe app that logs the events it receives; `scripts/measure_agents.py` measures latency and resource use through the MCP server.

@@ -41,15 +41,16 @@ class Integrations(unittest.TestCase):
                 self.assertEqual(r.returncode, 0, f"{agent} install: {r.stdout} {r.stderr}")
                 st = self.run_cli(home, agent, "status")
                 self.assertIn("is registered", st.stdout, f"{agent}: {st.stdout} {st.stderr}")
-                if agent == "claude-code":
-                    sk = os.path.join(home, ".claude", "skills", "agent-workspaces", "SKILL.md")
+                if agent in ("claude-code", "codex"):
+                    sk = os.path.join(home, ".claude" if agent == "claude-code" else ".codex", "skills",
+                                      "agent-workspaces", "SKILL.md")
                     self.assertTrue(os.path.exists(sk))
                     self.assertIn("never the user's personal desktop", open(sk).read())
                 u = self.run_cli(home, agent, "uninstall")
                 self.assertEqual(u.returncode, 0, f"{agent} uninstall: {u.stdout} {u.stderr}")
                 st = self.run_cli(home, agent, "status")
                 self.assertIn("not registered", st.stdout, f"{agent}: {st.stdout} {st.stderr}")
-                if agent == "claude-code":
+                if agent in ("claude-code", "codex"):
                     self.assertFalse(os.path.exists(sk))
                 tried.append(agent)
             finally:

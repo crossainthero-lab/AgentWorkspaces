@@ -1,0 +1,8 @@
+prompt: Open the calculator, take a screenshot of it and tell me what you see on its screen.
+
+[init] model=claude-haiku-5-5 mcp=[('agent-workspaces', 'connected')] builtin_tools=[]
+  call launch_app {"app": "calculator"}
+  -> <image> | launched Calculator (app 1, pid 1080060) in workspace claude-code-screenshot; workspace 'claude-code-screensho...
+agent: The Calculator is open in Basic mode in a 1280x720 workspace. I took the screenshot right after launch, and it's saved at `<run>/weff95d/shots/shot-01.png`.  - **Title bar:** "Basic" with a mode dropdown, plus undo/redo ...
+
+USAGE {"turns": 2, "cost_usd": 0.00094461, "duration_ms": 6875, "input": 4, "cache_read": 17751, "cache_creation": 2681, "output": 461}

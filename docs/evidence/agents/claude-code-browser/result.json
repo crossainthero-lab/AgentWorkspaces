@@ -1,0 +1,41 @@
+{
+  "agent": "claude-code",
+  "model": "haiku",
+  "prompt": "Open my browser and visit agdc.dev, then tell me what the page's main heading says.",
+  "exit_code": 0,
+  "seconds": 7.3,
+  "workspace": "claude-code-browser",
+  "run_alongside": [],
+  "workspace_viewers_attached": 0,
+  "workspace_windows": [
+    "AgentDock Silver \u2014 one workspace, every agent - Google Chrome"
+  ],
+  "files_in_workspace_home": [],
+  "file_previews": {},
+  "host_display_variables_seen_in_agent_process_group": [],
+  "host_wayland_sockets_before_after": [
+    {
+      "host_sockets": [
+        "wayland-0"
+      ]
+    },
+    {
+      "host_sockets": [
+        "wayland-0"
+      ]
+    }
+  ],
+  "agent_peak_pss_mib_incl_mcp_server": 284.2,
+  "agent_cpu_seconds": 1.15,
+  "workspace_memory_mib": 838,
+  "workspace_cpu_seconds": 4.6,
+  "usage": {
+    "turns": 2,
+    "cost_usd": 0.0008306100000000001,
+    "duration_ms": 6347,
+    "input": 4,
+    "cache_read": 17751,
+    "cache_creation": 2711,
+    "output": 221
+  }
+}

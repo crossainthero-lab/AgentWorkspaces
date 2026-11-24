@@ -41,7 +41,7 @@ Remove everything with `./uninstall.sh` (`--stop-workspaces`, `--remove-integrat
 
 ## Documentation
 
-[architecture](docs/architecture.md) · [isolation model](docs/isolation-model.md) · [security model](docs/security-model.md) · [API](docs/api.md) · [compatibility](docs/compatibility.md) · [browsers](docs/browsers.md) · [windows](docs/windows.md) · [audio](docs/audio.md) · [agent integrations](docs/integrations.md) · [GNOME extension](docs/gnome-extension.md) · [measurements](docs/measurements.md) · [testing](docs/testing.md) · [troubleshooting](docs/troubleshooting.md) · [limitations](docs/limitations.md)
+[architecture](docs/architecture.md) · [isolation model](docs/isolation-model.md) · [security model](docs/security-model.md) · [API](docs/api.md) · [compatibility](docs/compatibility.md) · [browsers](docs/browsers.md) · [windows](docs/windows.md) · [audio](docs/audio.md) · [agent integrations](docs/integrations.md) · [GNOME extension](docs/gnome-extension.md) · [measurements](docs/measurements.md) · [testing](docs/testing.md) · [troubleshooting](docs/troubleshooting.md) · [limitations](docs/limitations.md) · [compatibility matrix](docs/compatibility-matrix.md)
 
 ## License
 

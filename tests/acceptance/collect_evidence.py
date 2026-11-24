@@ -14,6 +14,27 @@ ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)
 OUT = os.path.join(ROOT, "docs", "evidence", "agents")
 
 
+HOME = os.path.expanduser("~")
+
+
+def scrub(text):
+    import re
+    text = re.sub(re.escape(HOME) + r"/\.cache/claude-tmp/[A-Za-z0-9_\-]+", "<tmp>", text)
+    text = re.sub(r"/run/user/\d+/awt-[A-Za-z0-9\-]+", "<tmp>", text)
+    return text.replace(HOME, "~")
+
+
+def mask_title_path(src, dst):
+    """The editor's header shows the document's folder; white it out when that folder is a private path."""
+    try:
+        from PIL import Image, ImageDraw
+        im = Image.open(src).convert("RGB")
+        ImageDraw.Draw(im).rectangle([300, 30, 980, 44], fill=(255, 255, 255))
+        im.save(dst)
+    except ImportError:
+        os.remove(dst)
+
+
 def main(pairs):
     for pair in pairs:
         name, base = pair.split("=", 1)
@@ -22,6 +43,8 @@ def main(pairs):
         dst = os.path.join(OUT, name)
         os.makedirs(dst, exist_ok=True)
         shutil.copyfile(os.path.join(d, "final.png"), os.path.join(dst, "final-screenshot.png"))
+        if any("/" in (t or "") and "Text Editor" in (t or "") for t in (r.get("workspace_state") or {}).get("windows", [])):
+            mask_title_path(os.path.join(d, "final.png"), os.path.join(dst, "final-screenshot.png"))
         lines = open(os.path.join(d, "agent.stdout"), errors="replace").read().splitlines()
         kind = "claude" if r["agent"] == "claude-code" else "codex"
         out, usage = (transcript.claude if kind == "claude" else transcript.codex)(lines)
@@ -39,7 +62,13 @@ def main(pairs):
                "agent_cpu_seconds": r.get("agent_cpu_seconds_children"),
                "workspace_memory_mib": round(u.get("memory_bytes", 0) / 2 ** 20) if u else None,
                "workspace_cpu_seconds": round(u.get("cpu_ns", 0) / 1e9, 1) if u else None, "usage": usage}
-        json.dump(red, open(os.path.join(dst, "result.json"), "w"), indent=2, default=str)
+        with open(os.path.join(dst, "result.json"), "w") as f:
+            f.write(scrub(json.dumps(red, indent=2, default=str)))
+        tp = os.path.join(dst, "transcript.txt")
+        with open(tp) as f:
+            clean = scrub(f.read())
+        with open(tp, "w") as f:
+            f.write(clean)
         print("wrote", dst)
 
 

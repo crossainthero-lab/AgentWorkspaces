@@ -1,0 +1,39 @@
+{
+  "agent": "codex",
+  "model": "gpt-6-luna",
+  "prompt": "Open the calculator, take a screenshot of it and tell me what you see on its screen.",
+  "exit_code": 0,
+  "seconds": 13.2,
+  "workspace": "codex-screenshot",
+  "run_alongside": [],
+  "workspace_viewers_attached": 0,
+  "workspace_windows": [
+    "Calculator"
+  ],
+  "files_in_workspace_home": [],
+  "file_previews": {},
+  "host_display_variables_seen_in_agent_process_group": [],
+  "host_wayland_sockets_before_after": [
+    {
+      "host_sockets": [
+        "wayland-0"
+      ]
+    },
+    {
+      "host_sockets": [
+        "wayland-0"
+      ]
+    }
+  ],
+  "agent_peak_pss_mib_incl_mcp_server": 233.6,
+  "agent_cpu_seconds": 1.06,
+  "workspace_memory_mib": 208,
+  "workspace_cpu_seconds": 1.4,
+  "usage": {
+    "input_tokens": 78547,
+    "cached_input_tokens": 66560,
+    "cache_write_input_tokens": 0,
+    "output_tokens": 168,
+    "reasoning_output_tokens": 0
+  }
+}

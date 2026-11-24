@@ -1,0 +1,41 @@
+{
+  "agent": "claude-code",
+  "model": "haiku",
+  "prompt": "Open the file manager and look inside the folder <tmp>/inbox. Tell me which files are in it.",
+  "exit_code": 0,
+  "seconds": 5.9,
+  "workspace": "claude-code-files",
+  "run_alongside": [],
+  "workspace_viewers_attached": 0,
+  "workspace_windows": [
+    "inbox"
+  ],
+  "files_in_workspace_home": [],
+  "file_previews": {},
+  "host_display_variables_seen_in_agent_process_group": [],
+  "host_wayland_sockets_before_after": [
+    {
+      "host_sockets": [
+        "wayland-0"
+      ]
+    },
+    {
+      "host_sockets": [
+        "wayland-0"
+      ]
+    }
+  ],
+  "agent_peak_pss_mib_incl_mcp_server": 283.2,
+  "agent_cpu_seconds": 1.08,
+  "workspace_memory_mib": 219,
+  "workspace_cpu_seconds": 1.2,
+  "usage": {
+    "turns": 2,
+    "cost_usd": 0.0008388600000000001,
+    "duration_ms": 4676,
+    "input": 4,
+    "cache_read": 17766,
+    "cache_creation": 2734,
+    "output": 228
+  }
+}

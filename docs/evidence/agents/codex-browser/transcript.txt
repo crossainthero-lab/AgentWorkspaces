@@ -1,0 +1,7 @@
+prompt: Open my browser and visit agdc.dev, then tell me what the page's main heading says.
+
+agent: I’ll open the site in the graphical browser and read the main heading from the page.
+  call launch_app {"app": "browser", "args": ["https://agdc.dev"]} -> <image> | launched Google Chrome (app 1, pid 1085974) in workspace codex-browser; workspace 'codex-b...
+agent: The main heading says: **“One workspace. Every agent.”**
+
+USAGE {"input_tokens": 78266, "cached_input_tokens": 51840, "cache_write_input_tokens": 0, "output_tokens": 152, "reasoning_output_tokens": 0}

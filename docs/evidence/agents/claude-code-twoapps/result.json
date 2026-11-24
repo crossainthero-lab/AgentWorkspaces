@@ -1,0 +1,42 @@
+{
+  "agent": "claude-code",
+  "model": "haiku",
+  "prompt": "Open the calculator and a text editor. Work out 17 times 23 in the calculator, then type the result into the text editor.",
+  "exit_code": 0,
+  "seconds": 23.8,
+  "workspace": "claude-code-twoapps",
+  "run_alongside": [],
+  "workspace_viewers_attached": 0,
+  "workspace_windows": [
+    "Calculator",
+    "391 (Draft) - Text Editor"
+  ],
+  "files_in_workspace_home": [],
+  "file_previews": {},
+  "host_display_variables_seen_in_agent_process_group": [],
+  "host_wayland_sockets_before_after": [
+    {
+      "host_sockets": [
+        "wayland-0"
+      ]
+    },
+    {
+      "host_sockets": [
+        "wayland-0"
+      ]
+    }
+  ],
+  "agent_peak_pss_mib_incl_mcp_server": 279.7,
+  "agent_cpu_seconds": 1.75,
+  "workspace_memory_mib": 278,
+  "workspace_cpu_seconds": 2.6,
+  "usage": {
+    "turns": 22,
+    "cost_usd": 0.00510626,
+    "duration_ms": 22923,
+    "input": 22,
+    "cache_read": 157846,
+    "cache_creation": 12288,
+    "output": 2136
+  }
+}
