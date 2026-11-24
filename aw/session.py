@@ -142,6 +142,7 @@ class WorkspaceSession:
             try:
                 r, _, _ = select.select([self.conn.sock, self._wake_r], [], [], 1.0)
             except (OSError, ValueError):
+                self._running = False
                 return
             if not self._running:
                 return
@@ -149,7 +150,7 @@ class WorkspaceSession:
                 with self.lock:
                     try:
                         self.conn.dispatch(0)
-                    except wl.WaylandError:
+                    except (wl.WaylandError, OSError, ValueError):
                         self._running = False
                         with self._cond:
                             self._cond.notify_all()
@@ -387,6 +388,12 @@ class WorkspaceSession:
     def click(self, x: Optional[float] = None, y: Optional[float] = None, button: str = "left",
               count: int = 1):
         if x is not None:
+            self.pointer_move(x, y)
+            time.sleep(0.04)
+            # some compositors drop the very first absolute motion after a virtual pointer is created;
+            # a 1px nudge makes sure the target surface has received enter + motion before the button
+            self.pointer_move(x + (1 if x < self._logical_extent()[0] - 2 else -1), y)
+            time.sleep(0.02)
             self.pointer_move(x, y)
             time.sleep(0.03)
         for _ in range(count):

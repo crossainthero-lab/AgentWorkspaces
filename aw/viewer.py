@@ -63,6 +63,7 @@ class Viewer(Gtk.Application):
         self.fit = True
         self.last_clip_out: Optional[str] = None
         self.metrics = []
+        self.dbg = []
 
     # ---- UI
     def do_activate(self):
@@ -333,6 +334,9 @@ class Viewer(Gtk.Application):
 
     def on_motion(self, c, x, y):
         p = self.map_xy(x, y)
+        if os.environ.get("AW_VIEWER_DEBUG"):
+            self.dbg.append(f"motion {x:.0f},{y:.0f} -> {p} takeover={self.takeover} tex={self.texture_size} "
+                            f"pic={self.pic.get_width()}x{self.pic.get_height()}")
         if p:
             self._send(self.inp.pointer_move, *p)
 
@@ -376,6 +380,8 @@ class Viewer(Gtk.Application):
                 s.close()
         if self.api:
             self.api.close()   # drops the viewer.attach count in the daemon
+        if self.dbg:
+            print("\n".join(self.dbg), flush=True)
         if METRICS and self.metrics:
             m = sorted(self.metrics)
             print(f"viewer frame handoff ms: n={len(m)} median={m[len(m)//2]:.1f} max={m[-1]:.1f}", flush=True)
