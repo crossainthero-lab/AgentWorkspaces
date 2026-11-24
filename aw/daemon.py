@@ -26,9 +26,14 @@ from .grants import GrantError, GrantStore
 from .manager import AGENT_KINDS, Manager, ManagerError
 from .session import SessionError
 from . import wl
+from .windows import WindowError
+from .browser_api import BrowserAPI
+from .policy_ext import POLICY_EXT
+
+auth.POLICY.update(POLICY_EXT)
 
 INPUT_METHODS = {"input.move", "input.click", "input.drag", "input.type", "input.key", "input.scroll",
-                 "window.action", "clipboard.set"}
+                 "window.action", "window.move", "window.resize", "window.set_geometry", "clipboard.set"}
 
 
 class Approval:
@@ -89,6 +94,11 @@ class Daemon:
         self.creds = self.mgr.creds
         self.audit = auth.AuditLog(paths.base_dir())
         self.grants = GrantStore(paths.base_dir(), audit=self.audit, emit=self.bus.emit)
+        self.browser = BrowserAPI(self)
+        try:
+            self.browser.sweep()        # authorised profile copies exist only while a live grant backs them
+        except OSError:
+            pass
         self.approvals: Dict[str, Approval] = {}
         self._aseq = 0
         self.lock = threading.Lock()
@@ -248,6 +258,8 @@ class Daemon:
             return self._credential(method, p)
         if method.startswith("grant."):
             return self._grant(method, p, conn_state, pr)
+        if method.startswith("browser."):
+            return self.browser.handle(method, p, conn_state, pr)
         if method == "audit.tail":
             return {"events": self.audit.tail(int(p.get("n", 50)))}
         if method == "workspace.list":
@@ -267,13 +279,13 @@ class Daemon:
             d["pending_approvals"] = sum(1 for a in self.approvals.values()
                                          if a.workspace == ws.id and a.status == "pending")
             try:
-                d["windows"] = self._session(ws).list_windows() if ws.state == "running" else []
+                d["windows"] = self.mgr.winmgr(ws).list() if ws.state == "running" else []
             except ManagerError:
                 d["windows"] = []
             return d
         if method == "workspace.create":
             allowed = ("agent_kind", "agent_label", "width", "height", "scale", "gpu", "clipboard",
-                       "window_policy", "home", "memory_max", "render_node", "xwayland", "sandbox", "sandbox_mounts", "sandbox_net")
+                       "window_policy", "home", "memory_max", "render_node", "xwayland", "sandbox", "sandbox_mounts", "sandbox_net", "audio")
             kw = {k: p[k] for k in allowed if k in p}
             ws = m.create(p.get("name", ""), start=p.get("start", True), **kw)
             d = m.summary(ws)
@@ -285,7 +297,7 @@ class Daemon:
             return m.summary(m.assign(self._ws(p).id, p.get("agent_kind", "none"), p.get("agent_label", "")))
         if method == "workspace.configure":
             ws = self._ws(p)
-            keys = ("width", "height", "scale", "gpu", "clipboard", "window_policy", "memory_max")
+            keys = ("width", "height", "scale", "gpu", "clipboard", "window_policy", "memory_max", "audio")
             return m.summary(m.configure(ws.id, **{k: p.get(k) for k in keys}))
         if method == "workspace.start":
             return m.summary(m.start(self._ws(p)))
@@ -296,6 +308,7 @@ class Daemon:
             ws = self._ws(p)
             m.destroy(ws.id)
             self.grants.drop_workspace(ws.id)
+            self.browser.drop_workspace(ws.id)
             self.approvals = {k: a for k, a in self.approvals.items() if a.workspace != ws.id}
             return {"ok": True}
         if method in ("workspace.pause", "workspace.takeover"):
@@ -332,13 +345,36 @@ class Daemon:
         if method == "window.list":
             ws = self._ws(p)
             self._check_assignment(ws, p, pr)
-            return {"windows": self._session(ws).list_windows()}
+            return {"windows": self.mgr.winmgr(ws).list()}
         if method in INPUT_METHODS:
             return self._input(method, p, pr)
         if method == "clipboard.get":
             ws = self._ws(p)
             self._check_assignment(ws, p, pr)
             return {"text": self._session(ws).get_clipboard()}
+        if method == "audio.info":
+            ws = self._ws(p)
+            self._check_assignment(ws, p, pr)
+            return m.audio_info(ws)
+        if method == "audio.record":
+            ws = self._ws(p)
+            self._check_assignment(ws, p, pr)
+            path = p.get("path")
+            if path:
+                path = self._shot_path(ws, str(path), pr)      # a workspace credential writes only inside <ws>/shots
+            m.note_action(ws, "audio.record", self._actor(p, pr))
+            return m.audio_record(ws, float(p.get("seconds", 3)), path)
+        if method == "audio.route":
+            ws = self._ws(p)
+            channel = self._human_channel(conn_state)
+            if channel is None:
+                self.audit.write("audio.route_refused", workspace=ws.id, **self._audit_ctx(pr, conn_state))
+                raise ManagerError("E_NOT_HUMAN_CHANNEL", "routing a workspace's audio to the host speakers is "
+                                   "only accepted from a human channel: run `agent-workspaces audio-route` in an "
+                                   "interactive terminal")
+            res = m.audio_route(ws, p.get("to", ""), p.get("host_remote"), p.get("sink"))
+            self.audit.write("audio.route", workspace=ws.id, to=res["to"], channel=channel)
+            return res
         if method == "viewer.attach":
             ws = self._ws(p)
             conn_state.setdefault("viewer_of", []).append(ws.id)
@@ -481,6 +517,7 @@ class Daemon:
         actor = self._guard_input(ws, p, pr)
         s = self._session(ws)
         kind = method.split(".", 1)[1]
+        wres = None
         if method == "input.move":
             s.pointer_move(float(p["x"]), float(p["y"]))
         elif method == "input.click":
@@ -494,13 +531,24 @@ class Daemon:
         elif method == "input.scroll":
             s.scroll(float(p.get("dx", 0)), float(p.get("dy", 0)), p.get("x"), p.get("y"))
         elif method == "window.action":
-            s.window_action(int(p["window"]), p["action"])
+            wres = self.mgr.winmgr(ws).action(int(p["window"]), p["action"])
             kind = "window." + p["action"]
+        elif method in ("window.move", "window.resize", "window.set_geometry"):
+            g = {k: p.get(k) for k in ("x", "y", "width", "height")}
+            if method == "window.move":
+                g["width"] = g["height"] = None
+            elif method == "window.resize":
+                g["x"] = g["y"] = None
+            wres = self.mgr.winmgr(ws).set_geometry(int(p["window"]), **g)
+            kind = "window.geometry"
         elif method == "clipboard.set":
             s.set_clipboard(str(p["text"]))
             kind = "clipboard"
         self.mgr.note_action(ws, kind, actor)
-        return {"ok": True, "pointer": {"x": s.pos[0], "y": s.pos[1]}}
+        res = {"ok": True, "pointer": {"x": s.pos[0], "y": s.pos[1]}}
+        if method.startswith("window."):
+            res["window"] = wres
+        return res
 
     def _enter(self, p):
         ws = self._ws(p)
@@ -650,6 +698,8 @@ class Handler(socketserver.StreamRequestHandler):
                     err(rid, e.code, e.message)
                     if failures >= 10:
                         break
+                except WindowError as e:
+                    err(rid, e.code, e.message)
                 except SessionError as e:
                     err(rid, "E_SESSION", str(e))
                 except (KeyError, ValueError, TypeError) as e:

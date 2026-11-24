@@ -52,8 +52,14 @@ def _spawn_daemon(extra_env=None):
         time.sleep(0.05)
 
 
-def start_daemon(tag="int", extra_env=None):
+def start_daemon(tag="int", extra_env=None, home=None):
+    """`home`: HOME (and the XDG dirs below it) of the daemon. Browser tests pass a throw-away fake home so
+    the user's real browser profiles are never read."""
     global BASE
+    if home:
+        extra_env = dict(extra_env or {}, HOME=home, **{k: os.path.join(home, sub) for k, sub in (
+            ("XDG_DATA_HOME", ".local/share"), ("XDG_STATE_HOME", ".local/state"),
+            ("XDG_CONFIG_HOME", ".config"), ("XDG_CACHE_HOME", ".cache"))})
     BASE = os.path.join(f"/run/user/{os.getuid()}", f"awt-{tag}-{os.getpid()}")
     os.makedirs(BASE, mode=0o700, exist_ok=True)
     os.environ["AW_BASE_DIR"] = BASE

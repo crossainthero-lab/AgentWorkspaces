@@ -95,6 +95,9 @@ as you. See `docs/security-model.md`.
 | `E_PROFILE_BUSY` | `workspace.launch` with a `--user-data-dir`/`-profile` directory that a running app of another workspace uses |
 | `E_NO_SANDBOX`, `E_BAD_SANDBOX` | bubblewrap missing / a requested sandbox mount was refused |
 | `E_NO_CREDENTIALS`, `E_INSECURE_CREDENTIAL_FILE`, `E_DISCONNECTED` | client side |
+| `E_BROWSER_UNSUPPORTED`, `E_NO_BROWSER`, `E_BAD_BROWSER_ARG`, `E_BAD_URL`, `E_PROFILE_BUSY`, `E_PROFILE_OPEN_ON_HOST`, `E_UNSAFE_PROFILE` | browsers ([browsers.md](browsers.md)) |
+| `E_AUDIO_OFF`, `E_BAD_AUDIO`, `E_AUDIO_START`, `E_AUDIO_HOST` | audio ([audio.md](audio.md)) |
+| `E_TIMEOUT` | the window placement was not applied in time |
 | `E_START_FAILED`, `E_SESSION`, `E_IO`, `E_INTERNAL` | runtime failures |
 
 ## Caller identity (`agent_kind`)
@@ -119,7 +122,7 @@ what separate agents.
   "input_mode": "agent",
   "takeover_reason": "",
   "display": {"width": 1280, "height": 800, "scale": 1.0},
-  "gpu": "auto", "xwayland": true, "clipboard": "isolated", "window_policy": "maximized", "home": "private",
+  "gpu": "auto", "xwayland": true, "audio": "private", "clipboard": "isolated", "window_policy": "maximized", "home": "private",
   "activity": {"last_action": "agent:click", "last_action_at": 1795497000.1, "idle_seconds": 12.4,
                "window_count": 1, "focused_window": "probe ALPHA"},
   "apps": [{"n": 1, "pid": 705125, "argv": ["/usr/bin/python3", "..."], "running": true}],
@@ -163,13 +166,13 @@ Agents may only ask; a person decides through the CLI on a terminal, the viewer 
 * `workspace.get {workspace}` (alias `workspace.status`) -> summary + `usage` + `windows` + `pending_approvals`.
 * `workspace.create {name, agent_kind?, agent_label?, width?, height?, scale?, gpu?("auto"|"off"),
   clipboard?("isolated"|"to-workspace"|"from-workspace"|"both"), window_policy?("maximized"|"floating"),
-  home?("private"|"shared"), xwayland?(default true; false = apps get no DISPLAY), memory_max?,
+  home?("private"|"shared"), xwayland?(default true; false = apps get no DISPLAY), audio?("private" (default)|"off"), memory_max?,
   sandbox?(bool), sandbox_mounts?(["/path[:ro|:rw]"]), sandbox_net?(default true), start?}` -> summary + `token_file`
   (the path of the workspace's default credential; the token itself is never returned). With `sandbox` the apps run
   under bubblewrap (docs/isolation-model.md); `E_NO_SANDBOX`, `E_BAD_SANDBOX` on a refused mount.
 * `workspace.rename {workspace, name}`, `workspace.assign {workspace, agent_kind, agent_label?}`
-* `workspace.configure {workspace, width?, height?, scale?, gpu?, clipboard?, window_policy?, memory_max?}`
-  (size/scale apply live; gpu/window_policy/memory_max restart the compositor and close its apps)
+* `workspace.configure {workspace, width?, height?, scale?, gpu?, clipboard?, window_policy?, memory_max?, audio?}`
+  (size/scale apply live; gpu/window_policy/memory_max/audio restart the compositor and close its apps)
 * `workspace.start|stop|destroy {workspace}`
 * `workspace.pause {workspace, reason?}` (alias `workspace.takeover`) / `workspace.resume {workspace}`
 * `workspace.usage {workspace}` -> `{memory_bytes, cpu_ns, tasks}` (cgroup accounting of the whole workspace)
@@ -187,9 +190,44 @@ Agents may only ask; a person decides through the CLI on a terminal, the viewer 
 * `screen.info {workspace}` -> `{outputs:[{name,width,height,refresh_hz,scale,x,y}], pointer:{x,y}, x_display}`
 
 ### Windows
-* `window.list {workspace}` -> `{windows:[{id,title,app_id,focused,maximized,minimized,fullscreen}]}`
+One merged list of the workspace's Wayland toplevels and the X11 windows of its own Xwayland; details,
+fields and the geometry contract in [windows.md](windows.md). Scope `windows`.
+* `window.list {workspace}` -> `{windows:[{id, kind:"wayland"|"x11", title, app_id, class, instance, pid, app,
+  focused, maximized, minimized, fullscreen, geometry:{x,y,width,height}, geometry_source:
+  "x11"|"tracked"|"derived"|"bounds"|"unknown", xid? | toplevel?}]}`. `id` is the number every call uses.
 * `window.action {workspace, window, action}`: `focus close maximize unmaximize restore minimize unminimize
-  fullscreen unfullscreen`
+  fullscreen unfullscreen` -> `{ok, pointer, window}` (the window after the action; `{id, closing:true}` for close)
+* `window.move {workspace, window, x, y}`, `window.resize {workspace, window, width, height}`,
+  `window.set_geometry {workspace, window, x, y, width, height}` (content rectangle, workspace pixels) ->
+  `{ok, pointer, window}`. They honour manual takeover like input, focus the window (Wayland), and take 0.1 s
+  (X11) to about 0.7 s (Wayland). `E_BAD_ARGS` for a missing pair or a size below 20; `E_NOT_FOUND`;
+  `E_TIMEOUT` if the compositor did not apply the placement configuration.
+
+### Audio
+Per-workspace private PipeWire with a null sink; see [audio.md](audio.md).
+* `audio.info {workspace}` -> `{mode:"private"|"off", sink, default_sink, daemons, streams:[{id,class,app,
+  media_name,state}], pulse_server, route:{to:"none"|"host", alive?}}` (scope `read`)
+* `audio.record {workspace, seconds (0.1-120), path?}` -> `{path, seconds, rate, channels, peak, rms, rms_dbfs,
+  tone_hz, frames}` (scope `screenshot`; a workspace credential may only write into `<workspace>/shots`).
+  `E_AUDIO_OFF` when the workspace has audio off.
+* `audio.route {workspace, to:"host"|"none", sink?}` **human only** (admin credential + terminal): play the
+  workspace's audio on the host PipeWire. `E_NOT_HUMAN_CHANNEL` otherwise.
+
+### Browsers
+Details, profile modes and the authorisation flow in [browsers.md](browsers.md).
+* `browser.list {workspace}` -> `{browsers:[{id,label,family,variant,launchable,reason,profiles:[{id,name}]}],
+  agent_profiles:[{browser,name}], authorized:[{browser,profile,grant,status,expires_at}]}` (scope `launch`;
+  names and ids only, no paths)
+* `browser.launch {workspace, browser, profile?, url?, args?, backend?("wayland"|"x11")}` -> `{app, pid, log,
+  browser, profile:{mode,name}, backend, url}`. `profile`: `"throwaway"` (default), `"agent:NAME"`,
+  `"authorized:ID"` or `{mode, name}`; never a path. Errors: `E_BROWSER_UNSUPPORTED` (snap/flatpak),
+  `E_BAD_BROWSER_ARG`, `E_BAD_URL`, `E_BAD_NAME`, `E_PROFILE_BUSY`, `E_GRANT_REQUIRED`, `E_NO_BROWSER`.
+* `browser.profile.list {workspace}` (scope `read`), `browser.profile.request {workspace, browser, profile,
+  reason?}` (scope `approval`; creates a pending `browser_profile` grant, returns it plus `how`).
+* **Human only** (admin credential + terminal, `E_NOT_HUMAN_CHANNEL` otherwise):
+  `browser.profile.authorize {workspace, browser, profile, ttl_seconds?, refresh?}` (copies the allow-listed
+  session data, creates the grant), `browser.profile.revoke {workspace, browser, profile}` (shreds the copy).
+  `E_PROFILE_OPEN_ON_HOST` when the user's own browser has the profile open (nothing is copied or unlocked).
 
 ### Input (all honour manual takeover)
 * `input.move {workspace,x,y}`, `input.click {workspace,x?,y?,button?,count?}`,
@@ -233,6 +271,7 @@ event stream (you may still send requests on it). Each event:
 | `workspace.activity` | `{id,name,actor,action,at}` (actor `agent`/`human`; action `click`, `type`, `screenshot`, ...) |
 | `workspace.enter_requested` | `{id,name}` |
 | `workspace.warning` | `{id,message}` |
+| `workspace.audio_route` | `{id,name,to}` |
 | `input.rejected` | `{id,name,reason:"manual_takeover"}` |
 | `viewer.attached`, `viewer.detached` | `{id,name,viewers}` |
 | `app.started`, `app.exited` | `{workspace,n,argv?,exit_code?}` |

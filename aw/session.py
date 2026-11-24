@@ -82,6 +82,7 @@ class WorkspaceSession:
     def __init__(self, socket_path: str, layout: str = "us", expect_pid: Optional[int] = None):
         # raises if the socket is missing or (with expect_pid) served by another process: fail closed
         self.conn = wl.Connection(socket_path, expect_pid=expect_pid)
+        self.epoch = time.monotonic_ns()         # distinguishes this connection's toplevel ids from a later one's
         self.socket_path = socket_path
         self.lock = threading.RLock()
         self.keymap = xkb.Keymap(layout)

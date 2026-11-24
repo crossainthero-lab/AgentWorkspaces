@@ -56,6 +56,9 @@ def build_parser() -> argparse.ArgumentParser:
     c.add_argument("--memory-max", help="systemd MemoryMax for the compositor, e.g. 2G")
     c.add_argument("--no-xwayland", action="store_true",
                    help="do not give apps a DISPLAY: X11 apps will not run, and GPU drivers cannot wake XWayland (~90 MB)")
+    c.add_argument("--audio", choices=["private", "off"], default="private",
+                   help="private: PipeWire null sink per workspace (about 10 MiB, nothing reaches the host "
+                        "speakers); off: no audio socket at all")
     c.add_argument("--no-start", action="store_true")
     c.add_argument("--sandbox", action="store_true",
                    help="run the workspace's apps in a bubblewrap sandbox: private HOME, read-only system, "
@@ -74,6 +77,7 @@ def build_parser() -> argparse.ArgumentParser:
     cf.add_argument("--gpu", choices=["auto", "off"])
     cf.add_argument("--clipboard", choices=["isolated", "to-workspace", "from-workspace", "both"])
     cf.add_argument("--window-policy", choices=["maximized", "floating"])
+    cf.add_argument("--audio", choices=["private", "off"], help="restarts the compositor (apps are closed)")
     for n in ("start", "stop", "destroy", "resume", "usage"):
         ws_arg(sub.add_parser(n))
     pz = sub.add_parser("pause", help="manual takeover: reject agent input"); ws_arg(pz)
@@ -95,6 +99,22 @@ def build_parser() -> argparse.ArgumentParser:
     wa = sub.add_parser("window-action"); ws_arg(wa); wa.add_argument("window", type=int)
     wa.add_argument("action", choices=["focus", "close", "maximize", "unmaximize", "minimize",
                                        "unminimize", "fullscreen", "unfullscreen", "restore"]); caller(wa)
+    wm_ = sub.add_parser("window-move", help="move a window (content rectangle origin, logical px)"); ws_arg(wm_)
+    wm_.add_argument("window", type=int); wm_.add_argument("x", type=int); wm_.add_argument("y", type=int); caller(wm_)
+    wr_ = sub.add_parser("window-resize", help="resize a window (content size, logical px)"); ws_arg(wr_)
+    wr_.add_argument("window", type=int); wr_.add_argument("width", type=int)
+    wr_.add_argument("height", type=int); caller(wr_)
+    wg_ = sub.add_parser("window-geometry", help="move and resize a window in one step"); ws_arg(wg_)
+    wg_.add_argument("window", type=int)
+    for n in ("x", "y", "width", "height"):
+        wg_.add_argument(n, type=int)
+    caller(wg_)
+    ai = sub.add_parser("audio-info", help="private audio state: sink, daemons, streams, route"); ws_arg(ai)
+    ar = sub.add_parser("audio-record", help="record the workspace's audio (its null sink monitor) to a WAV")
+    ws_arg(ar); ar.add_argument("seconds", type=float); ar.add_argument("-o", "--output", default=None)
+    arr = sub.add_parser("audio-route", help="HUMAN ONLY: play the workspace's audio on the host (off by default)")
+    ws_arg(arr); arr.add_argument("to", choices=["host", "none"]); arr.add_argument("--sink", help="host sink name")
+    arr.add_argument("--yes", action="store_true", help="skip the confirmation (needs a terminal otherwise)")
     ck = sub.add_parser("click"); ws_arg(ck); ck.add_argument("x", type=float, nargs="?")
     ck.add_argument("y", type=float, nargs="?"); ck.add_argument("--button", default="left")
     ck.add_argument("--count", type=int, default=1); caller(ck)
@@ -130,6 +150,8 @@ def build_parser() -> argparse.ArgumentParser:
     gr.add_argument("--ttl", type=float, default=900, help="seconds the grant lasts (approve), default 900")
     au = sub.add_parser("audit", help="show the audit log (who did what; never contains secrets or contents)")
     au.add_argument("-n", type=int, default=30)
+    from . import cli_browsers
+    cli_browsers.add_parsers(sub)
     ig = sub.add_parser("integrate", help="opt-in agent integration (reversible)")
     ig.add_argument("agent", choices=["claude-code", "codex", "antigravity", "hermes"])
     ig.add_argument("action", choices=["status", "install", "uninstall", "show"])
@@ -267,7 +289,7 @@ def _run(args) -> int:
                      width=int(w), height=int(h), scale=args.scale, gpu=args.gpu, clipboard=args.clipboard,
                      window_policy=args.window_policy, home=args.home, memory_max=args.memory_max,
                      start=not args.no_start, xwayland=not args.no_xwayland, sandbox=bool(args.sandbox),
-                     sandbox_mounts=args.sandbox_mount, sandbox_net=not args.sandbox_no_network)
+                     sandbox_mounts=args.sandbox_mount, sandbox_net=not args.sandbox_no_network, audio=args.audio)
         show(res, f"created workspace {res['name']} ({res['id']}) state={res['state']}\n"
                   f"credential file for the agent: {res['token_file']}")
         return 0
@@ -284,7 +306,7 @@ def _run(args) -> int:
         if args.size:
             w, _, h = args.size.partition("x")
             kw.update(width=int(w), height=int(h))
-        for k in ("scale", "gpu", "clipboard", "window_policy"):
+        for k in ("scale", "gpu", "clipboard", "window_policy", "audio"):
             if getattr(args, k) is not None:
                 kw[k] = getattr(args, k)
         res = c.call("workspace.configure", workspace=args.workspace, **kw)
@@ -347,7 +369,11 @@ def _run(args) -> int:
             for w in res["windows"]:
                 flags = "".join(f for f, on in (("F", w["focused"]), ("M", w["maximized"]),
                                                 ("m", w["minimized"]), ("S", w["fullscreen"])) if on)
-                print(f"{w['id']:>3} [{flags:<3}] {w['app_id']:<28} {w['title']}")
+                g = w.get("geometry") or {}
+                geo = (f"{g['width']}x{g['height']}+{g['x']}+{g['y']}" if g.get("width") is not None
+                       else "?")
+                print(f"{w['id']:>3} {w.get('kind', 'wayland'):<7} [{flags:<4}] {geo:<16} "
+                      f"{w['app_id']:<24} {w['title']}")
         return 0
     if cmd == "display-info":
         _p(c.call("screen.info", workspace=args.workspace, **kw))
@@ -355,6 +381,40 @@ def _run(args) -> int:
     if cmd == "window-action":
         show(c.call("window.action", workspace=args.workspace, window=args.window, action=args.action, **kw),
              "ok")
+        return 0
+    if cmd in ("browsers", "launch-browser", "profile"):
+        from . import cli_browsers
+        return cli_browsers.run(args, c, show, out)
+    if cmd == "audio-info":
+        _p(c.call("audio.info", workspace=args.workspace, **kw))
+        return 0
+    if cmd == "audio-record":
+        outp = args.output or f"workspace-{args.workspace}.wav"
+        res = c.call("audio.record", workspace=args.workspace, seconds=args.seconds,
+                     path=os.path.abspath(outp), **kw)
+        show(res, f"{res['path']}: {res['seconds']} s, peak {res['peak']}, rms {res['rms_dbfs']} dBFS"
+             + (f", tone {res['tone_hz']} Hz" if res.get("tone_hz") else ""))
+        return 0
+    if cmd == "audio-route":
+        if args.to == "host" and not args.yes:
+            if not sys.stdin.isatty():
+                print("refusing: routing to the host speakers needs a terminal (or --yes)", file=sys.stderr)
+                return 2
+            if input(f"Play the audio of workspace {args.workspace!r} on your host speakers? [y/N] ").strip().lower() != "y":
+                print("not changed")
+                return 1
+        res = c.call("audio.route", workspace=args.workspace, to=args.to, sink=args.sink)
+        show(res, f"audio route: {res['to']}")
+        return 0
+    if cmd in ("window-move", "window-resize", "window-geometry"):
+        method = {"window-move": "window.move", "window-resize": "window.resize",
+                  "window-geometry": "window.set_geometry"}[cmd]
+        g = {k: getattr(args, k) for k in ("x", "y", "width", "height") if hasattr(args, k)}
+        res = c.call(method, workspace=args.workspace, window=args.window, **g, **kw)
+        win = res.get("window") or {}
+        geo = win.get("geometry") or {}
+        show(res, "ok " + (f"{geo.get('width')}x{geo.get('height')}+{geo.get('x')}+{geo.get('y')} "
+                           f"({win.get('geometry_source')})" if geo else ""))
         return 0
     if cmd == "click":
         if (args.x is None) != (args.y is None):

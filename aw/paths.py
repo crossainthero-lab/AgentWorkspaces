@@ -34,6 +34,12 @@ def state_dir() -> str:
     return os.path.join(d, "agent-workspaces")
 
 
+def data_dir() -> str:
+    """Persistent data owned by AgentWorkspaces (named browser profiles, authorised profile copies)."""
+    d = os.environ.get("XDG_DATA_HOME") or os.path.join(os.path.expanduser("~"), ".local", "share")
+    return os.path.join(d, "agent-workspaces")
+
+
 def config_dir() -> str:
     d = os.environ.get("XDG_CONFIG_HOME") or os.path.join(os.path.expanduser("~"), ".config")
     return os.path.join(d, "agent-workspaces")

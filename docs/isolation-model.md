@@ -77,6 +77,6 @@ Compatibility actually run inside the sandbox: a GTK4 window with input and scre
 ## Honest edges
 
 * Same user, same kernel, same filesystem (unless `--sandbox`), same network. Any process of your user can read `/proc`, the workspace sockets and the API socket and token files.
-* The workspace has no audio (no PipeWire/Pulse socket is exposed).
+* Audio: the host's PipeWire/Pulse sockets are not discoverable from a workspace; a workspace gets its own private PipeWire with a null sink unless created with `--audio off` ([audio.md](audio.md)). Routing to the host speakers is an explicit, human-only action.
 * GPU memory and engines are shared with your desktop; there is no GPU partitioning.
-* Window listing uses wlr-foreign-toplevel, which labwc 0.9.3 does not populate for X11 windows (observed): XWayland apps render, take input and appear in screenshots, but not in `window.list`.
+* Window listing merges wlr-foreign-toplevel with the workspace's own X server, because labwc 0.9.3 announces only some X11 windows; Wayland window geometry is not readable ([windows.md](windows.md)).
