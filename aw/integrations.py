@@ -1,7 +1,8 @@
 """Opt-in, reversible per-agent integration.
 
-Each agent is registered through ITS OWN official `mcp add` / `mcp remove` command, never by editing its
-configuration files by hand, and never globally: one agent at a time, only when asked.
+Claude Code, Codex and Antigravity are registered through THEIR OWN official `mcp add` / `mcp remove` command.
+Hermes is registered by a marked text block (its `mcp add` rewrites the whole config file, which cannot be undone byte
+for byte). Never globally: one agent at a time, only when asked, and `uninstall` removes exactly what `install` added.
 
   agent-workspaces integrate claude-code install --workspace research
   agent-workspaces integrate claude-code status
@@ -162,6 +163,7 @@ def hermes_mcp_block(workspace: Optional[str]) -> str:
 def hermes_mcp_install(workspace: Optional[str], dry: bool) -> Optional[str]:
     """Returns a message, or None when the text edit is not possible (the caller falls back to `hermes mcp add`)."""
     path = _hermes_cfg()
+    existed = os.path.exists(path)
     try:
         txt = open(path).read()
     except OSError:
@@ -179,7 +181,8 @@ def hermes_mcp_install(workspace: Optional[str], dry: bool) -> Optional[str]:
         added_nl = bool(txt) and not txt.endswith("\n")
         new = txt + ("\n" if added_nl else "") + "mcp_servers:\n" + block
         if not dry:
-            guard_install._state_set("hermes-mcp", ["created-section"] + (["added-newline"] if added_nl else []))
+            guard_install._state_set("hermes-mcp", ["created-section"] + (["added-newline"] if added_nl else [])
+                                     + ([] if existed else ["created-file"]))
     else:
         end = len(lines)
         for j in range(idx + 1, len(lines)):
@@ -193,6 +196,7 @@ def hermes_mcp_install(workspace: Optional[str], dry: bool) -> Optional[str]:
         added_nl = False
     if dry:
         return f"would add a marked MCP server block to {path} (text edit; `hermes mcp add` is not used because it rewrites the whole file)"
+    os.makedirs(os.path.dirname(path), exist_ok=True)
     open(path, "w").write(new)
     return f"{path}: MCP server block added (text edit, exactly reversible)"
 
@@ -217,7 +221,10 @@ def hermes_mcp_uninstall(dry: bool) -> Optional[str]:
         if "added-newline" in flags and new.endswith("\n"):
             new = new[:-1]
     if not dry:
-        open(path, "w").write(new)
+        if "created-file" in flags and not new.strip():
+            os.remove(path)                                # the file did not exist before install
+        else:
+            open(path, "w").write(new)
         guard_install._state_set("hermes-mcp", [])
     return f"{path}: MCP server block removed"
 

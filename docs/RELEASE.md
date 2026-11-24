@@ -2,7 +2,7 @@
 
 What this release installs, how to check it, how to remove it and how to restore your configuration bit-exactly. Everything
 here was exercised for real; what was not is said so. Results of the reliability pass are in
-[compatibility-matrix.md](compatibility-matrix.md#release-reliability-pass-claude-code-and-hermes).
+[compatibility-matrix.md](compatibility-matrix.md#release-reliability-pass-claude-code-and-hermes-agent).
 
 ## Install, status, uninstall
 
@@ -39,13 +39,22 @@ python3 -I scripts/agent_backup.py restore ~/agentworkspaces-backup-DATE        
 | Claude Code | `~/.claude.json` | `claude mcp add --scope user`: one `mcpServers` entry `agent-workspaces` (command + env `AW_AGENT_KIND`, `AW_BASE_DIR`). Claude rewrites this file constantly (session state), so it is compared by entry, not by bytes |
 | Claude Code | `~/.claude/skills/agent-workspaces/SKILL.md` | new file (the rule text), removed by uninstall if unchanged |
 | Claude Code | `~/.claude/settings.json` | guard: `env` keys (fail-closed display environment), `permissions.deny` entry `mcp__claude-in-chrome`, one `PreToolUse` hook (matcher `Bash|Edit|Write|MultiEdit|NotebookEdit`). Existing keys, hooks and permissions are kept; uninstall removes only these and restores the file byte-for-byte |
-| Hermes | `~/.hermes/config.yaml` | `hermes mcp add`: `mcp_servers.agent-workspaces`; guard: a marked `hooks:` block (`pre_tool_call`, `fail_closed`) appended at the end |
+| Hermes | `~/.hermes/config.yaml` | the MCP server `agent-workspaces` as a **marked text block inside the existing `mcp_servers:` mapping** (`hermes mcp add` is not used: it rewrites and migrates the whole file, so the change could not be undone byte for byte); guard: a marked `hooks:` block (`pre_tool_call`, `fail_closed`) appended at the end. Install refuses to guard if you already have a top-level `hooks:` key |
 | Hermes | `~/.hermes/SOUL.md` | a marked block with the rule text appended (Hermes injects SOUL.md into its system prompt; it does not show an MCP server's own instructions to the model) |
 | Hermes | `~/.hermes/shell-hooks-allowlist.json` | the consent entry Hermes requires for a new hook (file created if absent) |
 | AgentWorkspaces | `~/.local/share/agent-workspaces/` (code), `~/.local/bin/agent-workspaces` (symlink), `~/.config/systemd/user/agent-workspaces.service` (**copied, not enabled**), `~/.config/agent-workspaces/guard-state.json` (which deny entries were added by us) | |
 
 Not touched: Codex and Antigravity configuration, GNOME Shell, dconf, shortcuts, the GNOME extension (not enabled), Gnotch,
 your browser profiles, any other Claude Code or Hermes setting, hook, plugin or MCP server.
+
+## Hermes specifics you should know
+
+* Hermes starts its MCP servers in your home directory, so every Hermes session shares ONE workspace named `hermes-home` (Claude Code gets one per project: `claude-code-<project>`).
+* `hermes chat` starts a background gateway process (`hermes_cli.main gateway run --idle-exit`, started by Hermes itself, not by this project). It keeps the agent-workspaces MCP server
+  alive between runs and exits when idle. If you change the integration (install, uninstall, update) and a Hermes run still behaves like the old one, stop that gateway (it is the process
+  whose command line contains `gateway run --idle-exit`; `kill -TERM <pid>`; the next `hermes chat` starts a fresh one).
+* Hermes does not show an MCP server's own instructions to the model; the rule text therefore lives in a marked block of `~/.hermes/SOUL.md`.
+* The model matters: with `qwen3.8-27b-agent` 20 of 22 runs passed; a smaller 35B/3B-active MoE passed 4 and 6 of 11 (it answered with `cat` and `ls` instead of using the editor). See the compatibility matrix.
 
 ## Idle cost
 
@@ -104,3 +113,28 @@ Uninstall removes exactly what was added; `status` shows `guard ON/OFF`.
 
 See [limitations.md](limitations.md). In particular: Ubuntu GNOME on Wayland only; the agents' own permission prompts are not intercepted; no audio from workspaces to your speakers by default;
 Hermes' terminal ignores the caller's environment, which is why the guard rewrites its commands.
+
+## What is installed now, and how it was proven (2026-11-24)
+
+Installed on the real configuration of this machine: AgentWorkspaces (`./install.sh`), `integrate claude-code install`, `integrate hermes install`, both with the guard ON.
+Not installed: Codex, Antigravity, the GNOME extension, shortcuts, any service. A backup of the four existing files (`~/.claude.json`, `~/.claude/settings.json`,
+`~/.hermes/config.yaml`, `~/.hermes/SOUL.md`) is in `~/agentworkspaces-backup-20261124` (mode 0700; sha256 checked; a restore test into a scratch directory was bit-exact before
+anything was installed).
+
+| Check | Result |
+|---|---|
+| Post-install smoke test through the real configuration, no integration flags, host display and bus variables removed from the process | Claude Code 3 of 3 (browser, editor, calculator screenshot), Hermes 3 of 3; evidence `docs/evidence/release/post-install/` |
+| Uninstall both, then compare with the backup | `~/.claude/settings.json`, `~/.hermes/config.yaml`, `~/.hermes/SOUL.md`: **byte-identical**; `~/.hermes/shell-hooks-allowlist.json` and the Claude skill: absent again; `~/.claude.json`: its `mcpServers` equal to the backup, no `agent-workspaces` entry (the file is rewritten by every running Claude session, so only that part is comparable; the other differing keys are cached feature flags and counters) |
+| Reinstall, then one request each | works for both (Claude: calculator; Hermes: calculator) |
+| A defect found by this smoke test | after a workspace was destroyed while a long-lived MCP server still held it, the MCP server kept answering "no credentials" and Hermes fell back to its terminal for 10 minutes: fixed (it now creates the workspace again), unit-tested and re-run on the real configuration: Hermes opened the editor again after the workspace had been destroyed |
+
+Roll back completely: `agent-workspaces integrate claude-code uninstall`, `agent-workspaces integrate hermes uninstall`, then `agent-workspaces stop-daemon`; or restore
+from the backup with `scripts/agent_backup.py restore` (also removes files that install created).
+
+## What you still have to approve
+
+* Codex and Antigravity integrations (not part of this release; their last results are in the compatibility matrix).
+* The GNOME Shell extension (installed nowhere, not enabled) and Gnotch.
+* Enabling the systemd user service (the unit is copied, not enabled).
+* Publishing: nothing was pushed except the branch `feat/release-agents`; no release was cut.
+

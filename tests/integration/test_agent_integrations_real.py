@@ -31,6 +31,8 @@ class Integrations(unittest.TestCase):
 
     def test_roundtrip_each_installed_agent(self):
         before = {p: digest(p) for p in REAL}
+        cj0 = os.path.expanduser("~/.claude.json")
+        had_entry = os.path.exists(cj0) and "agent-workspaces" in open(cj0).read()     # true when really installed
         tried = []
         for agent, exe in (("claude-code", "claude"), ("codex", "codex"), ("antigravity", "agy"), ("hermes", "hermes")):
             if not shutil.which(exe):
@@ -76,7 +78,7 @@ class Integrations(unittest.TestCase):
         # ~/.claude.json is rewritten constantly by running Claude sessions, so check for our entry instead
         cj = os.path.expanduser("~/.claude.json")
         if os.path.exists(cj):
-            self.assertNotIn("agent-workspaces", open(cj).read(), "integration leaked into the real Claude config")
+            self.assertEqual(had_entry, "agent-workspaces" in open(cj).read(), "the test changed the real Claude config")
 
     def test_show_prints_the_assigned_workspace_rule(self):
         home = tempfile.mkdtemp(prefix="awint")
