@@ -543,12 +543,12 @@ export default class AgentWorkspacesExtension extends Extension {
                 Main.notify('AgentWorkspaces', 'No agent workspace is running. Create one with: agent-workspaces create --name NAME');
                 return;
             }
-            running.sort((a, b) => (b.activity?.last_action_at ?? 0) - (a.activity?.last_action_at ?? 0));
             const env = {};
             for (const k of ['WAYLAND_DISPLAY', 'DISPLAY', 'XDG_RUNTIME_DIR', 'DBUS_SESSION_BUS_ADDRESS'])
                 if (GLib.getenv(k))
                     env[k] = GLib.getenv(k);
-            await this._daemonCall('workspace.enter', {workspace: running[0].name, display_env: env, maximized: true});
+            // no workspace named: the viewer opens on the one you used last (else the most recently active)
+            await this._daemonCall('workspace.enter', {display_env: env, maximized: true});
         } catch (e) {
             if (String(e.message).includes('daemon-unavailable'))
                 Main.notify('AgentWorkspaces', 'The AgentWorkspaces service is not running. Start it with: agent-workspaces daemon');

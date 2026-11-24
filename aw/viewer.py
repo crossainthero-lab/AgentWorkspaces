@@ -49,6 +49,7 @@ METRICS = os.environ.get("AW_VIEWER_METRICS")
 NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9 _.\-]{0,39}$")
 SIZES = [("1280 x 800", 1280, 800), ("1280 x 720", 1280, 720), ("1600 x 900", 1600, 900),
          ("1920 x 1080", 1920, 1080), ("1024 x 768", 1024, 768)]
+OBSERVE_DT = 1 / 30          # frame interval cap while you only watch; no cap while you control (input latency)
 THUMB_WIDTH = 480
 THUMB_EVERY = 1.5            # seconds between thumbnail refreshes, only while the overview is visible
 SIDEBAR_W, RAIL_W = 244, 56
@@ -72,8 +73,6 @@ headerbar togglebutton:checked { background: alpha(white, 0.2); }
 .aw-card { background: #111; border: 1px solid alpha(white, 0.10); border-radius: 12px; padding: 0; }
 .aw-card:hover { border-color: alpha(white, 0.35); }
 .aw-thumb { background: #050505; border-radius: 11px 11px 0 0; }
-.aw-newcard { border: 1px dashed alpha(white, 0.25); border-radius: 12px; background: transparent; min-height: 150px; }
-.aw-newcard:hover { border-color: alpha(white, 0.6); }
 .aw-approvals { background: #161616; border-bottom: 1px solid alpha(white, 0.12); padding: 8px 12px; }
 .aw-error { color: #ff8a80; }
 """
@@ -212,10 +211,15 @@ class Feed:
         self._latest = None
         self._pending = False
         self._lock = threading.Lock()
+        self.active = threading.Event()   # cleared while the window is not visible (another GNOME workspace)
+        self.active.set()
+        self.min_dt = OBSERVE_DT          # seconds between frames: relaxed while watching, none while you control
         threading.Thread(target=self._loop, daemon=True).start()
 
     def _loop(self):
         while self.running:
+            if not self.active.wait(1.0):
+                continue
             try:
                 t0 = time.monotonic()
                 fr = self.cap.capture_native(wait_damage=True, timeout=2.0, cursor=True)
@@ -235,6 +239,9 @@ class Feed:
                     continue          # newest frame wins; the main loop is busy with an older one
                 self._pending = True
             GLib.idle_add(self._deliver)
+            left = self.min_dt - (time.monotonic() - t0)
+            if left > 0:
+                time.sleep(left)
 
     def _deliver(self):
         with self._lock:
@@ -478,6 +485,7 @@ class Viewer(Gtk.Application):
         self.stack.add_named(self.build_empty(), "empty")
 
         win.connect("close-request", self.on_close)
+        win.connect("realize", lambda w: w.get_surface().connect("notify::state", self.on_surface_state))
         fc = Gtk.EventControllerFocus()
         fc.connect("enter", self.on_focus_in)
         fc.connect("leave", lambda *_: self.release_all())
@@ -493,14 +501,6 @@ class Viewer(Gtk.Application):
                                 row_spacing=14, min_children_per_line=1, max_children_per_line=6,
                                 valign=Gtk.Align.START, margin_top=18, margin_bottom=18, margin_start=18, margin_end=18)
         self.flow.connect("child-activated", self.on_card_activated)
-        self.new_card = Gtk.Button(hexpand=True)
-        self.new_card.add_css_class("aw-newcard")
-        nb = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6, halign=Gtk.Align.CENTER, valign=Gtk.Align.CENTER)
-        nb.append(Gtk.Image.new_from_icon_name("list-add-symbolic"))
-        nb.append(Gtk.Label(label="New workspace"))
-        self.new_card.set_child(nb)
-        self.new_card.connect("clicked", lambda b: self.show_create_dialog())
-        self.flow.append(self.new_card)
         sc = Gtk.ScrolledWindow(vexpand=True, hexpand=True)
         sc.set_child(self.flow)
         return sc
@@ -581,8 +581,6 @@ class Viewer(Gtk.Application):
         self.select(row.ws_id)
 
     def on_card_activated(self, fb, child):
-        if child.get_child() is self.new_card:
-            return
         self.select(child.ws_id)
 
     def on_overview_toggle(self, btn):
@@ -707,7 +705,9 @@ class Viewer(Gtk.Application):
             if not pick and self.last_name:
                 pick = self.find(self.last_name)
             if not pick:
-                pick = next((w["id"] for w in wl if w["state"] == "running"), None)
+                running = [w for w in wl if w["state"] == "running"]
+                running.sort(key=lambda w: (w.get("activity") or {}).get("last_action_at") or 0, reverse=True)
+                pick = running[0]["id"] if running else None
             if pick:
                 self.select(pick, sync=False)
         self.sync_widgets()
@@ -768,7 +768,7 @@ class Viewer(Gtk.Application):
             if i not in self.cards:
                 c = Card(self, i)
                 self.cards[i] = c
-                self.flow.insert(c, len(self.cards) - 1)
+                self.flow.append(c)
             self.rows[i].update(w)
             self.cards[i].update(w)
         if self.sel in self.rows:
@@ -812,8 +812,13 @@ class Viewer(Gtk.Application):
         live = self.stack.get_visible_child_name() == "live" and w
         if live:
             self.h_title.set_text(w["name"])
-            self.h_sub.set_text(activity_text(w) if w["state"] == "running"
-                                else f"{w['agent']['label']} · {w['state']}")
+            if w["state"] != "running":
+                sub = f"{w['agent']['label']} · {w['state']}"
+            elif w.get("input_mode") == "manual":
+                sub = "You are in control; the agent is paused" if self.controlling else "Agent paused; you are watching"
+            else:
+                sub = activity_text(w)
+            self.h_sub.set_text(sub)
             self.win.set_title(f"AgentWorkspaces: {w['name']}")
         else:
             self.h_title.set_text("Workspaces")
@@ -840,6 +845,8 @@ class Viewer(Gtk.Application):
         if w and w.get("input_mode") != "manual":
             self.controlling = False
         st = self.control_state()
+        if self.feed:
+            self.feed.min_dt = 0 if st == "you" else OBSERVE_DT
         self._syncing = True
         self.ctl_btns[st].set_active(True)
         self._syncing = False
@@ -853,6 +860,15 @@ class Viewer(Gtk.Application):
             self.chk_in.set_active(cb in ("to-workspace", "both"))
             self.chk_out.set_active(cb in ("from-workspace", "both"))
             self._syncing = False
+
+    suspended = False
+
+    def on_surface_state(self, surface, _pspec):
+        """The desktop marks the window suspended while it is not visible (for example you are on another GNOME
+        workspace): stop capturing and painting; the workspace itself is unaffected."""
+        self.suspended = bool(surface.get_state() & Gdk.ToplevelState.SUSPENDED)
+        if self.feed:
+            (self.feed.active.clear if self.suspended else self.feed.active.set)()
 
     # ---- feed management ---------------------------------------------------------------------------------------
     def close_feed(self):
@@ -881,6 +897,9 @@ class Viewer(Gtk.Application):
         except (ApiError, OSError, SessionError) as e:
             self.msg_show(f"Cannot open workspace: {getattr(e, 'message', e)}", "Try again")
             return
+        self.feed.min_dt = 0 if self.control_state() == "you" else OBSERVE_DT
+        if self.suspended:
+            self.feed.active.clear()
         self.msg_show(None)
         if METRICS:
             self.dbg.append(f"renderer={type(self.win.get_native().get_renderer()).__name__}")
@@ -930,7 +949,7 @@ class Viewer(Gtk.Application):
     def thumb_loop(self):
         while self.alive:
             time.sleep(THUMB_EVERY)
-            if not (self.win and self.win.is_visible() and self.stack.get_visible_child_name() == "overview"):
+            if self.suspended or not (self.win and self.win.is_visible() and self.stack.get_visible_child_name() == "overview"):
                 continue
             for i, w in list(self.ws.items()):
                 if w.get("state") != "running" or self.stack.get_visible_child_name() != "overview":
@@ -1158,6 +1177,9 @@ class Viewer(Gtk.Application):
         return False
 
     def on_key(self, c, keyval, keycode, state, down):
+        if os.environ.get("AW_VIEWER_DEBUG"):
+            print(f"key {keyval:#x} code={keycode} down={down} state={self.control_state()} focus={self.pic.has_focus()}",
+                  file=sys.stderr, flush=True)
         if self.control_state() != "you" or not self.pic.has_focus():
             return False
         code = keycode - 8  # GDK hardware keycode (xkb) -> evdev
@@ -1197,7 +1219,7 @@ class Viewer(Gtk.Application):
         self.save_state()
         self.close_feed()
         if METRICS and self.dbg:
-            print("\n".join(self.dbg), flush=True)
+            print("\n".join(self.dbg), file=sys.stderr, flush=True)
         return False
 
 
@@ -1285,7 +1307,7 @@ class CreateDialog(Gtk.Window):
         grid = Gtk.Grid(row_spacing=10, column_spacing=14, margin_top=18, margin_bottom=18, margin_start=20,
                         margin_end=20)
         self.set_child(grid)
-        self.name = Gtk.Entry(placeholder_text="research", hexpand=True, activates_default=True, max_length=40)
+        self.name = Gtk.Entry(placeholder_text="name", hexpand=True, activates_default=True, max_length=40)
         self.name.connect("changed", self.validate)
         self.kinds = [k for k in (viewer.agent_kinds or {"other": {}}) if k != "none"] + ["none"]
         labels = [(viewer.agent_kinds.get(k, {}).get("label") or k) if k != "none" else "No agent yet" for k in self.kinds]

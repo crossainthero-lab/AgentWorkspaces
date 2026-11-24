@@ -34,6 +34,9 @@ class Daemon:
                     "XDG_STATE_HOME": os.path.join(home, ".state"), "AW_BASE_DIR": self.base, "PYTHONPATH": ROOT,
                     "XDG_RUNTIME_DIR": host_rt, "DBUS_SESSION_BUS_ADDRESS": f"unix:path={host_rt}/bus",
                     "LANG": "C.UTF-8", "GSETTINGS_BACKEND": "memory"}
+        for k in ("AW_VIEWER_DEBUG", "AW_VIEWER_METRICS"):     # opt-in diagnostics for the viewer the daemon starts
+            if os.environ.get(k):
+                self.env[k] = os.environ[k]
         for k in ("WAYLAND_DISPLAY", "DISPLAY", "XAUTHORITY"):
             assert k not in self.env
         self.proc = None
@@ -75,7 +78,7 @@ class Daemon:
                 try:
                     with open(f"/proc/{d}/stat") as f:
                         ppid = int(f.read().rsplit(")", 1)[1].split()[1])
-                    if ppid == self.proc.pid:
+                    if ppid == self.proc.pid and b"aw.viewer" in open(f"/proc/{d}/cmdline", "rb").read():
                         out.append(int(d))
                 except (OSError, ValueError, IndexError):
                     pass
