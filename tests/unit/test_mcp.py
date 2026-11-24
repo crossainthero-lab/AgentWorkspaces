@@ -43,6 +43,8 @@ class FakeClient:
         if method == "workspace.launch":
             return {"app": 1, "pid": 42}
         if method == "screen.screenshot":
+            if self.workspaces and not any(w["name"] == p["workspace"] for w in self.workspaces):
+                raise ApiError("E_NO_CREDENTIALS", "no credential found")   # destroyed: its credential went with it
             return {"base64": "AAAA", "width": 10, "height": 5, "capture_ms": 1.0, "workspace": p["workspace"]}
         if method.startswith("input."):
             if p.get("_paused"):
@@ -162,6 +164,15 @@ class McpTests(unittest.TestCase):
         self.rpc(s, "tools/call", {"name": "screenshot", "arguments": {}})
         self.assertFalse([c for c in s.client.calls if c[0] == "workspace.create"])
         self.assertEqual(s.client.calls[-1][1]["workspace"], "claude-code-proj")
+
+    def test_workspace_destroyed_meanwhile_is_created_again(self):
+        s = server([ws("claude-code-proj", "claude-code")], auto=True)
+        self.rpc(s, "tools/call", {"name": "screenshot", "arguments": {}})
+        s.client.workspaces.clear()
+        s.client.workspaces.append(ws("unrelated", "codex"))      # the old one is gone
+        r = self.rpc(s, "tools/call", {"name": "screenshot", "arguments": {}})["result"]
+        self.assertFalse(r.get("isError"), r)
+        self.assertEqual([c for c in s.client.calls if c[0] == "workspace.create"][-1][1]["name"], "claude-code-proj")
 
     def test_stopped_workspace_is_started(self):
         w = ws("codex-proj", "codex")

@@ -483,8 +483,9 @@ class Server:
         try:
             return self._call_ws_tool(name, a)
         except ApiError as e:
-            if e.code == "E_NOT_FOUND" and self._ws_cache and not a.get("workspace") and self.auto \
-                    and "workspace" in e.message.lower():
+            gone = (e.code == "E_NOT_FOUND" and "workspace" in e.message.lower()) or \
+                e.code in ("E_NO_CREDENTIALS", "E_UNAUTHENTICATED")    # destroyed meanwhile: its credential went with it
+            if gone and self._ws_cache and not a.get("workspace") and self.auto:
                 self._ws_cache = None          # destroyed meanwhile: create/attach again, once
                 return self._call_ws_tool(name, a)
             raise

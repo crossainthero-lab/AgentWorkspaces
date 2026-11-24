@@ -296,7 +296,8 @@ def run(args) -> int:
                 return r.returncode
         print(f"{agent}: registered MCP server '{NAME}' (AW_AGENT_KIND={AGENTS[agent]['kind']})")
         note = _write_skill(agent, False)
-        print(note or "this agent has no skill folder support here; the MCP server sends the instructions itself")
+        if note or agent not in RULES_FILE:
+            print(note or "this agent has no skill folder support here; the MCP server sends the instructions itself")
         rn = _install_rules(agent, False)
         if rn:
             print(rn)
