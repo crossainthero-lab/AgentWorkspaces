@@ -113,15 +113,17 @@ class Proxy:
 
 
 class Connection:
-    def __init__(self, socket_path: str):
-        if not os.path.isabs(socket_path):
-            raise WaylandError("socket path must be absolute (never resolved from the environment)")
-        if not os.path.exists(socket_path):
-            raise WaylandError(f"workspace compositor socket missing: {socket_path}")
+    def __init__(self, socket_path: Optional[str] = None, sock: Optional[socket.socket] = None):
         load_all_protocols()
+        if sock is None:
+            if not socket_path or not os.path.isabs(socket_path):
+                raise WaylandError("socket path must be absolute (never resolved from the environment)")
+            if not os.path.exists(socket_path):
+                raise WaylandError(f"workspace compositor socket missing: {socket_path}")
+            sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+            sock.connect(socket_path)
         self.path = socket_path
-        self.sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-        self.sock.connect(socket_path)
+        self.sock = sock
         self.objects: Dict[int, Proxy] = {}
         self._next_id = 2
         self._rbuf = b""

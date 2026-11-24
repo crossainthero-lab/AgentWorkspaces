@@ -86,6 +86,7 @@ class WorkspaceSession:
         self.keymap = xkb.Keymap(layout)
         self._running = True
         self._wake_r, self._wake_w = os.pipe()
+        self._cond = threading.Condition()
         c = self.conn
         self.seat = c.bind("wl_seat", 7)
         self.shm = c.bind("wl_shm", 1)
@@ -150,7 +151,11 @@ class WorkspaceSession:
                         self.conn.dispatch(0)
                     except wl.WaylandError:
                         self._running = False
+                        with self._cond:
+                            self._cond.notify_all()
                         return
+                with self._cond:
+                    self._cond.notify_all()
 
     def _wait_for(self, pred, timeout=5.0, what="event"):
         deadline = time.monotonic() + timeout
@@ -297,6 +302,49 @@ class WorkspaceSession:
             frame.destroy()
             return st["w"], st["h"], rgb
 
+    def capture_native(self, wait_damage: bool = False, timeout: float = 5.0, cursor: bool = True):
+        """Return (width, height, stride, fourcc, bytes, y_invert) of the raw shm frame.
+        With wait_damage the call blocks until the output changes (wlr-screencopy copy_with_damage),
+        or returns None on timeout. Used by the viewer: no per-pixel Python work."""
+        with self.lock:
+            out = self.outputs[0]["proxy"]
+            frame = self.screencopy.capture_output(1 if cursor else 0, out)
+            st: Dict[str, Any] = {}
+            frame.on("buffer", lambda fmt, w, h, stride: st.update(fmt=fmt, w=w, h=h, stride=stride))
+            frame.on("flags", lambda f: st.__setitem__("flags", f))
+            frame.on("ready", lambda *a: st.__setitem__("ready", True))
+            frame.on("failed", lambda: st.__setitem__("failed", True))
+            frame.on("linux_dmabuf", lambda *a: None)
+            frame.on("damage", lambda *a: None)
+            frame.on("buffer_done", lambda: st.__setitem__("bdone", True))
+            self._wait_for(lambda: "bdone" in st or "failed" in st, 5, "screencopy buffer info")
+            if "failed" in st:
+                raise SessionError("screencopy failed")
+            buf, mm, size, _ = self._shm_buffer(st["w"], st["h"], st["stride"], st["fmt"])
+            if wait_damage:
+                frame.copy_with_damage(buf)
+            else:
+                frame.copy(buf)
+        # wait outside the long lock hold so other threads can still use this session
+        deadline = time.monotonic() + timeout
+        with self._cond:
+            while not ("ready" in st or "failed" in st):
+                left = deadline - time.monotonic()
+                if left <= 0:
+                    break
+                self._cond.wait(left)
+        if "ready" not in st and "failed" not in st:
+            with self.lock:
+                frame.destroy()
+            return None
+        with self.lock:
+            if "failed" in st:
+                self._shm_cache.clear()
+                raise SessionError("screencopy copy failed")
+            data = bytes(mm[:size])
+            frame.destroy()
+        return st["w"], st["h"], st["stride"], st["fmt"], data, bool(st.get("flags", 0) & 1)
+
     def screenshot_png(self, region=None, cursor: bool = False) -> bytes:
         w, h, rgb = self.capture_raw(region, cursor)
         return encode_png(w, h, rgb)
@@ -423,6 +471,13 @@ class WorkspaceSession:
                 self._key(xkb.MODIFIER_KEYS[m], False)
             self._set_mods(0)
             self.conn.roundtrip()
+
+    def raw_key(self, code: int, down: bool, mods: int):
+        """Forward one evdev key event with an explicit modifier mask (used by the viewer for the human)."""
+        with self.lock:
+            self._ensure_keyboard()
+            self._set_mods(mods)
+            self._key(code, down)
 
     def type_text(self, text: str, delay_ms: int = 4):
         with self.lock:

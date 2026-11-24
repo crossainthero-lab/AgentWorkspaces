@@ -361,7 +361,13 @@ class Handler(socketserver.StreamRequestHandler):
                 try:
                     if method == "events.subscribe":
                         if sub is None:
-                            sub = self.daemon.bus.subscribe(q, params.get("workspaces"), params.get("types"))
+                            ids = []
+                            for ref in params.get("workspaces") or []:
+                                try:
+                                    ids.append(self.daemon.mgr.get(ref).id)   # names may change; ids do not
+                                except ManagerError:
+                                    ids.append(ref)
+                            sub = self.daemon.bus.subscribe(q, ids, params.get("types"))
 
                             def run():
                                 while True:

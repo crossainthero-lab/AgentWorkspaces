@@ -27,7 +27,7 @@ class App(Gtk.Application):
         win.set_default_size(640, 400)
         css = Gtk.CssProvider()
         css.load_from_data(f"""
-        .banner {{ background: {color}; color: white; font-size: 44px; font-weight: 700; padding: 24px; }}
+        .banner {{ background: {color}; color: white; font-size: 44px; font-weight: 700; padding: 24px; }} button {{ color: #111; }} entry {{ color: #111; }}
         """.encode())
         Gtk.StyleContext.add_provider_for_display(Gdk.Display.get_default(), css, 800)
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)

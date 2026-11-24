@@ -497,6 +497,7 @@ echo "$DISPLAY" > {shlex.quote(ws.dir)}/display.tmp && mv {shlex.quote(ws.dir)}/
             base["HOME"] = os.path.join(ws.dir, "home")
         base["GSETTINGS_BACKEND"] = "memory"
         base["NO_AT_BRIDGE"] = "1"
+        base["GTK_A11Y"] = "none"
         base["GTK_USE_PORTAL"] = "0"
         if ws.gpu == "off":
             base["LIBGL_ALWAYS_SOFTWARE"] = "1"
