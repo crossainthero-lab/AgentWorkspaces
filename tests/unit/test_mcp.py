@@ -27,6 +27,15 @@ class FakeClient:
             w = ws(p["name"], p["agent_kind"])
             self.workspaces.append(w)
             return w
+        if method == "workspace.get":
+            hit = [w for w in self.workspaces if w["name"].lower() == p["workspace"].lower()]
+            if not hit:
+                raise ApiError("E_NO_CREDENTIALS", "no credential found")   # no token file yet
+            return hit[0]
+        if method == "workspace.configure":
+            return ws(p["workspace"], "claude-code")
+        if method == "workspace.stop":
+            return {"ok": True}
         if method == "workspace.start":
             return [w for w in self.workspaces if w["name"] == p["workspace"]][0] | {"state": "running"}
         if method == "window.list":
@@ -55,6 +64,7 @@ def server(workspaces, kind="claude-code", default=None, auto=False):
     s = mcp.Server.__new__(mcp.Server)
     s.kind, s.default_ws, s.client = kind, default, FakeClient(workspaces)
     s.project, s.auto, s.shots_dir, s._ws_cache, s._shot_n = "proj", auto, None, None, 0
+    s._prov = s.client            # the fake daemon answers both the agent and the provisioning credential
     return s
 
 
@@ -152,13 +162,7 @@ class McpTests(unittest.TestCase):
         self.assertIn("workspace.start", [c[0] for c in s.client.calls])
 
     def test_name_owned_by_another_agent_is_reported(self):
-        s = server([], auto=True)
-        real = s.client.call
-        def call(m, **p):
-            if m == "workspace.create":
-                raise ApiError("E_EXISTS", "exists")
-            return real(m, **p)
-        s.client.call = call
+        s = server([ws("claude-code-proj", "codex")], auto=True)
         r = self.rpc(s, "tools/call", {"name": "screenshot", "arguments": {}})["result"]
         self.assertTrue(r["isError"])
         self.assertIn("E_ASSIGNMENT", r["content"][0]["text"])
@@ -195,11 +199,43 @@ class McpTests(unittest.TestCase):
         self.assertTrue(r["isError"])
         self.assertIn("E_NO_VISION", r["content"][0]["text"])
 
-    def test_destroy_needs_confirmation(self):
+    def test_agent_cannot_destroy_or_control_another_workspace(self):
         s = server([ws("mine", "claude-code")], default="mine")
-        r = self.rpc(s, "tools/call", {"name": "workspace_control", "arguments": {"action": "destroy"}})["result"]
-        self.assertTrue(r["isError"])
+        r = self.rpc(s, "tools/call", {"name": "workspace_control", "arguments": {"action": "destroy"}})
+        self.assertTrue(r["result"]["isError"] or "error" in r)
         self.assertFalse([c for c in s.client.calls if c[0] == "workspace.destroy"])
+        r = self.rpc(s, "tools/call", {"name": "workspace_control",
+                                       "arguments": {"action": "stop", "workspace": "someone-else"}})["result"]
+        self.assertIn("E_FORBIDDEN", r["content"][0]["text"])
+
+    def test_provisioning_can_be_switched_off(self):
+        os.environ["AW_PROVISION"] = "0"
+        try:
+            s = server([], auto=True)
+            r = self.rpc(s, "tools/call", {"name": "screenshot", "arguments": {}})["result"]
+            self.assertTrue(r["isError"])
+            self.assertIn("E_NEEDS_HUMAN", r["content"][0]["text"])
+            self.assertFalse([c for c in s.client.calls if c[0] == "workspace.create"])
+        finally:
+            del os.environ["AW_PROVISION"]
+
+    def test_missing_admin_credential_asks_the_human(self):
+        s = server([], auto=True)
+        real = s.client.call
+        def call(m, **p):
+            if m in ("workspace.list", "workspace.create"):
+                raise ApiError("E_NO_CREDENTIALS", "no admin token")
+            return real(m, **p)
+        s._prov = type("P", (), {"call": staticmethod(call)})()
+        r = self.rpc(s, "tools/call", {"name": "screenshot", "arguments": {}})["result"]
+        self.assertIn("E_NEEDS_HUMAN", r["content"][0]["text"])
+        self.assertIn("agent-workspaces create --name claude-code-proj", r["content"][0]["text"])
+
+    def test_screenshot_file_is_requested_relative_to_the_workspace_shots_dir(self):
+        s = server([ws("mine", "claude-code")], default="mine")
+        self.rpc(s, "tools/call", {"name": "screenshot", "arguments": {}})
+        p = [c for c in s.client.calls if c[0] == "screen.screenshot"][0][1]["path"]
+        self.assertFalse(os.path.isabs(p))
 
     def test_unknown_method(self):
         self.assertEqual(self.rpc(server([]), "bogus")["error"]["code"], -32601)

@@ -63,10 +63,9 @@ TOOLS = [
        "need it; use it to choose a size.", {"width": {"type": "integer"}, "height": {"type": "integer"},
                                               "name": {"type": "string"}}, ws=False),
     _t("workspace_status", "State, input mode (agent/manual), windows, apps, CPU/memory use of your workspace."),
-    _t("workspace_control", "Start, stop, restart or destroy your workspace. 'stop' and 'restart' close every app "
-       "in it; 'destroy' also deletes its private home and needs confirm=true.",
-       {"action": {"type": "string", "enum": ["start", "stop", "restart", "destroy"]},
-        "confirm": {"type": "boolean"}}, ["action"]),
+    _t("workspace_control", "Start, stop or restart your own workspace ('stop' and 'restart' close every app in "
+       "it). Destroying a workspace is not possible for an agent: ask the user.",
+       {"action": {"type": "string", "enum": ["start", "stop", "restart"]}}, ["action"]),
     _t("configure_display", "Change the workspace screen size or scale (applies live, apps keep running).",
        {"width": {"type": "integer"}, "height": {"type": "integer"}, "scale": NUM}),
     _t("display_info", "Output size, scale and the last pointer position of the workspace."),
@@ -146,7 +145,10 @@ class Server:
     def __init__(self, default_workspace: Optional[str] = None):
         self.kind = os.environ.get("AW_AGENT_KIND") or None
         self.default_ws = default_workspace or os.environ.get("AW_WORKSPACE") or None
-        self.client = Client()
+        # All agent calls use a WORKSPACE credential (found by the client: AW_TOKEN / AW_TOKEN_FILE or the token
+        # file of the workspace being addressed). It cannot create, destroy or take over anything.
+        self.client = Client(role="agent", workspace=self.default_ws)
+        self._prov: Optional[Client] = None
         self.project = default_project()
         self.auto = os.environ.get("AW_AUTO_CREATE", "1") != "0" and self.kind is not None
         self.shots_dir: Optional[str] = None
@@ -158,32 +160,65 @@ class Server:
         return auto_name(self.kind or "other", self.project)
 
     # ---- workspace discovery / creation
+    def _provisioner(self) -> Client:
+        """The credential used ONLY to create / start / resize this agent's own workspace (the human delegated
+        that by installing the integration). Never used for input, screenshots or any other workspace.
+        AW_PROVISION=0 disables it: then the workspace must already exist (e.g. created by the human)."""
+        if os.environ.get("AW_PROVISION", "1") == "0":
+            raise ApiError("E_NEEDS_HUMAN", f"provisioning is disabled (AW_PROVISION=0): ask the user to run "
+                           f"'agent-workspaces create --name {self.my_name} --agent {self.kind or 'other'}'")
+        if self._prov is None:
+            self._prov = Client(role="admin")
+        return self._prov
+
+    def _prov_call(self, method: str, **p) -> Any:
+        try:
+            return self._provisioner().call(method, **p)
+        except ApiError as e:
+            if e.code in ("E_NO_CREDENTIALS", "E_INSECURE_CREDENTIAL_FILE", "E_UNAUTHENTICATED", "E_FORBIDDEN"):
+                raise ApiError("E_NEEDS_HUMAN", f"this needs the human: ask the user to run "
+                               f"'agent-workspaces create --name {self.my_name} --agent {self.kind or 'other'}' "
+                               f"({e.code}: {e.message})")
+            raise
+
     def ensure(self, name: Optional[str] = None, **create_kw) -> Dict[str, Any]:
-        """Attach to the workspace called `name` (default: this agent's automatic one), creating or starting it."""
+        """Attach to the workspace called `name` (default: this agent's automatic one), creating or starting it
+        when needed."""
         name = name or self.my_name
-        c = self.client
+        # 1. attach with the agent's own workspace credential (no privileges needed when it already runs)
+        try:
+            w = self.client.call("workspace.get", workspace=name)
+            if w["agent"]["kind"] not in (self.kind or "other", "none"):
+                raise ApiError("E_ASSIGNMENT", f"a workspace called {name!r} exists but is assigned to a "
+                               "different agent; pass 'workspace' explicitly")
+            if w["state"] == "running":
+                self._ws_cache = w["name"]
+                return dict(w, created=False)
+            self._prov_call("workspace.start", workspace=name)
+            self._ws_cache = w["name"]
+            return dict(self.client.call("workspace.get", workspace=name), created=False)
+        except ApiError as e:
+            if e.code not in ("E_NO_CREDENTIALS", "E_FORBIDDEN", "E_NOT_FOUND", "E_UNAUTHENTICATED", "E_AMBIGUOUS"):
+                raise
+        # 2. provision: create it (or start it) with the delegated credential
         for _ in range(2):
-            found = [w for w in c.call("workspace.list", **self._ck())["workspaces"]
-                     if w["name"].lower() == name.lower()]
+            found = [w for w in self._prov_call("workspace.list")["workspaces"] if w["name"].lower() == name.lower()]
             if found:
                 w = found[0]
+                if w["agent"]["kind"] not in (self.kind or "other", "none"):
+                    raise ApiError("E_ASSIGNMENT", f"a workspace called {name!r} exists but is assigned to a "
+                                   "different agent; pass 'workspace' explicitly")
                 if w["state"] != "running":
-                    w = c.call("workspace.start", workspace=w["name"])
+                    w = self._prov_call("workspace.start", workspace=w["name"])
                 self._ws_cache = w["name"]
                 return dict(w, created=False)
             try:
-                w = c.call("workspace.create", name=name, agent_kind=self.kind or "other", **create_kw)
+                w = self._prov_call("workspace.create", name=name, agent_kind=self.kind or "other", **create_kw)
                 self._ws_cache = w["name"]
                 return dict(w, created=True)
             except ApiError as e:
                 if e.code != "E_EXISTS":
-                    raise
-                # either we raced another process of this agent, or the name belongs to another agent kind
-                again = [w for w in c.call("workspace.list", **self._ck())["workspaces"]
-                         if w["name"].lower() == name.lower()]
-                if not again:
-                    raise ApiError("E_ASSIGNMENT", f"a workspace called {name!r} exists but is assigned to a "
-                                   "different agent; pass 'workspace' explicitly")
+                    raise          # raced another process of this agent: look again
         raise ApiError("E_INTERNAL", "could not attach to or create the workspace")
 
     def _resolve(self, args: Dict[str, Any]) -> str:
@@ -219,13 +254,8 @@ class Server:
         if a.get("max_width"):
             kw["max_width"] = int(a["max_width"])
         if want_file and os.environ.get("AW_SAVE_SHOTS", "1") != "0":
-            try:
-                if self.shots_dir is None:
-                    self.shots_dir = paths.ensure_private_dir(os.path.join(paths.base_dir(), "shots"))
-                self._shot_n = (self._shot_n + 1) % 40
-                kw["path"] = os.path.join(self.shots_dir, f"{re.sub(r'[^A-Za-z0-9_.-]', '_', ws)}-{self._shot_n:02d}.png")
-            except OSError:
-                pass
+            self._shot_n = (self._shot_n + 1) % 40
+            kw["path"] = f"shot-{self._shot_n:02d}.png"      # a workspace credential may only write in <ws>/shots
         return self.client.call("screen.screenshot", workspace=ws, cursor=bool(a.get("cursor")), inline=True, **kw)
 
     def _shot_parts(self, r: Dict[str, Any], prefix: str = "") -> List[Dict[str, Any]]:
@@ -253,23 +283,22 @@ class Server:
             return self._text(json.dumps(c.call("workspace.get", workspace=ws), indent=2))
         if name == "workspace_control":
             act = a["action"]
-            if act == "destroy":
-                if a.get("confirm") is not True:
-                    raise ApiError("E_CONFIRM", "destroy deletes the workspace and its private home; call again "
-                                   "with confirm=true only if the user asked for that")
-                c.call("workspace.destroy", workspace=ws)
-                self._ws_cache = None
-                return self._text(f"workspace {ws} destroyed (a new one is created on the next graphical call)")
+            own = self.default_ws or self._ws_cache or self.my_name
+            if ws != own and ws.lower() != own.lower():
+                raise ApiError("E_FORBIDDEN", "you may only control your own workspace")
             if act in ("stop", "restart"):
-                c.call("workspace.stop", workspace=ws)
+                self._prov_call("workspace.stop", workspace=ws)
             if act in ("start", "restart"):
-                c.call("workspace.start", workspace=ws)
+                self._prov_call("workspace.start", workspace=ws)
             return self._text(f"workspace {ws}: {act} done")
         if name == "configure_display":
             kw = {k: a[k] for k in ("width", "height", "scale") if k in a}
             if not kw:
                 raise ApiError("E_BAD_ARGS", "give width, height and/or scale")
-            w = c.call("workspace.configure", workspace=ws, **kw)
+            own = self.default_ws or self._ws_cache or self.my_name
+            if ws != own and ws.lower() != own.lower():
+                raise ApiError("E_FORBIDDEN", "you may only configure your own workspace")
+            w = self._prov_call("workspace.configure", workspace=ws, **kw)
             return self._text(f"display is now {w['display']['width']}x{w['display']['height']} scale {w['display']['scale']}")
         if name == "screenshot":
             return self._shot_parts(self._shot(ws, a))
@@ -367,6 +396,10 @@ class Server:
         missing = [k for k in spec["inputSchema"].get("required", []) if k not in a]
         if missing:
             raise ApiError("E_BAD_ARGS", f"missing required argument(s): {', '.join(missing)}")
+        for k, v in a.items():                 # enum validation (the schema is advisory for some clients)
+            en = spec["inputSchema"]["properties"].get(k, {}).get("enum")
+            if en and v not in en:
+                raise ApiError("E_BAD_ARGS", f"{k} must be one of {en}")
         c = self.client
         if name == "list_workspaces":
             res = c.call("workspace.list", **self._ck())
