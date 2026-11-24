@@ -27,6 +27,10 @@ class WaylandError(Exception):
     pass
 
 
+class PeerMismatch(WaylandError):
+    """The process behind the socket is not the one we expected (checked before any byte is exchanged)."""
+
+
 class Arg:
     __slots__ = ("name", "type", "interface", "allow_null")
 
@@ -113,7 +117,8 @@ class Proxy:
 
 
 class Connection:
-    def __init__(self, socket_path: Optional[str] = None, sock: Optional[socket.socket] = None):
+    def __init__(self, socket_path: Optional[str] = None, sock: Optional[socket.socket] = None,
+                 expect_pid: Optional[int] = None):
         load_all_protocols()
         if sock is None:
             if not socket_path or not os.path.isabs(socket_path):
@@ -122,6 +127,13 @@ class Connection:
                 raise WaylandError(f"workspace compositor socket missing: {socket_path}")
             sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
             sock.connect(socket_path)
+            if expect_pid is not None:
+                import struct
+                peer = struct.unpack("3i", sock.getsockopt(socket.SOL_SOCKET, socket.SO_PEERCRED,
+                                                           struct.calcsize("3i")))[0]
+                if peer != expect_pid:
+                    sock.close()
+                    raise PeerMismatch(f"socket {socket_path} is served by pid {peer}, expected {expect_pid}")
         self.path = socket_path
         self.sock = sock
         self.objects: Dict[int, Proxy] = {}

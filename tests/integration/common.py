@@ -28,23 +28,48 @@ def have(cmd):
     return shutil.which(cmd) is not None
 
 
-def start_daemon(tag="int"):
-    global BASE, DAEMON
-    BASE = os.path.join(f"/run/user/{os.getuid()}", f"awt-{tag}-{os.getpid()}")
-    os.makedirs(BASE, mode=0o700, exist_ok=True)
-    os.environ["AW_BASE_DIR"] = BASE
+def _spawn_daemon(extra_env=None):
+    global DAEMON
     env = {"PATH": os.environ["PATH"], "HOME": os.path.expanduser("~"), "AW_BASE_DIR": BASE, "PYTHONPATH": ROOT,
            "XDG_RUNTIME_DIR": f"/run/user/{os.getuid()}",
            "DBUS_SESSION_BUS_ADDRESS": os.environ.get("DBUS_SESSION_BUS_ADDRESS",
                                                       f"unix:path=/run/user/{os.getuid()}/bus"),
            "LANG": "C.UTF-8"}   # NB: no WAYLAND_DISPLAY / DISPLAY: the daemon never needs the host display
+    env.update(extra_env or {})
     DAEMON = subprocess.Popen([sys.executable, "-m", "aw.daemon"], env=env, cwd=ROOT,
                               stdout=open(os.path.join(BASE, "daemon.log"), "wb"), stderr=subprocess.STDOUT,
                               start_new_session=True)
-    for _ in range(100):
+    for _ in range(200):
         if os.path.exists(os.path.join(BASE, "api.sock")):
-            break
+            try:
+                import socket as _s
+                t = _s.socket(_s.AF_UNIX)
+                t.connect(os.path.join(BASE, "api.sock"))
+                t.close()
+                break
+            except OSError:
+                pass
         time.sleep(0.05)
+
+
+def start_daemon(tag="int", extra_env=None):
+    global BASE
+    BASE = os.path.join(f"/run/user/{os.getuid()}", f"awt-{tag}-{os.getpid()}")
+    os.makedirs(BASE, mode=0o700, exist_ok=True)
+    os.environ["AW_BASE_DIR"] = BASE
+    _spawn_daemon(extra_env)
+    return Client(autostart=False)
+
+
+def restart_daemon(kill=True, extra_env=None):
+    """Kill the daemon by its exact pid (SIGKILL = a crash, SIGTERM = a clean stop) and start a new one on the
+    same base dir. Workspaces keep running; the new daemon must adopt them."""
+    global DAEMON
+    old = DAEMON
+    if old and old.poll() is None:
+        old.send_signal(signal.SIGKILL if kill else signal.SIGTERM)
+        old.wait(10)
+    _spawn_daemon(extra_env)
     return Client(autostart=False)
 
 

@@ -25,6 +25,7 @@ from .auth import AuthError, Principal
 from .grants import GrantError, GrantStore
 from .manager import AGENT_KINDS, Manager, ManagerError
 from .session import SessionError
+from . import wl
 
 INPUT_METHODS = {"input.move", "input.click", "input.drag", "input.type", "input.key", "input.scroll",
                  "window.action", "clipboard.set"}
@@ -200,7 +201,18 @@ class Daemon:
             self.audit.write("auth.denied", method=method, code=e.code, workspace=p.get("workspace")
                              if isinstance(p.get("workspace"), str) else None, **self._audit_ctx(pr, conn_state))
             raise ManagerError(e.code, e.message)
-        result = self._dispatch(method, p, conn_state, pr)
+        try:
+            result = self._dispatch(method, p, conn_state, pr)
+        except (OSError, wl.WaylandError, SessionError):
+            # The connection to a workspace compositor broke mid-call. If the compositor is gone this becomes a
+            # clean E_NOT_RUNNING (and the workspace is recorded as stopped); if something else is serving the
+            # socket, E_ROUTING; otherwise the cached connection is dropped so the next call starts fresh.
+            ref = p.get("workspace")
+            ws = self.mgr.workspaces.get(self._resolve_id(ref) or "") if isinstance(ref, str) else None
+            if ws is not None and ws.state == "running":
+                self.mgr.verify_routing(ws)
+                self.mgr.drop_session(ws)
+            raise
         if method in AUDITED:
             self.audit.write("request", method=method, workspace=p.get("workspace") if isinstance(
                 p.get("workspace"), str) else None, **self._audit_ctx(pr, conn_state))
@@ -540,7 +552,7 @@ class Handler(socketserver.StreamRequestHandler):
             pid, uid, _gid = auth.peer_cred(self.request)
         except OSError:
             return
-        state: Dict[str, Any] = {"peer_pid": pid}
+        state: Dict[str, Any] = {"peer_pid": pid, "viewer_of": []}   # shared with per-request copies
         wlock = threading.Lock()
         sub = None
         pump: Optional[threading.Thread] = None

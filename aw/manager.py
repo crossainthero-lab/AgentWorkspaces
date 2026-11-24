@@ -25,7 +25,7 @@ import threading
 import time
 from typing import Any, Callable, Dict, List, Optional
 
-from . import appenv, auth, paths, sandbox as sbx
+from . import appenv, auth, paths, sandbox as sbx, wl
 from .session import SessionError, WorkspaceSession
 
 AGENT_KINDS = {
@@ -56,8 +56,19 @@ def _proc_start(pid: int) -> Optional[str]:
         return None
 
 
+def _proc_gone_or_zombie(pid: int) -> bool:
+    try:
+        with open(f"/proc/{pid}/stat") as f:
+            return f.read().rsplit(")", 1)[1].split()[0] in ("Z", "X")
+    except (OSError, IndexError):
+        return True
+
+
 def _alive(pid: Optional[int], start: Optional[str]) -> bool:
-    return bool(pid) and _proc_start(pid) is not None and (start is None or _proc_start(pid) == start)
+    """The process exists, is not a zombie, and (when `start` is given) is the SAME process: a pid that was
+    reused by something else has a different start time and counts as dead."""
+    return (bool(pid) and _proc_start(pid) is not None and (start is None or _proc_start(pid) == start)
+            and not _proc_gone_or_zombie(pid))
 
 
 def find_render_node() -> Optional[str]:
@@ -70,13 +81,31 @@ def _systemd_available() -> bool:
         os.path.join(paths.host_runtime_dir(), "systemd"))
 
 
+PROFILE_FLAGS = ("--user-data-dir", "--profile", "-profile", "--user-profile")
+
+
+def profile_dir_of(argv: List[str], cwd: str) -> Optional[str]:
+    """The browser/Electron profile directory an app was told to use, if any (`--user-data-dir=X`,
+    `--user-data-dir X`, Firefox `-profile X`). Resolved to a real path; None when the app uses its default."""
+    for i, a in enumerate(argv):
+        for f in PROFILE_FLAGS:
+            val = None
+            if a == f and i + 1 < len(argv):
+                val = argv[i + 1]
+            elif a.startswith(f + "="):
+                val = a[len(f) + 1:]
+            if val:
+                return os.path.realpath(val if os.path.isabs(val) else os.path.join(cwd, val))
+    return None
+
+
 class Workspace:
     """Plain data holder; persisted as ws.json next to the workspace's runtime dir."""
 
     FIELDS = ("id", "name", "agent", "width", "height", "scale", "gpu", "render_node", "clipboard",
               "window_policy", "home", "memory_max", "state", "input_mode", "compositor_pid",
               "compositor_start", "x_display", "created_at", "apps", "next_app", "xkb_layout",
-              "takeover_reason", "last_action", "last_action_at", "last_input_at", "viewers", "xwayland", "sandbox")
+              "takeover_reason", "last_action", "last_action_at", "last_input_at", "viewers", "xwayland", "sandbox", "bus_pid", "bus_start")
 
     def __init__(self, **kw):
         self.id: str = kw["id"]
@@ -106,6 +135,8 @@ class Workspace:
         self.last_input_at: float = kw.get("last_input_at", 0.0)
         self.viewers: int = 0
         self.xwayland: bool = kw.get("xwayland", True)
+        self.bus_pid: Optional[int] = kw.get("bus_pid")           # the workspace's private session bus
+        self.bus_start: Optional[str] = kw.get("bus_start")
         self.sandbox: Optional[Dict[str, Any]] = kw.get("sandbox")   # None | {"mounts": [{"path","ro"}]}
 
     def to_meta(self) -> Dict[str, Any]:
@@ -339,7 +370,8 @@ echo "$DISPLAY" > {shlex.quote(ws.dir)}/display.tmp && mv {shlex.quote(ws.dir)}/
                            ["labwc", "-C", os.path.join(ws.dir, "labwc"), "-s", os.path.join(ws.dir, "startup.sh")],
                            stdout=log)
             ws.compositor_pid = p.pid
-            ws._bus_pid = bus.pid  # type: ignore[attr-defined]
+            ws.bus_pid = bus.pid
+            ws.bus_start = _proc_start(bus.pid)
             threading.Thread(target=lambda: (p.wait(), self._on_compositor_exit(ws, p.pid)),
                              daemon=True).start()
             threading.Thread(target=bus.wait, daemon=True).start()
@@ -401,9 +433,10 @@ echo "$DISPLAY" > {shlex.quote(ws.dir)}/display.tmp && mv {shlex.quote(ws.dir)}/
         if self.use_systemd:
             subprocess.run(["systemctl", "--user", "stop", ws.slice], env=self._host_bus_env(),
                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=30)
-        pids = [ws.compositor_pid, getattr(ws, "_bus_pid", None)] + [
-            a.get("pid") for a in ws.apps.values() if _alive(a.get("pid"), a.get("start"))]
-        pids = [p for p in pids if p]
+        # only processes whose pid AND start time match what we recorded: a reused pid is never signalled
+        cand = [(ws.compositor_pid, ws.compositor_start), (ws.bus_pid, ws.bus_start)] + [
+            (a.get("pid"), a.get("start")) for a in ws.apps.values()]
+        pids = [p for p, st in cand if p and _alive(p, st)]
         for pid in pids:
             if _proc_start(pid):
                 try:
@@ -539,6 +572,16 @@ echo "$DISPLAY" > {shlex.quote(ws.dir)}/display.tmp && mv {shlex.quote(ws.dir)}/
             raise ManagerError("E_ROUTING", f"workspace {ws.name!r}: {expected} is not a socket owned by you")
         return st
 
+    def drop_session(self, ws: Workspace):
+        """Forget a cached compositor connection that failed; the next call reconnects (and re-verifies)."""
+        with self.lock:
+            s = self.sessions.pop(ws.id, None)
+        if s is not None:
+            try:
+                s.close()
+            except Exception:
+                pass
+
     def session(self, ws: Workspace) -> WorkspaceSession:
         with self.lock:
             st = self.verify_routing(ws)
@@ -550,16 +593,14 @@ echo "$DISPLAY" > {shlex.quote(ws.dir)}/display.tmp && mv {shlex.quote(ws.dir)}/
                 s.close()
                 self.sessions.pop(ws.id, None)
             try:
-                s = WorkspaceSession(ws.socket, ws.xkb_layout)
+                # the peer pid is verified before a single Wayland byte is exchanged
+                s = WorkspaceSession(ws.socket, ws.xkb_layout, expect_pid=ws.compositor_pid)
+            except wl.PeerMismatch as e:
+                raise ManagerError("E_ROUTING", f"workspace {ws.name!r}: the process behind its compositor "
+                                   f"socket is not the workspace's compositor ({e}); refusing")
             except Exception as e:
                 raise ManagerError("E_SESSION", f"cannot connect to workspace compositor: {e}")
-            peer = auth.peer_cred(s.conn.sock)[0]
-            if peer != ws.compositor_pid:
-                s.close()
-                raise ManagerError("E_ROUTING", f"workspace {ws.name!r}: the process behind its compositor "
-                                   f"socket (pid {peer}) is not the workspace's compositor "
-                                   f"(pid {ws.compositor_pid}); refusing")
-            s.aw_ino, s.aw_peer = st.st_ino, peer
+            s.aw_ino, s.aw_peer = st.st_ino, ws.compositor_pid
             self.sessions[ws.id] = s
             return s
 
@@ -599,6 +640,20 @@ echo "$DISPLAY" > {shlex.quote(ws.dir)}/display.tmp && mv {shlex.quote(ws.dir)}/
             ws.next_app += 1
         logp = os.path.join(ws.dir, f"app-{n}.log")
         cwd = cwd or (base["HOME"] if os.path.isdir(base["HOME"]) else "/")
+        profile = profile_dir_of(argv, cwd)
+        if profile:
+            # Chromium/Firefox/Electron hand a second launch over to the instance that already owns the profile
+            # directory. Across workspaces that would open the agent's page inside ANOTHER workspace's browser
+            # session (measured with Chrome), so a profile in use elsewhere is refused.
+            with self.lock:
+                for other in self.workspaces.values():
+                    if other.id == ws.id:
+                        continue
+                    for a in other.apps.values():
+                        if a.get("profile") == profile and _alive(a.get("pid"), a.get("start")):
+                            raise ManagerError("E_PROFILE_BUSY", f"profile directory {profile} is in use by a "
+                                               f"running app of workspace {other.name!r}; use a separate profile "
+                                               "directory per workspace")
         popen_cwd = cwd
         if ws.sandbox:
             home = base["HOME"]
@@ -614,7 +669,7 @@ echo "$DISPLAY" > {shlex.quote(ws.dir)}/display.tmp && mv {shlex.quote(ws.dir)}/
         lf = open(logp, "ab")
         p = self._wrap(ws, f"app{n}", base, argv, cwd=popen_cwd, stdout=lf)
         app = {"n": n, "pid": p.pid, "argv": argv, "started": time.time(), "log": logp, "running": True,
-               "start": None}
+               "start": None, "profile": profile}
         time.sleep(0.05)
         app["start"] = _proc_start(p.pid)
         with self.lock:
