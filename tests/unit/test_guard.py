@@ -47,7 +47,14 @@ BLOCKED = [
     "flatpak run org.mozilla.firefox", "kioclient5 exec http://x", "mimeopen file.pdf", "xdg-open http://x &",
     "f(){ google-chrome \"$@\"; }; f http://x", "for u in a b; do firefox $u; done", "if true; then google-chrome http://x; fi",
     "ln -s /usr/bin/google-chrome-stable /tmp/c", "cp /usr/bin/firefox /tmp/f", "BROWSER=google-chrome python3 -m webbrowser x",
-    "bash <<EOF\nxdg-open http://x\nEOF", "sh <<'X'\nxeyes; xdotool key a\nX", "bash -s <<'E'\ngoogle-chrome http://x\nE",
+    # a display variable still cannot be set by any real assignment, however the data/print commands are mixed in
+    "echo hi; WAYLAND_DISPLAY=wayland-0 xeyes", "echo ok && export DISPLAY=:0", "echo a | WAYLAND_DISPLAY=x env xeyes",
+    "echo \"WAYLAND_DISPLAY=wayland-0 xeyes\" | sh", "echo 'WAYLAND_DISPLAY=x xeyes' | bash -s", "echo 'WAYLAND_DISPLAY=x xeyes' > run.sh",
+    "echo 'DISPLAY=:0' | tee run.sh", "echo \"$(WAYLAND_DISPLAY=wayland-0 xeyes)\"", "sh -c \"$(echo WAYLAND_DISPLAY=x xeyes)\"",
+    "WAYLAND_DISPLAY=wayland-0 echo hi", "env echo WAYLAND_DISPLAY=x", "printf -v WAYLAND_DISPLAY '%s' x; WAYLAND_DISPLAY=wayland-0 xeyes",
+    "git -c alias.x='!WAYLAND_DISPLAY=x xeyes' x", "git -c core.pager='DISPLAY=:0 xeyes' log", "sed '1e WAYLAND_DISPLAY=x xeyes' f", "rg --pre 'WAYLAND_DISPLAY=x xeyes' a",
+    "declare -x WAYLAND_DISPLAY=wayland-0", "eval \"WAYLAND_DISPLAY=x xeyes\"", "cat /dev/null; XAUTHORITY=x xeyes",
+    "echo \"a\" | xargs -I{} sh -c 'WAYLAND_DISPLAY=x xeyes'", "bash <<EOF\nxdg-open http://x\nEOF", "sh <<'X'\nxeyes; xdotool key a\nX", "bash -s <<'E'\ngoogle-chrome http://x\nE",
     "google-chrome https://example.org", "firefox https://example.org", "firefox", "chromium-browser x",
     "/usr/bin/google-chrome-stable x", "nohup google-chrome x &", "brave-browser", "epiphany x",
 ]
@@ -64,6 +71,12 @@ ALLOWED = [
     "chromium --headless=new --dump-dom http://127.0.0.1:8000/", "firefox --headless --screenshot /tmp/x.png http://127.0.0.1",
     "python3 - <<'E'\ns = open('f').read()\nprint(s)\nE", "python3 <<EOF\nimport webbrowser_not_used\nx = open('a')\nEOF",
     "cat > note.txt <<EOF\nuse xdg-open or firefox to view\nEOF", "tee f <<'X'\nopen the door\nX", "python3 -c \"s = open('f').read()\"",
+    # printing, searching or committing text that mentions the display variables is not an assignment
+    'echo "WAYLAND_DISPLAY=$WAYLAND_DISPLAY DISPLAY=$DISPLAY GDK_BACKEND=$GDK_BACKEND"', "echo 'set WAYLAND_DISPLAY=wayland-0 in the docs'",
+    "printf '%s\\n' \"WAYLAND_DISPLAY=$WAYLAND_DISPLAY\"", "printf '%s' \"$WAYLAND_DISPLAY\"", "grep -n 'WAYLAND_DISPLAY=' file",
+"sed -n '/WAYLAND_DISPLAY=/p' f.conf", "sed -i 's/DISPLAY=:0/DISPLAY=:1/' notes.txt",
+    "git commit -m \"fix WAYLAND_DISPLAY=wayland-0 handling\"", "git -c user.name=x -c user.email=a@b commit -qm 'fix DISPLAY=:0 docs'", "git log --grep='DISPLAY=' --oneline", "env | grep WAYLAND", "printenv WAYLAND_DISPLAY",
+    "echo $WAYLAND_DISPLAY | grep -c wayland", "cat notes.md | grep 'DISPLAY='", "echo hi; echo \"XAUTHORITY=$XAUTHORITY\"",
     "code --list-extensions", "code --install-extension ms-python.python", "code --version", "libreoffice --headless --convert-to pdf a.odt",
     "google-chrome --user-data-dir=/tmp/p --no-first-run about:blank", "firefox --profile /tmp/ffp --version",
     "git commit -m 'open the browser docs'", "echo open", "grep -rn webbrowser src/", "python3 -c \"print('webbrowser')\"",

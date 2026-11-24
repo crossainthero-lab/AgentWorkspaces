@@ -381,6 +381,139 @@ def strip_heredocs(cmd: str) -> str:
     return "\n".join(out)
 
 
+# --------------------------------------------------------------------------- data arguments are not assignments
+# `echo "WAYLAND_DISPLAY=$WAYLAND_DISPLAY"`, `grep -n 'DISPLAY=' f`, `git commit -m "fix DISPLAY=..."` only mention the text. The
+# assignment / socket-path rules therefore ignore a simple command whose command word merely prints or searches its arguments.
+# Conservative on purpose: nothing is ignored when the command substitutes (`$(`, backticks), writes to a file, pipes into anything
+# but a plain text filter, has a prefix assignment or wrapper before the command word, or uses an option that executes code.
+DATA_CMDS = {"echo", "printf", "grep", "egrep", "fgrep", "rg", "cat", "head", "tail", "wc", "logger", "sed", "git"}
+STRING_CMDS = {"echo", "printf", "logger", "git"}      # only print or record their arguments: never open a file argument
+PIPE_SAFE = {"grep", "egrep", "fgrep", "rg", "head", "tail", "wc", "cut", "uniq", "cat", "nl", "tr"}
+GIT_SAFE_CONFIG = {"user.name", "user.email", "commit.gpgsign", "core.quotepath"}
+GIT_DATA_SUBCMDS = {"commit", "log", "tag", "grep", "show", "diff", "blame", "notes", "shortlog"}
+SED_EXEC_RE = re.compile(r"(^|[\s;{}'\"/!0-9$,])e(\s|$)|\b[sy](.).*?\1.*?\1[A-Za-z]*e")
+
+
+def _segments(cmd: str) -> List[Tuple[int, int, str]]:
+    """(start, end, separator-after) of the top-level simple commands of `cmd`, quote and parenthesis aware."""
+    out, start, i, n = [], 0, 0, len(cmd)
+    quote, depth = None, 0
+    while i < n:
+        c = cmd[i]
+        if quote == "'":
+            if c == "'":
+                quote = None
+        elif quote == '"':
+            if c == "\\":
+                i += 1
+            elif c == '"':
+                quote = None
+            elif c == "$" and cmd[i + 1:i + 2] == "(":
+                depth += 1
+                i += 1
+        else:
+            if c == "\\":
+                i += 1
+            elif c in "'\"":
+                quote = c
+            elif c == "$" and cmd[i + 1:i + 2] == "(":
+                depth += 1
+                i += 1
+            elif c == "(" :
+                depth += 1
+            elif c == ")" and depth:
+                depth -= 1
+            elif depth == 0 and c in ";&|\n":
+                sep = c
+                j = i + 1
+                while j < n and cmd[j] in "&|":
+                    sep += cmd[j]
+                    j += 1
+                out.append((start, i, sep))
+                start, i = j, j - 1
+        i += 1
+    out.append((start, n, ""))
+    return out
+
+
+def _unquoted_has(text: str, chars: str) -> bool:
+    quote = None
+    i = 0
+    while i < len(text):
+        c = text[i]
+        if quote:
+            if c == "\\" and quote == '"':
+                i += 1
+            elif c == quote:
+                quote = None
+        elif c == "\\":
+            i += 1
+        elif c in "'\"":
+            quote = c
+        elif c in chars:
+            return True
+        i += 1
+    return False
+
+
+def _redirects_to_file(text: str) -> bool:
+    plain = re.sub(r"\d*>&\d+|\d*>>?\s*/dev/null", "", _strip_quoted(text))
+    return ">" in plain
+
+
+def _strip_quoted(text: str) -> str:
+    return re.sub(r"'[^']*'|\"(?:\\.|[^\"\\])*\"", "''", text)
+
+
+def _is_data_segment(text: str, sep: str, next_text: str, strings_only: bool = False) -> bool:
+    t = text.strip()
+    if not t or "$(" in t or "`" in t or _redirects_to_file(t):
+        return False
+    words = t.split()
+    first = words[0]
+    if first not in (STRING_CMDS if strings_only else DATA_CMDS):
+        return False
+    rest = words[1:]
+    if first == "printf" and rest[:1] == ["-v"]:
+        return False
+    if first == "rg" and any(w == "--pre" or w.startswith("--pre=") for w in rest):
+        return False
+    if first == "sed" and SED_EXEC_RE.search(t[len("sed"):]):
+        return False
+    if first == "git":
+        i = 0
+        while i + 1 < len(rest) and rest[i] == "-c" and rest[i + 1].split("=")[0] in GIT_SAFE_CONFIG:
+            i += 2                                         # `git -c user.name=x commit`: harmless; `-c alias.x=!cmd` is not
+        if i < len(rest) and rest[i].startswith("-"):
+            return False
+        sub = rest[i] if i < len(rest) else ""
+        if sub not in GIT_DATA_SUBCMDS or (sub == "grep" and any(w.startswith("-O") or w.startswith("--open-files") for w in rest)):
+            return False
+    if sep.startswith("|"):
+        nw = next_text.strip().split()
+        if not nw or nw[0] not in PIPE_SAFE:
+            return False
+    return True
+
+
+def mask_data_arguments(cmd: str, strings_only: bool = False) -> str:
+    """`cmd` with every data-only simple command replaced by a bare `echo`, so that text sitting in its arguments is not read as an
+    assignment or a socket path. Everything else is returned unchanged."""
+    segs = _segments(cmd)
+    if len(segs) == 1 and not segs[0][2]:
+        a, b, sep = segs[0]
+        return "echo" if _is_data_segment(cmd[a:b], sep, "", strings_only) else cmd
+    out, last = [], 0
+    for k, (a, b, sep) in enumerate(segs):
+        nxt = cmd[segs[k + 1][0]:segs[k + 1][1]] if k + 1 < len(segs) else ""
+        out.append(cmd[last:a])
+        out.append(" echo " if _is_data_segment(cmd[a:b], sep, nxt, strings_only) else cmd[a:b])
+        last = b
+    out.append(cmd[last:])
+    return "".join(out)
+
+
+
 def check_command(cmd: str, depth: int = 0) -> Decision:
     """Decide whether the shell command may run. Allowed commands still run under the guard environment."""
     if not isinstance(cmd, str):
@@ -391,10 +524,11 @@ def check_command(cmd: str, depth: int = 0) -> Decision:
     pw = protected_write(cmd)
     if pw:
         return Decision(True, PROTECTED_MSG.format(what=pw))
-    m = ASSIGN_RE.search(cmd)
+    scan = mask_data_arguments(cmd)
+    m = ASSIGN_RE.search(scan)
     if m and not (m.group(1) == "DISPLAY" and VIRTUAL_X.search(cmd)):
         return Decision(True, MSG.format(why=f"it assigns {m.group(1)} (the display variables are fixed by the guard)"))
-    m = SOCKET_PATH_RE.search(cmd)
+    m = SOCKET_PATH_RE.search(mask_data_arguments(cmd, strings_only=True))     # `cat /run/user/N/bus` still names the socket
     if m:
         return Decision(True, MSG.format(why=f"it refers to a display/session-bus socket ({m.group(0).strip('/')})"))
     for words in _split_simple(cmd):

@@ -286,6 +286,7 @@ class OrdinaryWork(unittest.TestCase):
         work = tempfile.mkdtemp(prefix="awwork")
         open(os.path.join(work, "Makefile"), "w").write("all:\n\t@echo made-$(shell echo ok)\n")
         open(os.path.join(work, "t.py"), "w").write("import unittest\nclass T(unittest.TestCase):\n    def test_a(self):\n        self.assertEqual(2+2, 4)\nunittest.main()\n")
+        open(os.path.join(work, "conf.txt"), "w").write("# notes\nWAYLAND_DISPLAY=wayland-0\nDISPLAY=:0\nplain line\n")
         srv = subprocess.Popen([sys.executable, "-u", "-m", "http.server", "0", "--bind", "127.0.0.1"], cwd=work, stdout=subprocess.PIPE,
                                stderr=subprocess.STDOUT, text=True, start_new_session=True)
         try:
@@ -299,6 +300,12 @@ class OrdinaryWork(unittest.TestCase):
                 "systemctl --user list-units --no-legend --type=target 2>&1 | head -1 | awk '{print $1}'", "echo $HOME | wc -c", "cat /etc/os-release | head -1",
                 "node --version 2>&1 | cut -c1-2", "npm --version 2>&1 | cut -c1-1", "tar czf a.tgz Makefile && tar tzf a.tgz",
                 "env | grep -c '^PATH='", "timeout 3 sleep 1; echo slept", "nohup sh -c 'echo bg' >bg.out 2>&1 & wait; cat bg.out",
+                # text that merely MENTIONS the display variables (the false positive reported by the first real user)
+                'echo "WAYLAND_DISPLAY=$WAYLAND_DISPLAY DISPLAY=$DISPLAY GDK_BACKEND=$GDK_BACKEND" | wc -l',
+                "echo 'set WAYLAND_DISPLAY=wayland-0 and DISPLAY=:0 in the docs'", "printf '%s\\n' 'XDG_RUNTIME_DIR=/run/user/1000'",
+                "printf '%s' \"$WAYLAND_DISPLAY\" | wc -c | awk '{print ($1>0)}'", "grep -n 'WAYLAND_DISPLAY=' conf.txt",
+                "sed -n '/DISPLAY=/p' conf.txt", "cat conf.txt | grep -c 'DISPLAY='", "env | grep -c WAYLAND_DISPLAY",
+                "echo more >> conf.txt && git add -A && git -c user.email=a@b -c user.name=x commit -qm 'fix WAYLAND_DISPLAY=wayland-0 handling' && git log -1 --format=%s",
             ]
             for envname, envf, rw in (("claude", claude_guard_env, False), ("hermes", hermes_guard_env, True)):
                 for cmd in cmds:
