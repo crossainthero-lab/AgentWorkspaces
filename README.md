@@ -25,13 +25,25 @@ Each workspace is a separate headless Wayland compositor (labwc/wlroots) running
 ## Install (user level, no root, nothing in GNOME changes)
 
 ```bash
+git clone -b feat/release-agents https://github.com/crossainthero-lab/AgentWorkspaces && cd AgentWorkspaces   # main only has the README until the PRs are merged
 sudo apt install labwc          # the only package that needs root, if you do not have it yet
+./install.sh --dry-run          # optional: prints every change, writes nothing
 ./install.sh                    # copies to ~/.local/share/agent-workspaces, links ~/.local/bin/agent-workspaces
 agent-workspaces create --name research --agent claude-code
 agent-workspaces launch research -- gnome-text-editor
 agent-workspaces screenshot research -o research.png
 agent-workspaces enter research
 ```
+
+Optional GNOME Shell extension (Ctrl+Alt+Down enters the AgentWorkspaces viewer, Ctrl+Alt+Up returns; while enabled it rewrites those two shortcuts and restores them when disabled):
+
+```bash
+gnome-extension/install.sh      # copies files and compiles the schema, enables nothing
+# log out and in once: on Wayland GNOME only discovers a newly installed extension at login
+gnome-extensions enable agent-workspaces@agentworkspaces.dev
+```
+
+If `gsettings get org.gnome.shell disable-user-extensions` prints `true`, no user extension loads at all; set it to `false` first. Disable with `gnome-extensions disable agent-workspaces@agentworkspaces.dev`. Install, status, uninstall and restore commands for the Claude Code and Hermes integrations: [docs/RELEASE.md](docs/RELEASE.md).
 
 Remove everything with `./uninstall.sh` (`--stop-workspaces`, `--remove-integrations` are available). Requirements: labwc, python3, systemd user session, libxkbcommon, and python3-gi with GTK4 for the viewer.
 
