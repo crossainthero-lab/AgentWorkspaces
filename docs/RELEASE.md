@@ -138,3 +138,7 @@ from the backup with `scripts/agent_backup.py restore` (also removes files that 
 * Enabling the systemd user service (the unit is copied, not enabled).
 * Publishing: nothing was pushed except the branch `feat/release-agents`; no release was cut.
 
+
+Updating: after `./install.sh` copies a newer `guard.py`, Hermes reports the hook script as "modified since approval" (`hermes hooks doctor`). Run
+`agent-workspaces integrate hermes install` again: it is idempotent and refreshes the consent entry. Also stop Hermes' background gateway once (see above) so it
+starts the updated MCP server.
