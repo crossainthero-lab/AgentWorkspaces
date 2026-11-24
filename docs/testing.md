@@ -2,7 +2,7 @@
 
 Tests are split on purpose. Unit tests need no compositor and cannot fail because of the machine. Real integration tests start real compositors and real apps and are labelled as such in their module docstrings.
 
-## Unit tests (107, `tests/unit/`)
+## Unit tests (176, `tests/unit/`)
 
 ```bash
 python3 -m unittest discover -s tests/unit -t .
@@ -11,6 +11,8 @@ python3 -m unittest discover -s tests/unit -t .
 Cover: launcher environment (host variables never reach apps, allow-list, fails closed), PNG encoding and pixel-format conversion, keymap/character mapping (including a Linefeed regression found by a real app), the Wayland wire codec against a fake server on a socket pair, the daemon API (validation, takeover `E_PAUSED` for every input method, assignment `E_ASSIGNMENT`, event filters, approvals, framing, adoption of persisted workspaces), the MCP server with a fake daemon (handshake, workspace resolution, no guessing when ambiguous, no shell splitting).
 
 New with API v2 (authentication): `test_auth.py` (credentials, token files and permissions, rotation/revocation/expiry, scopes, workspace binding, foreign and unknown ids, human-only methods, grants, audit log without secrets, credential lookup order, a real socket with login / per-request tokens / event scoping), `test_routing.py` (the routing identity checks against fabricated stale, reused-pid, symlinked and imposter sockets; static audit that no module reads the host display variables or contains an input-injection tool), `test_sandbox.py` (mount validation and the bubblewrap argument list).
+
+`test_policy_coverage.py` fails when an API method that the daemon implements, or that the CLI, viewer, MCP server or GNOME extension calls, has no entry in the authorisation table (`aw/auth.py` plus `aw/policy_ext.py`), or when a table entry has no implementation.
 
 Tests that call `Daemon.handle(method, params, state)` directly must pass `daemon.admin_state()` (the human) or `daemon.workspace_state("name")` (an agent holding that workspace's credential) as `state`; an empty dict is an unauthenticated caller and every method except `hello` fails with `E_UNAUTHENTICATED`.
 
@@ -27,10 +29,10 @@ AW_TEST_ELECTRON_BIN=/path/to/electron AW_TEST_ELECTRON_APP=/path/to/app-dir pyt
 Requirements: labwc, python3-gi (GTK4), a systemd user session; GPU tests skip without an NVIDIA driver; Chrome/xeyes tests skip when not installed.
 
 ```bash
-python3 -m unittest tests.integration.test_reliability_real tests.integration.test_sandbox_real -v   # 33 tests, about 70 s
+python3 -m unittest tests.integration.test_reliability_real tests.integration.test_sandbox_real -v   # 35 tests, about 75 s
 ```
 
-Last runs on the development workstation: `test_workspaces_real` 17 tests (1 skipped: Electron), `test_reliability_real` 21 tests, `test_sandbox_real` 12 tests, all passing. `test_agent_integrations_real` (real agent CLIs) was not re-run after API v2. Each module starts its own daemon under `/run/user/UID/awt-*`, uses at most two compositors at a time and removes everything it started (processes are killed only by exact pid).
+Last runs of the integrated branch (`feat/integration`) on the development workstation, one module at a time, no host display variables: `test_workspaces_real` 17 tests (1 skipped: Electron binary not provided), `test_reliability_real` 22, `test_sandbox_real` 13, `test_windows_audio_real` 8, `test_browsers_real` 11 (10 run, 1 skipped: Firefox, no non-snap build provided), `test_mcp_agent_tools_real` 3, all passing; `gnome-extension/tests/run_real.py --plain` 50/50. `test_agent_integrations_real` (real agent CLIs) and the real-model acceptance runs were not repeated on the integrated branch (the acceptance results in [compatibility-matrix.md](compatibility-matrix.md) were measured on `feat/agents-integration`). Each module starts its own daemon under `/run/user/UID/awt-*`, uses at most two compositors at a time and removes everything it started (processes are killed only by exact pid).
 
 | Test class | What it really does | Maps to validation item |
 |---|---|---|
@@ -73,13 +75,13 @@ The test harness (`tests/harness.py`) provides **HostSim**, the stand-in desktop
 * A real read-only probe of the live desktop's pointer is not possible without privileges on GNOME Wayland (no unprivileged pointer-position API; `org.gnome.Shell.Introspect.GetWindows` is denied; `/dev/input` needs the `input` group). The host-untouched claim therefore rests on the structural audit and the stand-in desktop test, not on watching your real pointer.
 * Qt, GTK3, Firefox; Intel/AMD GPUs; multi-monitor viewer placement; long-running stability; audio.
 * Running Gnotch against the API.
-* A real connection from another user account to the API socket (only the injected-uid unit test and the 0600/0700 modes were checked); other distributions' behaviour of bubblewrap under user-namespace restrictions; Firefox, Qt and Electron inside `--sandbox`; GPU use of Chrome inside `--sandbox`; the viewer, the GNOME extension and the agent MCP registrations against API v2 on a live session (the extension change is a 3-line edit that was not run).
+* A real connection from another user account to the API socket (only the injected-uid unit test and the 0600/0700 modes were checked); other distributions' behaviour of bubblewrap under user-namespace restrictions; Firefox, Qt and Electron inside `--sandbox`; GPU use of Chrome inside `--sandbox`; the viewer, the GNOME extension and the agent MCP registrations against API v2 on a live session (they were run against API v2 only in the isolated headless shell and the integration tests).
 * A hostile same-user process (see [security-model.md](security-model.md): not defended against).
 * Second test machine: unreachable when attempted (SSH connection timeout), so no run there.
 
 ## Isolated GNOME Shell, real stack
 
-`python3 gnome-extension/tests/run_real.py [--plain] [--media DIR]`: 53 checks with the real daemon, real workspaces, the real
+`python3 gnome-extension/tests/run_real.py [--plain] [--media DIR]`: 53 checks (50 with `--plain`) with the real daemon, real workspaces, the real
 viewer and the developer's extension set in a private headless GNOME Shell; `demo_video.py` records the demo video;
 `measure_gs.py` prints the numbers in [measurements.md](measurements.md). Details: [gnome-extension.md](gnome-extension.md).
 They use the user's systemd manager only to create workspace scopes (as the integration tests do), nothing on the real
@@ -97,6 +99,7 @@ fake X server incl. refusal of a display not served by the workspace's composito
 modifies the original, shredding, ownership of writable profiles, auth policy of the new methods),
 `test_audio_pure.py`, `test_mcp_ext.py`.
 
+
 New REAL integration tests (real compositors, real apps; a throw-away fake HOME for the daemon and CLI, so no real
 browser profile is ever read):
 
@@ -110,11 +113,13 @@ AW_TEST_FIREFOX=... AW_TEST_ELECTRON_BIN=/path/to/stock/electron AW_COMPAT_REPOR
 | Test class | What it really does |
 |---|---|
 | `Windows` | a real GTK4 window (Wayland) and a real GTK3 window on XWayland with solid banner colours: after `window.set_geometry/move/resize` the banner's bounding box in the screenshot equals the reported rectangle; maximize/fullscreen/minimize/focus/close for both kinds; X11 geometry survives compositor reconfigure; announced (`xmessage`) and unannounced (`xeyes`) X11 windows listed once; the host X display is refused |
+| `Windows` (stall test) | three real windows in a floating workspace placed 5 times each: no `window.set_geometry` call takes 3 s or more (regression test for a Wayland-connection race that made calls wait 5 s) |
 | `Audio` | tone from `pw-cat` and from `ffmpeg -f pulse` captured at the right frequency from the workspace sink; host PipeWire graph identical before/after and no `/dev/snd` fd in the workspace; audio off = no socket; a workspace credential may only record into its own dir; routing to a stand-in "host" PipeWire is refused without a terminal and works through the CLI in a real pty |
 | `ChromeProfiles` | throwaway profile inside the workspace dir, native Wayland, no debug flag, no TCP listener, real clicks/typing reach the page, profile deleted with the workspace; agent profile keeps a cookie across restarts and is refused (`E_PROFILE_BUSY`) in a second workspace; forbidden arguments/URLs |
 | `AuthorizedProfile` | fixture "host" profile built by real Chrome; agent can only request; `profile authorize` refuses without a terminal, with a wrong confirmation, while the host profile is locked (live and stale lock, lock untouched, original byte-identical); authorised copy has no `Login Data`, is 0700, the session works in the workspace; revoke and workspace destroy remove it; the generic grant flow (request, denial, approval, expiry, revocation, wildcard refusal) with the CLI in real pseudo-terminals |
 | `FirefoxProfiles`, `SnapFirefox` | Firefox 160 vendor tarball: agent profile + cookie persistence; the Ubuntu snap is detected and refused |
 | `Matrix` | see compatibility.md |
+
 ## Real agent acceptance tests (`tests/acceptance/`)
 
 These run the **real agent CLIs with real models** against a real daemon and real headless workspaces. They cost tokens (a few cents per run with the cheapest models) and need the agents to be signed in, so they are not part of the normal test run.
@@ -124,6 +129,8 @@ python3 -m tests.acceptance.run_scenarios claude-code:browser codex:files "claud
 python3 -m tests.acceptance.summarise            # table of the newest run per scenario
 python3 tests/acceptance/transcript.py .scratch/runs/<run> claude   # sanitised transcript
 ```
+
+The Hermes runner reads the provider block named by `AW_HERMES_PROVIDER` (default `spark`) from `~/.hermes/config.yaml` and the key variable named by `AW_HERMES_KEY_ENV`; it never writes to your Hermes configuration.
 
 Tasks (`harness.PROMPTS`) are ordinary requests that do not mention AgentWorkspaces, commands or workspaces. Each agent runs with an environment built from scratch (no `DISPLAY`, `WAYLAND_DISPLAY`, `WAYLAND_SOCKET`, `XAUTHORITY`, `DBUS_SESSION_BUS_ADDRESS`; private empty `XDG_RUNTIME_DIR`; `BROWSER=/bin/true`), its own shell tool removed where the agent allows it, and a time limit; processes are stopped by exact process group. The harness audits the environment names of every process in the agent's group, and compares the host's Wayland sockets before and after. A `+` runs scenarios at the same time in separate workspaces. Results, screenshots and transcripts are in [compatibility-matrix.md](compatibility-matrix.md) and `docs/evidence/agents/`.
 

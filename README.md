@@ -18,7 +18,7 @@ Each workspace is a separate headless Wayland compositor (labwc/wlroots) running
 | MCP server (stdio) | screenshot, windows, launch app, mouse, keyboard, scroll, window actions, display info, status. Bound to the workspace assigned to the calling agent |
 | Viewer window | one GTK4 window for all workspaces: sidebar, live overview, Agent / Paused / You control ("You" forwards your mouse and keyboard), approvals and grants, create / stop / close. No GNOME extension needed ([docs/viewer.md](docs/viewer.md)) |
 | Optional GNOME extension | Ctrl+Alt+Down enters the AgentWorkspaces workspace, Ctrl+Alt+Up returns. Separate, opt-in, restores your previous shortcuts. See [gnome-extension/](gnome-extension/README.md) |
-| Local API v1 | JSON lines over a unix socket, with events. Spec: [docs/api.md](docs/api.md) |
+| Local API v2 | JSON lines over a unix socket, with events; every request carries a credential (per-workspace token for agents, admin token for you). Spec: [docs/api.md](docs/api.md) |
 | Browsers, windows, audio | `launch-browser` (private throwaway/agent profiles; a copy of your signed-in profile only after you approve it in a terminal), one window list for Wayland and XWayland windows with move/resize, a private audio sink per workspace you can record: [browsers](docs/browsers.md), [windows](docs/windows.md), [audio](docs/audio.md), [compatibility](docs/compatibility.md) |
 | Per-agent integration | Claude Code, Codex, Antigravity, Hermes Agent, each opt-in and reversible: [docs/integrations.md](docs/integrations.md) |
 

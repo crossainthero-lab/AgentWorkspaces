@@ -107,8 +107,9 @@ Consequences for the design:
 * Left/Right, `move-to-workspace-*` and every other key are never touched.
 * **The viewer is the UI.** The extension draws nothing of its own. It asks the daemon for the viewer
   (`workspace.enter` with `maximized: true` and **no workspace name**: the viewer opens on the workspace you used last,
-  else the most recently active one) using the admin credential, which it reads from
-  `$XDG_RUNTIME_DIR/agent-workspaces/admin.token` (docs/api.md, Authentication). It exports a tiny session-bus
+  else the most recently active one) using the admin credential, which it finds the same way
+  the viewer does (`AW_ADMIN_TOKEN`, the file `AW_ADMIN_TOKEN_FILE`, else `<base>/admin.token` with base `AW_BASE_DIR` or
+  `$XDG_RUNTIME_DIR/agent-workspaces`; docs/api.md, Authentication). It exports a tiny session-bus
   interface `dev.agentworkspaces.ShellExtension1` (`Enter()`, `Return()`) that the viewer's "Back to desktop" button
   calls; the button is shown only while that bus name exists. Without the extension everything else works.
 * The viewer window is marked suspended by GNOME while you are on another workspace; the viewer then stops capturing and

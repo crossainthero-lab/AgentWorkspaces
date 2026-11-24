@@ -34,12 +34,16 @@ HOST_DISPLAY_VARS = ("DISPLAY", "WAYLAND_DISPLAY", "WAYLAND_SOCKET", "XAUTHORITY
 CHEAP_MODEL = {"claude-code": "haiku", "codex": "gpt-6-luna", "antigravity": "gemini-3.8-flash-low",
                "hermes": "qwen3.6-35b-a3b"}
 
+# Name of the provider block in ~/.hermes/config.yaml that points at the (local) OpenAI-compatible router, and of the
+# environment variable holding its key. Both are the acceptance harness's defaults; override for another setup.
+HERMES_PROVIDER = os.environ.get("AW_HERMES_PROVIDER", "spark")
+HERMES_KEY_NAME = os.environ.get("AW_HERMES_KEY_ENV", "SPARK_LLM_API_KEY")
 HERMES_RUN_HOME = os.path.join(os.path.expanduser("~"), ".cache", "agent-workspaces", "hermes-home")
 
 
 def _hermes_key_env() -> Dict[str, str]:
-    """The Spark router key for this one process, from the user's existing Hermes .env (never printed or written)."""
-    name = "SPARK_LLM_API_KEY"
+    """The router key for this one process, from the user's existing Hermes .env (never printed or written)."""
+    name = HERMES_KEY_NAME
     if os.environ.get(name):
         return {name: os.environ[name]}
     try:
@@ -89,7 +93,7 @@ def stop_hermes_runtime() -> List[int]:
 def _router_accepts_images(base_url: Optional[str], model: str) -> bool:
     """Ask the router (read-only /v1/models, no model is loaded by this call) whether `model` takes image input."""
     import urllib.request
-    key = _hermes_key_env().get("SPARK_LLM_API_KEY")
+    key = _hermes_key_env().get(HERMES_KEY_NAME)
     if not base_url or not key:
         return False
     try:
@@ -110,15 +114,15 @@ def hermes_home(model: Optional[str], menv: Dict[str, str]) -> str:
     real = os.path.join(os.path.expanduser("~"), ".hermes")
     with open(os.path.join(real, "config.yaml")) as f:
         cfg = yaml.safe_load(f)
-    prov = (cfg.get("providers") or {}).get("spark") or {}
+    prov = (cfg.get("providers") or {}).get(HERMES_PROVIDER) or {}
     prov = {k: v for k, v in prov.items() if k in ("base_url", "key_env", "models", "discover_models", "api", "transport")}
     server = ig.server_command()
     m = model or CHEAP_MODEL["hermes"]
-    out = {"model": {"default": m, "provider": "spark", "base_url": prov.get("base_url"),
+    out = {"model": {"default": m, "provider": HERMES_PROVIDER, "base_url": prov.get("base_url"),
                      # Hermes passes MCP images to the model natively only for routes it knows are vision-capable;
                      # the router's own model metadata says so for this alias (checked here, not assumed).
                      **({"supports_vision": True} if _router_accepts_images(prov.get("base_url"), m) else {})},
-           "providers": {"spark": prov},
+           "providers": {HERMES_PROVIDER: prov},
            "mcp_servers": {ig.NAME: {"command": server[0], "args": server[1:], "env": menv}}}
     os.makedirs(HERMES_RUN_HOME, mode=0o700, exist_ok=True)
     link = os.path.join(HERMES_RUN_HOME, "hermes-agent")
@@ -283,7 +287,7 @@ def plan(agent: str, prompt: str, model: Optional[str] = None, project: str = "d
         env["HERMES_HOME"] = hermes_home(model, menv)
         env.update(_hermes_key_env())        # the API key goes into THIS process's environment only
         argv = ["hermes", "chat", "-q", prompt, "-Q", "--max-turns", str(max_turns), "-t", f"mcp-{ig.NAME}",
-                "--provider", "spark", "-m", model or CHEAP_MODEL["hermes"]]
+                "--provider", HERMES_PROVIDER, "-m", model or CHEAP_MODEL["hermes"]]
         if structured:
             argv += ["--format", "stream-json"]
         notes.append("Hermes toolsets restricted to the MCP server's tools")

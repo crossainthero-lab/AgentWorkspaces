@@ -311,7 +311,9 @@ class Connection:
             left = deadline - time.monotonic()
             if left <= 0:
                 raise WaylandError("roundtrip timed out")
-            self.dispatch(left)
+            # short slices: another thread that dispatches on this connection may consume the "done" event, and
+            # waiting out the whole timeout for more data would then stall (and not even fail) for `timeout` s
+            self.dispatch(min(left, 0.2))
 
     def get_registry(self) -> Proxy:
         reg = self.display.get_registry()

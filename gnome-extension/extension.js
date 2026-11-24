@@ -503,21 +503,32 @@ export default class AgentWorkspacesExtension extends Extension {
 
     // ---- asking the AgentWorkspaces service to open the viewer ------------------------------------
 
-    _socketPath() {
-        return GLib.build_filenamev([GLib.get_user_runtime_dir(), 'agent-workspaces', 'api.sock']);
+    // Same locations as the Python side (aw/paths.py, docs/api.md 'Credential lookup', role admin).
+    _baseDir() {
+        return GLib.getenv('AW_BASE_DIR') ||
+            GLib.build_filenamev([GLib.get_user_runtime_dir(), 'agent-workspaces']);
     }
 
-    // The extension acts for the person at the keyboard, so it uses the admin credential (a 0600 file in the same
-    // runtime directory as the socket, see docs/api.md 'Authentication'). No file: the daemon answers
-    // E_UNAUTHENTICATED and the notice below says what to do.
-    _adminToken() {
+    _socketPath() {
+        return GLib.build_filenamev([this._baseDir(), 'api.sock']);
+    }
+
+    _readTokenFile(path) {
         try {
-            const [ok, bytes] = GLib.file_get_contents(GLib.build_filenamev(
-                [GLib.get_user_runtime_dir(), 'agent-workspaces', 'admin.token']));
-            return ok ? new TextDecoder().decode(bytes).trim() : undefined;
+            const [ok, bytes] = GLib.file_get_contents(path);
+            return ok ? new TextDecoder().decode(bytes).trim() || undefined : undefined;
         } catch (e) {
             return undefined;
         }
+    }
+
+    // The extension acts for the person at the keyboard, so it uses the admin credential: AW_ADMIN_TOKEN, the file
+    // AW_ADMIN_TOKEN_FILE, else <base>/admin.token (a 0600 file next to the socket). No credential: the daemon
+    // answers E_UNAUTHENTICATED and the notice below says what to do.
+    _adminToken() {
+        return GLib.getenv('AW_ADMIN_TOKEN') ||
+            (GLib.getenv('AW_ADMIN_TOKEN_FILE') && this._readTokenFile(GLib.getenv('AW_ADMIN_TOKEN_FILE'))) ||
+            this._readTokenFile(GLib.build_filenamev([this._baseDir(), 'admin.token']));
     }
 
     _daemonCall(method, params) {

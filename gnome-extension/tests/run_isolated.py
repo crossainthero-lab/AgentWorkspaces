@@ -218,7 +218,7 @@ class FakeDaemon(threading.Thread):
                     res = {"launched": True, "pid": p.pid}
                 else:
                     res = {}
-                f.write((json.dumps({"v": 1, "id": req.get("id"), "ok": True, "result": res}) + "\n").encode())
+                f.write((json.dumps({"v": 2, "id": req.get("id"), "ok": True, "result": res}) + "\n").encode())
                 f.flush()
 
     def close(self):

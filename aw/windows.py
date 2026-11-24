@@ -146,7 +146,8 @@ class Placer:
             time.sleep(0.2)
             session.window_action(window, "unmaximize")
             time.sleep(0.2)
-            session.conn.roundtrip()
+            with session.lock:       # the session's pump thread dispatches on the same connection: never without it
+                session.conn.roundtrip()
             self._write("")          # leave a clean rc.xml for the next start (the running config is reloaded next time)
 
 

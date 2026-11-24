@@ -199,6 +199,31 @@ class Windows(unittest.TestCase):
         finally:
             C.call("workspace.destroy", workspace="xl")
 
+    def test_set_geometry_on_several_windows_never_stalls(self):
+        """Regression: a Wayland connection dispatched from two threads made some window.set_geometry calls
+        (typically on the second window of a floating workspace) wait out a 5 s roundtrip timeout, much longer
+        with a busy viewer. Real windows, repeated placement, every call must be fast."""
+        C.call("workspace.create", name="stall", width=1280, height=720, window_policy="floating")
+        try:
+            for i, col in enumerate(("#c05621", "#2f855a", "#2b6cb0")):
+                lg = os.path.join(K.BASE, f"stall{i}.log")
+                open(lg, "w").close()
+                C.call("workspace.launch", workspace="stall", argv=[sys.executable, GTK4, f"S{i}", lg, col])
+            wait_window("stall", lambda w: True)
+            K.wait_for(lambda: len(windows("stall")) >= 3, 20)
+            time.sleep(1.0)
+            worst = 0.0
+            for rnd in range(5):
+                for k, w in enumerate(windows("stall")):
+                    t0 = time.monotonic()
+                    r = C.call("window.set_geometry", workspace="stall", window=w["id"],
+                               x=40 + 90 * k + 10 * rnd, y=50 + 70 * k, width=400, height=300)["window"]
+                    worst = max(worst, time.monotonic() - t0)
+                    self.assertEqual(r["geometry"]["width"], 400)
+            self.assertLess(worst, 3.0, f"slowest set_geometry took {worst:.1f} s")
+        finally:
+            C.call("workspace.destroy", workspace="stall")
+
     def test_host_x_server_is_never_consulted(self):
         C.call("workspace.create", name="nohost", width=800, height=500)
         try:

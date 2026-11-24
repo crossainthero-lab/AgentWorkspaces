@@ -52,7 +52,7 @@ GSettings schema `org.gnome.shell.extensions.agent-workspaces`: `enter-shortcut`
 * Enter: records the workspace you are on, finds the workspace that holds the viewer window (window app id
   `dev.agentworkspaces.Viewer`, or title starting with `AgentWorkspaces:`), or creates one (the empty workspace
   GNOME keeps at the end, or a new one) and asks the daemon (`workspace.enter`, `docs/api.md`, with the admin
-  credential from `$XDG_RUNTIME_DIR/agent-workspaces/admin.token`) to open the viewer maximized on it. The viewer
+  credential: `AW_ADMIN_TOKEN`, the file `AW_ADMIN_TOKEN_FILE`, else `<base>/admin.token`, base being `AW_BASE_DIR` or `$XDG_RUNTIME_DIR/agent-workspaces`) to open the viewer maximized on it. The viewer
   (`docs/viewer.md`) is the whole UI: workspace list, overview, control, requests. It opens on the workspace you used
   last. The viewer's "Back to desktop" button calls this extension's session-bus method `Return` (same as Ctrl+Alt+Up). With no daemon running it still switches, and shows a notice with the command to start it.
 * Return: back to the recorded workspace. If it no longer exists (GNOME removes empty workspaces), to the

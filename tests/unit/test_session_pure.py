@@ -2,6 +2,7 @@
 import os
 import socket
 import struct
+import time
 import sys
 import unittest
 import zlib
@@ -116,6 +117,30 @@ class FakeCompositor(unittest.TestCase):
         # second: wl_display.sync(new_id=3)
         oid2, w22 = struct.unpack_from("<II", sent, 12)
         self.assertEqual((oid2, w22 & 0xFFFF, struct.unpack_from("<I", sent, 20)[0]), (1, 0, 3))
+
+    def test_roundtrip_does_not_wait_out_its_timeout_when_another_thread_consumed_the_done_event(self):
+        """Regression: the session's pump thread and a caller can dispatch on the same connection; when the pump
+        consumed `callback.done`, roundtrip() used to sit in select() for the whole 5 s timeout (a window.set_geometry
+        call that stalled 5 s, and for a busy viewer much longer) and then return as if nothing was wrong."""
+        a, b = socket.socketpair()
+
+        def msg(oid, opcode, payload):
+            return struct.pack("<II", oid, ((8 + len(payload)) << 16) | opcode) + payload
+        b.sendall(msg(3, 0, struct.pack("<I", 0)))                 # done for the registry roundtrip
+        c = wl.Connection(sock=a)
+        real = c.dispatch
+        calls = []
+
+        def racing_dispatch(timeout=0):
+            if not calls:                                           # "the other thread" gets the event first
+                calls.append(1)
+                b.sendall(msg(4, 0, struct.pack("<I", 0)))          # callback id 4 = this roundtrip's sync
+                real(0)
+            return real(timeout)
+        c.dispatch = racing_dispatch
+        t0 = time.monotonic()
+        c.roundtrip(timeout=5.0)
+        self.assertLess(time.monotonic() - t0, 1.5)
 
     def test_socket_path_must_be_absolute_and_exist(self):
         with self.assertRaises(wl.WaylandError):

@@ -17,9 +17,9 @@ for other programs such as Gnotch. It does not depend on GNOME Shell and does no
 ## Request / response
 
 ```json
-{"v":1,"id":7,"method":"workspace.list","params":{}}
-{"v":1,"id":7,"ok":true,"result":{"workspaces":[ ... ]}}
-{"v":1,"id":7,"ok":false,"error":{"code":"E_NOT_FOUND","message":"no workspace named 'x'"}}
+{"v":2,"id":7,"method":"workspace.list","params":{},"token":"awt1_..."}
+{"v":2,"id":7,"ok":true,"result":{"workspaces":[ ... ]}}
+{"v":2,"id":7,"ok":false,"error":{"code":"E_NOT_FOUND","message":"no workspace named 'x'"}}
 ```
 
 `id` is any JSON value; it is echoed back. A workspace is addressed by `workspace` = its **name** or **id**.
@@ -261,7 +261,7 @@ CLIs themselves.
 event stream (you may still send requests on it). Each event:
 
 ```json
-{"v":1,"event":"workspace.input_mode","ts":1795497001.2,"data":{"id":"wabbf62","name":"research","input_mode":"manual","reason":"entered by user"}}
+{"v":2,"event":"workspace.input_mode","ts":1795497001.2,"data":{"id":"wabbf62","name":"research","input_mode":"manual","reason":"entered by user"}}
 ```
 
 | event | data |
@@ -291,5 +291,5 @@ event stream (you may still send requests on it). Each event:
 4. Takeover toggle: `workspace.pause` / `workspace.resume`.
 5. Approvals: `approval.list {pending:true}`, `approval.resolve`.
 
-D-Bus is intentionally not offered in v1: a socket needs no bus name ownership, works before the session bus
+D-Bus is intentionally not offered in v2: a socket needs no bus name ownership, works before the session bus
 exists, and is trivial to consume from GJS (`Gio.SocketClient`) and from any language.
