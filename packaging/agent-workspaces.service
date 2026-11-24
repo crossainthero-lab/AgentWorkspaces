@@ -1,0 +1,13 @@
+[Unit]
+Description=AgentWorkspaces daemon (separate graphical workspaces for AI agents)
+Documentation=https://github.com/crossainthero-lab/AgentWorkspaces
+
+[Service]
+Type=simple
+ExecStart=%h/.local/share/agent-workspaces/bin/agent-workspaces daemon
+Restart=on-failure
+RestartSec=2
+# Workspaces run in their own systemd scopes (aw-*.slice) and keep running if the daemon restarts.
+
+[Install]
+WantedBy=default.target
