@@ -95,7 +95,8 @@ def plan(agent: str, prompt: str, model: Optional[str] = None, project: str = "d
     elif agent == "codex":
         def toml(v):
             return json.dumps(v)
-        argv = ["codex", "exec", "--skip-git-repo-check", "--ephemeral", "--json", "-s", "read-only",
+        argv = ["codex", "exec", "--skip-git-repo-check", "--ephemeral", "--ignore-user-config",
+                "--ignore-rules", "--json", "-s", "read-only",
                 "-c", 'approval_policy="never"',
                 "-c", f"mcp_servers.{ig.NAME}.command={toml(server[0])}",
                 "-c", f"mcp_servers.{ig.NAME}.args={toml(server[1:])}",

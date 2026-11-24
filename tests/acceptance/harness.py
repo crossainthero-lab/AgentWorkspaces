@@ -65,9 +65,27 @@ def run_agent(agent: str, prompt: str, base: str, project: str, run_dir: str, mo
     cl = Client(autostart=False)
     name = ws_name or f"{agentrun.ig.AGENTS[agent]['kind']}-{project}"
 
+    env_names: set = set()
+
+    def audit_env():
+        """Names of environment variables seen in every process of the agent's process group."""
+        for d in os.listdir("/proc"):
+            if not d.isdigit():
+                continue
+            try:
+                if os.getpgid(int(d)) != proc.pid:
+                    continue
+                with open(f"/proc/{d}/environ", "rb") as f:
+                    for kv in f.read().split(b"\0"):
+                        if b"=" in kv:
+                            env_names.add(kv.split(b"=", 1)[0].decode(errors="replace"))
+            except (OSError, ProcessLookupError):
+                continue
+
     def sampler():
         n = 0
         while not stop.wait(shots_every):
+            audit_env()
             try:
                 r = cl.call("screen.screenshot", workspace=name, agent_kind="human", path=os.path.join(
                     run_dir, f"shot-{n:02d}.png"), inline=False)
@@ -77,6 +95,8 @@ def run_agent(agent: str, prompt: str, base: str, project: str, run_dir: str, mo
                 pass
     th = threading.Thread(target=sampler, daemon=True)
     th.start()
+    time.sleep(1.0)
+    audit_env()
     timed_out = False
     try:
         proc.wait(timeout=timeout)
@@ -90,10 +110,13 @@ def run_agent(agent: str, prompt: str, base: str, project: str, run_dir: str, mo
             proc.wait(5)
     stop.set()
     th.join(timeout=10)
+    HOST_VARS = {"DISPLAY", "WAYLAND_DISPLAY", "WAYLAND_SOCKET", "XAUTHORITY", "DBUS_SESSION_BUS_ADDRESS"}
     dur = time.time() - t0
     res: Dict[str, Any] = {"agent": agent, "model": model or agentrun.CHEAP_MODEL.get(agent), "prompt": prompt,
                            "exit_code": proc.returncode, "timed_out": timed_out, "seconds": round(dur, 1),
-                           "workspace": name, "run_dir": run_dir, "shots": shots}
+                           "workspace": name, "run_dir": run_dir, "shots": shots,
+                           "agent_env_host_display_vars": sorted(env_names & HOST_VARS),
+                           "agent_env_names_seen": len(env_names)}
     try:
         w = cl.call("workspace.get", workspace=name)
         res["workspace_state"] = {"state": w["state"], "agent": w["agent"]["kind"], "viewers": w["viewers"],
