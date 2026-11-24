@@ -226,6 +226,20 @@ class Server:
                     raise          # raced another process of this agent: look again
         raise ApiError("E_INTERNAL", "could not attach to or create the workspace")
 
+    def _user_workspace(self) -> Optional[str]:
+        """A workspace the HUMAN created and assigned to this agent kind (its name does not look like an automatic
+        '<kind>-<project>' one). If there is exactly one, the user meant it: use it instead of creating another."""
+        if not self.kind:
+            return None
+        try:
+            lst = self.client.call("workspace.list", **self._ck())["workspaces"]
+        except ApiError:
+            return None
+        if any(w["name"].lower() == self.my_name.lower() for w in lst):
+            return None                      # this project already has its own automatic workspace
+        mine = [w for w in lst if w["agent"]["kind"] == self.kind and not w["name"].lower().startswith(self.kind.lower() + "-")]
+        return mine[0]["name"] if len(mine) == 1 else None
+
     def _resolve(self, args: Dict[str, Any]) -> str:
         ref = args.get("workspace") or self.default_ws
         if ref:
@@ -233,6 +247,10 @@ class Server:
         if self.auto:
             if self._ws_cache:
                 return self._ws_cache
+            manual = self._user_workspace()
+            if manual:
+                self._ws_cache = manual
+                return manual
             return self.ensure()["name"]
         res = self.client.call("workspace.list", **self._ck())
         mine = [w for w in res["workspaces"] if self.kind and w["agent"]["kind"] == self.kind]

@@ -148,6 +148,17 @@ class McpTests(unittest.TestCase):
         self.rpc(s, "tools/call", {"name": "screenshot", "arguments": {}})
         self.assertEqual(len([c for c in s.client.calls if c[0] == "workspace.create"]), 1)  # reused
 
+    def test_a_workspace_the_user_assigned_to_this_agent_is_used_instead_of_creating_one(self):
+        s = server([ws("research", "claude-code")], auto=True)
+        self.rpc(s, "tools/call", {"name": "screenshot", "arguments": {}})
+        self.assertFalse([c for c in s.client.calls if c[0] == "workspace.create"])
+        self.assertEqual(s.client.calls[-1][1]["workspace"], "research")
+
+    def test_two_user_workspaces_do_not_hijack_the_automatic_one(self):
+        s = server([ws("a", "claude-code"), ws("b", "claude-code")], auto=True)
+        self.rpc(s, "tools/call", {"name": "screenshot", "arguments": {}})
+        self.assertEqual([c for c in s.client.calls if c[0] == "workspace.create"][0][1]["name"], "claude-code-proj")
+
     def test_existing_workspace_is_attached_not_duplicated(self):
         s = server([ws("claude-code-proj", "claude-code"), ws("other", "claude-code")], auto=True)
         self.rpc(s, "tools/call", {"name": "screenshot", "arguments": {}})

@@ -19,7 +19,7 @@ agent-workspaces integrate codex run "open the calculator and tell me what it sh
 
 1. The agent has the `agent-workspaces` MCP server. Its `initialize` result carries the rule text ([below](#what-the-agent-is-told)) and every tool description says what it is for.
 2. The user's plain-language request needs a graphical app, so the model calls `launch_app` (or `list_apps`, `screenshot`, ...).
-3. The server resolves **its own workspace**: `<agent kind>-<project>` (for example `codex-myproject`; the project is the directory the agent started the server in, `AW_PROJECT` overrides it). If it exists it is re-attached (and started if stopped), otherwise it is created, assigned to that agent kind, 1280x720, private home. A second session of the same agent in the same project gets the same workspace; another agent kind gets another one.
+3. The server resolves **its own workspace**: `<agent kind>-<project>` (for example `codex-myproject`; the project is the directory the agent started the server in, `AW_PROJECT` overrides it). If it exists it is re-attached (and started if stopped), otherwise it is created, assigned to that agent kind, 1280x720, private home. A second session of the same agent in the same project gets the same workspace; another agent kind gets another one. If you created exactly one workspace yourself and assigned it to that agent kind (a name that is not `<kind>-...`), that one is used instead of creating another.
 4. The app starts inside that workspace and the tool returns a screenshot as an MCP image.
 5. The model then uses `screenshot`, `mouse_click`, `double_click`, `mouse_drag`, `scroll`, `keyboard_type`, `keyboard_key`, `window_action` and friends. Nothing is sent to your session.
 
