@@ -54,6 +54,8 @@ def build_parser() -> argparse.ArgumentParser:
     c.add_argument("--window-policy", choices=["maximized", "floating"], default="maximized")
     c.add_argument("--home", choices=["private", "shared"], default="private")
     c.add_argument("--memory-max", help="systemd MemoryMax for the compositor, e.g. 2G")
+    c.add_argument("--no-xwayland", action="store_true",
+                   help="do not give apps a DISPLAY: X11 apps will not run, and GPU drivers cannot wake XWayland (~90 MB)")
     c.add_argument("--no-start", action="store_true")
 
     r = sub.add_parser("rename"); ws_arg(r); r.add_argument("new_name")
@@ -172,7 +174,7 @@ def _run(args) -> int:
         res = c.call("workspace.create", name=args.name, agent_kind=args.agent, agent_label=args.agent_label,
                      width=int(w), height=int(h), scale=args.scale, gpu=args.gpu, clipboard=args.clipboard,
                      window_policy=args.window_policy, home=args.home, memory_max=args.memory_max,
-                     start=not args.no_start)
+                     start=not args.no_start, xwayland=not args.no_xwayland)
         show(res, f"created workspace {res['name']} ({res['id']}) state={res['state']}")
         return 0
     if cmd == "rename":

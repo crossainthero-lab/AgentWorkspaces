@@ -74,7 +74,7 @@ class Workspace:
     FIELDS = ("id", "name", "agent", "width", "height", "scale", "gpu", "render_node", "clipboard",
               "window_policy", "home", "memory_max", "state", "input_mode", "compositor_pid",
               "compositor_start", "x_display", "created_at", "apps", "next_app", "xkb_layout",
-              "takeover_reason", "last_action", "last_action_at", "last_input_at", "viewers")
+              "takeover_reason", "last_action", "last_action_at", "last_input_at", "viewers", "xwayland")
 
     def __init__(self, **kw):
         self.id: str = kw["id"]
@@ -103,6 +103,7 @@ class Workspace:
         self.last_action_at: float = kw.get("last_action_at", 0.0)
         self.last_input_at: float = kw.get("last_input_at", 0.0)
         self.viewers: int = 0
+        self.xwayland: bool = kw.get("xwayland", True)
 
     def to_meta(self) -> Dict[str, Any]:
         return {k: getattr(self, k) for k in self.FIELDS if k != "viewers"}
@@ -178,7 +179,7 @@ class Manager:
     def create(self, name: str, agent_kind: str = "none", agent_label: str = "", width: int = 1280,
                height: int = 720, scale: float = 1.0, gpu: str = "auto", clipboard: str = "isolated",
                window_policy: str = "maximized", home: str = "private", memory_max: Optional[str] = None,
-               start: bool = True, render_node: Optional[str] = None) -> Workspace:
+               start: bool = True, render_node: Optional[str] = None, xwayland: bool = True) -> Workspace:
         if not NAME_RE.match(name or ""):
             raise ManagerError("E_BAD_NAME", "name must be 1-40 chars: letters, digits, space, _ . -")
         if agent_kind not in AGENT_KINDS:
@@ -199,7 +200,7 @@ class Manager:
             wid = "w" + secrets.token_hex(3)
             ws = Workspace(id=wid, name=name, width=width, height=height, scale=scale, gpu=gpu,
                            clipboard=clipboard, window_policy=window_policy, home=home,
-                           memory_max=memory_max, render_node=render_node,
+                           memory_max=memory_max, render_node=render_node, xwayland=xwayland,
                            agent={"kind": agent_kind, "label": agent_label or AGENT_KINDS[agent_kind]["label"]})
             self.workspaces[wid] = ws
             paths.ensure_private_dir(ws.dir)
@@ -485,7 +486,7 @@ echo "$DISPLAY" > {shlex.quote(ws.dir)}/display.tmp && mv {shlex.quote(ws.dir)}/
         if ws.state != "running":
             raise ManagerError("E_NOT_RUNNING", f"workspace {ws.name!r} is {ws.state}")
         try:
-            display = ws.x_display
+            display = ws.x_display if ws.xwayland else None   # no DISPLAY => nothing can trigger XWayland
             base = appenv.build_env(ws.rt, x_display=display, bus_address=f"unix:path={ws.rt}/bus",
                                     extra=extra_env)
             appenv.assert_no_host_sockets(base, paths.host_runtime_dir())
@@ -581,7 +582,7 @@ echo "$DISPLAY" > {shlex.quote(ws.dir)}/display.tmp && mv {shlex.quote(ws.dir)}/
                       "icon_hint": AGENT_KINDS.get(kind, AGENT_KINDS["other"])["icon_hint"]},
             "input_mode": ws.input_mode, "takeover_reason": ws.takeover_reason,
             "display": {"width": ws.width, "height": ws.height, "scale": ws.scale},
-            "gpu": ws.gpu, "clipboard": ws.clipboard, "window_policy": ws.window_policy, "home": ws.home,
+            "gpu": ws.gpu, "xwayland": ws.xwayland, "clipboard": ws.clipboard, "window_policy": ws.window_policy, "home": ws.home,
             "activity": {"last_action": ws.last_action, "last_action_at": ws.last_action_at or None,
                          "idle_seconds": (now - ws.last_action_at) if ws.last_action_at else None,
                          "window_count": len(wins), "focused_window": focused["title"] if focused else None},

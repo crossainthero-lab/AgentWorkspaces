@@ -53,7 +53,7 @@ See `docs/security-model.md`.
   "input_mode": "agent",
   "takeover_reason": "",
   "display": {"width": 1280, "height": 800, "scale": 1.0},
-  "gpu": "auto", "clipboard": "isolated", "window_policy": "maximized", "home": "private",
+  "gpu": "auto", "xwayland": true, "clipboard": "isolated", "window_policy": "maximized", "home": "private",
   "activity": {"last_action": "agent:click", "last_action_at": 1795497000.1, "idle_seconds": 12.4,
                "window_count": 1, "focused_window": "probe ALPHA"},
   "apps": [{"n": 1, "pid": 705125, "argv": ["/usr/bin/python3", "..."], "running": true}],
@@ -77,7 +77,7 @@ See `docs/security-model.md`.
 * `workspace.get {workspace}` (alias `workspace.status`) -> summary + `usage` + `windows` + `pending_approvals`.
 * `workspace.create {name, agent_kind?, agent_label?, width?, height?, scale?, gpu?("auto"|"off"),
   clipboard?("isolated"|"to-workspace"|"from-workspace"|"both"), window_policy?("maximized"|"floating"),
-  home?("private"|"shared"), memory_max?, start?}` -> summary
+  home?("private"|"shared"), xwayland?(default true; false = apps get no DISPLAY), memory_max?, start?}` -> summary
 * `workspace.rename {workspace, name}`, `workspace.assign {workspace, agent_kind, agent_label?}`
 * `workspace.configure {workspace, width?, height?, scale?, gpu?, clipboard?, window_policy?, memory_max?}`
   (size/scale apply live; gpu/window_policy/memory_max restart the compositor and close its apps)

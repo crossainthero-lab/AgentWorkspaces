@@ -276,6 +276,25 @@ class ChromiumApp(unittest.TestCase):
             C.call("workspace.destroy", workspace="chr")
 
 
+@unittest.skipUnless(os.environ.get("AW_TEST_ELECTRON_BIN") and os.environ.get("AW_TEST_ELECTRON_APP"),
+                     "set AW_TEST_ELECTRON_BIN and AW_TEST_ELECTRON_APP to an Electron binary and a test app dir "
+                     "(see docs/testing.md); Electron is not claimed as supported without this test")
+class ElectronApp(unittest.TestCase):
+    def test_electron_native_wayland(self):
+        C.call("workspace.create", name="el", agent_kind="hermes", width=1100, height=700)
+        try:
+            C.call("workspace.launch", workspace="el", argv=[
+                os.environ["AW_TEST_ELECTRON_BIN"], "--no-sandbox", "--ozone-platform=wayland",
+                os.environ["AW_TEST_ELECTRON_APP"]])
+            self.assertTrue(K.wait_for(lambda: C.call("window.list", workspace="el")["windows"], 30))
+            time.sleep(3)
+            png, _ = shot("el")
+            colours = {K.pixel(png, x, y) for x in range(200, 1000, 80) for y in range(250, 650, 60)}
+            self.assertIn((0xd6, 0x9e, 0x2e), colours, colours)
+        finally:
+            C.call("workspace.destroy", workspace="el")
+
+
 class McpEndToEnd(unittest.TestCase):
     def test_mcp_stdio_drives_assigned_workspace(self):
         import json

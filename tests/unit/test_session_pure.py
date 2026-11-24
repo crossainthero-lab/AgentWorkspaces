@@ -77,6 +77,11 @@ class Keymap(unittest.TestCase):
         self.assertEqual(self.km.char_to_key(" ")[0], xkb.KEYS["space"])
         self.assertIsNone(self.km.char_to_key("é"))  # not in the us layout
 
+    def test_newline_and_tab_use_return_and_tab_keys(self):
+        # regression: the us layout has a <LNFD> Linefeed key; "\n" must still type Return (evdev 28)
+        self.assertEqual(self.km.char_to_key("\n"), (28, 0))
+        self.assertEqual(self.km.char_to_key("\t"), (15, 0))
+
     def test_mod_masks_distinct(self):
         masks = {self.km.mod_mask(m) for m in ("shift", "ctrl", "alt", "super")}
         self.assertEqual(len(masks), 4)

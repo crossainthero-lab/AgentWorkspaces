@@ -98,9 +98,11 @@ class Keymap:
                 # prefer the plainest way to type a character (fewest modifier bits)
                 if prev is None or bin(mask).count("1") < bin(prev[1]).count("1"):
                     self.char_map[ch] = (kc - 8, mask)  # evdev code = xkb keycode - 8
-        # control characters
-        self.char_map.setdefault("\n", (28, 0))
-        self.char_map.setdefault("\t", (15, 0))
+        # control characters always use the real Return/Tab keys (the layout also has a rarely-handled
+        # <LNFD> Linefeed key that maps to "\n")
+        self.char_map["\n"] = (28, 0)
+        self.char_map["\r"] = (28, 0)
+        self.char_map["\t"] = (15, 0)
 
     def mod_mask(self, *names: str) -> int:
         mask = 0
