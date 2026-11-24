@@ -51,11 +51,14 @@ def host_fingerprint() -> Dict[str, Any]:
 
 def run_agent(agent: str, prompt: str, base: str, project: str, run_dir: str, model: Optional[str] = None,
               timeout: float = 240.0, extra_env: Optional[Dict[str, str]] = None, shots_every: float = 6.0,
-              ws_name: Optional[str] = None, instructions: bool = True) -> Dict[str, Any]:
+              ws_name: Optional[str] = None, instructions: bool = True, customize=None, cwd: Optional[str] = None) -> Dict[str, Any]:
     os.makedirs(run_dir, exist_ok=True)
     plan = agentrun.plan(agent, prompt, model=model, project=project, base_dir=base, extra_env=extra_env,
-                      instructions=instructions)
-    assert "DISPLAY" not in plan.env and "WAYLAND_DISPLAY" not in plan.env
+                      instructions=instructions, cwd=cwd)
+    if customize:
+        customize(plan)          # guard tests: give the agent a stand-in "host" environment on purpose
+    else:
+        assert "DISPLAY" not in plan.env and "WAYLAND_DISPLAY" not in plan.env
     out_f = open(os.path.join(run_dir, "agent.stdout"), "wb")
     err_f = open(os.path.join(run_dir, "agent.stderr"), "wb")
     t0 = time.time()
