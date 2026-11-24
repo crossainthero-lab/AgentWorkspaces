@@ -26,6 +26,17 @@ ROLES = {
     "terminal": ("TerminalEmulator",),
     "image viewer": ("Viewer",),
 }
+ROLE_ALIAS = {"web browser": "browser", "internet": "browser", "editor": "text editor", "notepad": "text editor",
+              "files": "file manager", "file browser": "file manager"}
+# Well-known defaults win over exotic matches (e.g. a privacy browser fork, an emulator front end).
+PREFERRED = {
+    "browser": ("google-chrome", "chromium", "firefox"),
+    "text editor": ("org.gnome.texteditor", "gnome-text-editor", "gedit", "org.gnome.gedit", "kate", "mousepad"),
+    "file manager": ("org.gnome.nautilus", "nautilus", "nemo", "thunar", "dolphin"),
+    "calculator": ("org.gnome.calculator", "gnome-calculator", "kcalc"),
+}
+CHROMIUM_FLAGS = ["--ozone-platform=wayland", "--no-first-run", "--no-default-browser-check",
+                  "--password-store=basic"]
 FIELD_CODE = re.compile(r"%[a-zA-Z%]")
 
 
@@ -102,6 +113,13 @@ def find_app(query: str, apps: Optional[List[Dict]] = None) -> Optional[Dict]:
         hit = [a for a in apps if key(a) == q]
         if hit:
             return hit[0]
+    q = ROLE_ALIAS.get(q, q)
+    plain = [a for a in apps if not any(x.startswith(("--app=", "--profile-directory")) for x in a["argv"])]
+    for want in PREFERRED.get(q, ()):
+        for key in (lambda a: a["id"].lower(), lambda a: os.path.basename(a["argv"][0]).lower()):
+            for a in plain:
+                if key(a) == want:
+                    return a
     cats = ROLES.get(q)
     if cats:
         hit = [a for a in apps if any(c in a["categories"] for c in cats)]
@@ -109,5 +127,20 @@ def find_app(query: str, apps: Optional[List[Dict]] = None) -> Optional[Dict]:
         hit.sort(key=lambda a: (len(a["name"]), a["name"]))
         if hit:
             return hit[0]
-    hit = [a for a in apps if q in a["name"].lower() or q in a["id"].lower()]
+    hit = [a for a in apps if q in a["name"].lower()] or [a for a in apps if q in a["id"].lower()]
     return hit[0] if len(hit) == 1 else (sorted(hit, key=lambda a: len(a["name"]))[0] if hit else None)
+
+
+def launch_argv(app: Dict) -> List[str]:
+    """argv to start `app`, with the flags a Chromium-family browser needs to run Wayland-native in a fresh
+    private profile (no first-run dialogs)."""
+    argv = list(app["argv"])
+    if app.get("id") in ("google-chrome", "com.google.Chrome") and not argv[0].startswith("/usr/"):
+        # a per-user wrapper script shadows the desktop entry: do not run user scripts in a workspace
+        for cand in ("/usr/bin/google-chrome-stable", "/usr/bin/google-chrome"):
+            if os.path.exists(cand):
+                argv = [cand]
+                break
+    if os.path.basename(argv[0]) in ("google-chrome", "google-chrome-stable", "chromium", "chromium-browser"):
+        argv += [f for f in CHROMIUM_FLAGS if f not in argv]
+    return argv

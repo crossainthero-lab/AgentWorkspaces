@@ -283,8 +283,17 @@ class Server:
             return self._text(json.dumps(c.call("screen.info", workspace=ws, **ck), indent=2))
         if name == "list_apps":
             lst = appsmod.list_apps()
-            lines = [f"{x['id']}: {x['name']}  [{', '.join(x['categories'][:3])}]" for x in lst]
-            return self._text("\n".join(lines) or "no launchable applications found")
+            if not lst:
+                return self._text("no launchable applications found")
+            roles = []
+            for role in ("browser", "text editor", "file manager", "calculator", "image viewer"):
+                f = appsmod.find_app(role, lst)
+                if f:
+                    roles.append(f"{role}: {f['id']} ({f['name']})")
+            rest = [f"{x['id']}: {x['name']}" for x in lst if "Game" not in x["categories"]
+                    and not any(c.startswith("X-") for c in x["categories"])]
+            return self._text("Defaults (launch_app app=<role or id>):\n" + "\n".join(roles) +
+                              f"\n\nAll ({len(rest)}):\n" + "\n".join(rest[:80]))
         if name == "list_windows":
             return self._text(json.dumps(c.call("window.list", workspace=ws, **ck)["windows"], indent=2))
         if name == "window_action":
@@ -329,7 +338,7 @@ class Server:
             found = appsmod.find_app(a["app"])
             if not found:
                 raise ApiError("E_NOT_FOUND", f"no installed application matches {a['app']!r}; call list_apps")
-            argv = list(found["argv"])
+            argv = appsmod.launch_argv(found)
             label = found["name"]
         elif a.get("command"):
             cmd = a["command"]
