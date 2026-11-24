@@ -7,7 +7,7 @@ Each workspace is a separate headless Wayland compositor (labwc/wlroots) running
 ![An agent working in its own workspace](docs/media/workspace-research.png)
 
 * Target: Ubuntu GNOME on Wayland (developed and tested on Ubuntu 26.04, GNOME Shell 50, an NVIDIA GPU).
-* Not a security sandbox. Graphical isolation is not filesystem or network isolation. Read [docs/security-model.md](docs/security-model.md).
+* Graphical isolation is not filesystem or network isolation, and the API credentials do not stop a hostile program running as you. Apps can optionally run in a bubblewrap sandbox (`--sandbox`). Read [docs/security-model.md](docs/security-model.md) for exactly what is and is not covered.
 * Status: early (0.1). What is tested and what is not is listed in [docs/testing.md](docs/testing.md) and [docs/limitations.md](docs/limitations.md).
 
 ## What you get

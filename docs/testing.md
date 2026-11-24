@@ -2,13 +2,17 @@
 
 Tests are split on purpose. Unit tests need no compositor and cannot fail because of the machine. Real integration tests start real compositors and real apps and are labelled as such in their module docstrings.
 
-## Unit tests (49, `tests/unit/`)
+## Unit tests (106, `tests/unit/`)
 
 ```bash
 python3 -m unittest discover -s tests/unit -t .
 ```
 
 Cover: launcher environment (host variables never reach apps, allow-list, fails closed), PNG encoding and pixel-format conversion, keymap/character mapping (including a Linefeed regression found by a real app), the Wayland wire codec against a fake server on a socket pair, the daemon API (validation, takeover `E_PAUSED` for every input method, assignment `E_ASSIGNMENT`, event filters, approvals, framing, adoption of persisted workspaces), the MCP server with a fake daemon (handshake, workspace resolution, no guessing when ambiguous, no shell splitting).
+
+New with API v2 (authentication): `test_auth.py` (credentials, token files and permissions, rotation/revocation/expiry, scopes, workspace binding, foreign and unknown ids, human-only methods, grants, audit log without secrets, credential lookup order, a real socket with login / per-request tokens / event scoping), `test_routing.py` (the routing identity checks against fabricated stale, reused-pid, symlinked and imposter sockets; static audit that no module reads the host display variables or contains an input-injection tool), `test_sandbox.py` (mount validation and the bubblewrap argument list).
+
+Tests that call `Daemon.handle(method, params, state)` directly must pass `daemon.admin_state()` (the human) or `daemon.workspace_state("name")` (an agent holding that workspace's credential) as `state`; an empty dict is an unauthenticated caller and every method except `hello` fails with `E_UNAUTHENTICATED`.
 
 These are logic tests. They prove nothing about a real compositor.
 
@@ -22,7 +26,11 @@ AW_TEST_ELECTRON_BIN=/path/to/electron AW_TEST_ELECTRON_APP=/path/to/app-dir pyt
 
 Requirements: labwc, python3-gi (GTK4), a systemd user session; GPU tests skip without an NVIDIA driver; Chrome/xeyes tests skip when not installed.
 
-Last full run on the development workstation: 19 tests, all passing (17 workspace tests including Electron, 2 agent-CLI tests), 57 s.
+```bash
+python3 -m unittest tests.integration.test_reliability_real tests.integration.test_sandbox_real -v   # 33 tests, about 70 s
+```
+
+Last runs on the development workstation: `test_workspaces_real` 17 tests (1 skipped: Electron), `test_reliability_real` 21 tests, `test_sandbox_real` 12 tests, all passing. `test_agent_integrations_real` (real agent CLIs) was not re-run after API v2. Each module starts its own daemon under `/run/user/UID/awt-*`, uses at most two compositors at a time and removes everything it started (processes are killed only by exact pid).
 
 | Test class | What it really does | Maps to validation item |
 |---|---|---|
@@ -38,6 +46,25 @@ Last full run on the development workstation: 19 tests, all passing (17 workspac
 | `McpEndToEnd` | `agent-workspaces mcp` over stdio: initialize, screenshot (image content), click reaches the app, `E_PAUSED` after takeover | MCP |
 | `test_agent_integrations_real` | the real `claude`, `codex`, `agy`, `hermes` CLIs register, list and remove the MCP server in a throw-away HOME (no display/browser variables); real config files unchanged | per-agent adapters |
 
+### Reliability and security tests (`test_reliability_real.py`)
+
+| Test class | What it really does |
+|---|---|
+| `CompositorCrash` | two workspaces with GTK4 apps; `kill -9` of one compositor's exact pid: screenshot, click, type, windows, launch, clipboard all answer `E_NOT_RUNNING`; state `stopped` within seconds with a `compositor_exited` event; the app and the private bus are gone and no systemd scope is left; the neighbour keeps working with the same compositor pid; `workspace.start` recovers with the same credential and input works again |
+| `ApplicationCrash` | `kill -9` of an app's exact pid: `app.exited` event, workspace and screenshots fine, app launchable again |
+| `AgentDisconnect` | 4 kinds of vanishing clients (closed mid-typing, reset mid-screenshot, half a request, event subscriber and viewer attach that never say goodbye); the daemon log has no traceback, the viewer count returns to 0, the next input works within 3 s; the client library refuses to repeat a state-changing call after a lost connection and retries read-only ones |
+| `DaemonRestart` | SIGKILL of the daemon's exact pid, restart: both workspaces, apps and agent tokens survive; an adopted compositor killed later is noticed and cleaned; clean SIGTERM restart adopts again; destroy leaves no process, scope or directory |
+| `ConcurrentAgents` | two threads, two credentials, two workspaces: 25 interleaved move+screenshot rounds each, every screenshot shows only its own workspace's colour, every cross-workspace attempt is `E_FORBIDDEN`, each app saw only its own pointer positions |
+| `UnauthorisedAndWrongIds` | raw socket: no/garbage/tampered/empty/foreign/expired/revoked tokens; wrong, empty, foreign and unknown workspace ids; agents cannot call human methods; revocation and rotation hit open connections; throttling closes the connection; socket modes |
+| `RoutingFailures` | a stand-in personal desktop (HostSim with a probe window) while the daemon's environment points at it: unknown/stopped/crashed workspaces never reach it; a different process listening at the workspace's socket path gets `E_ROUTING` and receives zero bytes; a symlink to the stand-in's socket is refused; the stand-in's event log, pointer and windows stay unchanged |
+| `TakeoverAndRelease` | takeover blocks every agent input route with `E_PAUSED`; claiming to be human, `resume` and `pause` with an agent credential are refused; the human works the workspace; release lets the agent resume |
+| `HumanGrants` | agent requests; admin credential without a terminal is refused; the real CLI on a real pseudo-terminal approves (cancels on a wrong word), the grant expires/revokes; the audit log has every step and no secret; CLI credential commands |
+| `BrowserProfileConflicts` | real Google Chrome in two workspaces: the same profile directory is refused (`E_PROFILE_BUSY`) and the first workspace's browser receives nothing; separate directories and the default private homes coexist |
+
+### Sandbox tests (`test_sandbox_real.py`)
+
+A probe program runs the same checks in an unsandboxed control workspace and in sandboxed ones (files, sockets, processes, writes, environment, abstract sockets); then a GTK4 app (input + screenshot), an X11 app and Chrome run inside the sandbox. `scripts/measure_sandbox.py` produces the overhead figures in [isolation-model.md](isolation-model.md#optional-sandbox-for-workspace-apps).
+
 The test harness (`tests/harness.py`) provides **HostSim**, the stand-in desktop. It exists so that no test opens a window on, or sends input to, your real session.
 
 ## Not tested
@@ -46,6 +73,8 @@ The test harness (`tests/harness.py`) provides **HostSim**, the stand-in desktop
 * A real read-only probe of the live desktop's pointer is not possible without privileges on GNOME Wayland (no unprivileged pointer-position API; `org.gnome.Shell.Introspect.GetWindows` is denied; `/dev/input` needs the `input` group). The host-untouched claim therefore rests on the structural audit and the stand-in desktop test, not on watching your real pointer.
 * Qt, GTK3, Firefox; Intel/AMD GPUs; multi-monitor viewer placement; long-running stability; audio.
 * Running Gnotch against the API.
+* A real connection from another user account to the API socket (only the injected-uid unit test and the 0600/0700 modes were checked); other distributions' behaviour of bubblewrap under user-namespace restrictions; Firefox, Qt and Electron inside `--sandbox`; GPU use of Chrome inside `--sandbox`; the viewer, the GNOME extension and the agent MCP registrations against API v2 on a live session (the extension change is a 3-line edit that was not run).
+* A hostile same-user process (see [security-model.md](security-model.md): not defended against).
 * Second test machine: unreachable when attempted (SSH connection timeout), so no run there.
 
 ## GNOME extension tests

@@ -465,6 +465,18 @@ export default class AgentWorkspacesExtension extends Extension {
         return GLib.build_filenamev([GLib.get_user_runtime_dir(), 'agent-workspaces', 'api.sock']);
     }
 
+    // API v2: the human's credential is the 0600 file admin.token next to the socket (docs/api.md)
+    _adminToken() {
+        try {
+            const f = Gio.File.new_for_path(GLib.build_filenamev(
+                [GLib.get_user_runtime_dir(), 'agent-workspaces', 'admin.token']));
+            const [ok, bytes] = f.load_contents(null);
+            return ok ? new TextDecoder().decode(bytes).trim() : null;
+        } catch (e) {
+            return null;
+        }
+    }
+
     _daemonCall(method, params) {
         return new Promise((resolve, reject) => {
             const client = new Gio.SocketClient();
@@ -490,7 +502,7 @@ export default class AgentWorkspacesExtension extends Extension {
                     reject(new Error('daemon-unavailable'));
                     return;
                 }
-                const req = JSON.stringify({v: 1, id: 1, method, params}) + '\n';
+                const req = JSON.stringify({v: 2, id: 1, method, params, token: this._adminToken()}) + '\n';
                 const out = conn.get_output_stream();
                 const input = new Gio.DataInputStream({base_stream: conn.get_input_stream()});
                 out.write_all_async(new TextEncoder().encode(req), GLib.PRIORITY_DEFAULT, cancel, (o, r2) => {

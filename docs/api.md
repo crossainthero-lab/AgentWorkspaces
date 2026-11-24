@@ -92,6 +92,8 @@ as you. See `docs/security-model.md`.
 | `E_GRANT_REQUIRED`, `E_NOT_HUMAN_CHANNEL`, `E_BAD_GRANT` | human-only grants (below) |
 | `E_ROUTING` | the compositor socket of the workspace failed the identity check; nothing was sent |
 | `E_BAD_SCOPE`, `E_BAD_TTL` | credential issue/exchange validation |
+| `E_PROFILE_BUSY` | `workspace.launch` with a `--user-data-dir`/`-profile` directory that a running app of another workspace uses |
+| `E_NO_SANDBOX`, `E_BAD_SANDBOX` | bubblewrap missing / a requested sandbox mount was refused |
 | `E_NO_CREDENTIALS`, `E_INSECURE_CREDENTIAL_FILE`, `E_DISCONNECTED` | client side |
 | `E_START_FAILED`, `E_SESSION`, `E_IO`, `E_INTERNAL` | runtime failures |
 
@@ -161,7 +163,10 @@ Agents may only ask; a person decides through the CLI on a terminal, the viewer 
 * `workspace.get {workspace}` (alias `workspace.status`) -> summary + `usage` + `windows` + `pending_approvals`.
 * `workspace.create {name, agent_kind?, agent_label?, width?, height?, scale?, gpu?("auto"|"off"),
   clipboard?("isolated"|"to-workspace"|"from-workspace"|"both"), window_policy?("maximized"|"floating"),
-  home?("private"|"shared"), xwayland?(default true; false = apps get no DISPLAY), memory_max?, start?}` -> summary
+  home?("private"|"shared"), xwayland?(default true; false = apps get no DISPLAY), memory_max?,
+  sandbox?(bool), sandbox_mounts?(["/path[:ro|:rw]"]), sandbox_net?(default true), start?}` -> summary + `token_file`
+  (the path of the workspace's default credential; the token itself is never returned). With `sandbox` the apps run
+  under bubblewrap (docs/isolation-model.md); `E_NO_SANDBOX`, `E_BAD_SANDBOX` on a refused mount.
 * `workspace.rename {workspace, name}`, `workspace.assign {workspace, agent_kind, agent_label?}`
 * `workspace.configure {workspace, width?, height?, scale?, gpu?, clipboard?, window_policy?, memory_max?}`
   (size/scale apply live; gpu/window_policy/memory_max restart the compositor and close its apps)

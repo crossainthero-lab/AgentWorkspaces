@@ -9,6 +9,7 @@ Runs against a throw-away daemon under /run/user/UID/awt-*; nothing is shown on 
 """
 import json
 import os
+import shutil
 import statistics
 import subprocess
 import sys
@@ -39,6 +40,7 @@ def exec_cost():
             t = time.perf_counter()
             subprocess.run(cmd, check=True)
             ts.append((time.perf_counter() - t) * 1000)
+        shutil.rmtree(home, ignore_errors=True) if name == "sandboxed" else None
         res[name] = {"median_ms": round(statistics.median(ts), 2), "p95_ms": round(sorted(ts)[int(.95 * len(ts))], 2)}
     return res
 
@@ -104,6 +106,7 @@ def main():
                            "sandboxed": app_runs(c, "mbox", True, logdir)}
     finally:
         K.stop_daemon(c)
+        shutil.rmtree(logdir, ignore_errors=True)
     print(json.dumps(out, indent=2))
 
 

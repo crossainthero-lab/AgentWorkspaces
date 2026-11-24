@@ -46,9 +46,37 @@ Default `isolated`: the workspace clipboard is its own. The viewer (not the daem
 
 `create --size WxH --scale S` and `configure` use wlr-output-management on the workspace output (headless output, custom mode). Verified for resolution and for scale 2.0 (logical coordinates are halved, screenshots stay in physical pixels).
 
+## Optional sandbox for workspace apps
+
+Graphical isolation (everything above) does not limit what an app can read or do. `create --sandbox` (off by default, per workspace) runs every app launched into that workspace under bubblewrap (`bwrap`, found installed here: 0.11.1; it runs here on Ubuntu 26.04 with `kernel.apparmor_restrict_unprivileged_userns=1`, where the distribution also ships an AppArmor profile named `bwrap-userns-restrict`; other systems were not tried). `--sandbox-mount PATH[:ro|:rw]` (repeatable, read-only by default) adds project directories; `--sandbox-no-network` also unshares the network. `workspace.get` reports `sandbox: {enabled, mounts, network}`.
+
+| Inside the sandbox | Value | Measured by |
+|---|---|---|
+| a file outside the allowed set (a canary in `/tmp`) | not readable | `Containment.test_paths_outside_the_allowed_set_are_not_readable`; the same probe in an unsandboxed workspace *can* read it (control) |
+| your home | only the path leading to a mounted project directory exists (an empty skeleton); `~/.ssh` and everything else absent | `test_real_home_shows_nothing_but_the_path_to_a_mounted_project` |
+| `HOME`, `XDG_RUNTIME_DIR` | the workspace's own directories; the host runtime directory (host Wayland, session bus, PipeWire, API socket, token files, other workspaces) does not exist | `test_host_runtime_dir_shows_only_the_workspaces_own_path`, `test_environment_inside_is_the_workspaces_own` |
+| `/usr`, `/opt`, a short list of `/etc` entries, `/sys` | read-only | `test_write_permissions` (`/usr` and a read-only mount refuse writes; a `:rw` mount, `HOME` and `/tmp` accept them; the `/tmp` write never appears on the host) |
+| processes | own PID namespace: a bare probe sees 2 PIDs where the host has about 600 (the test asserts fewer than 12); the daemon's and your other processes are not listed | `test_process_namespace_hides_host_processes` |
+| network | **shared with the host by default**, so abstract unix sockets of the host (for example the host X server's) are reachable and the network works; with `--sandbox-no-network` the abstract socket becomes unreachable (measured with a stand-in socket owned by the test) | `test_abstract_unix_sockets_of_the_host_stay_reachable_unless_network_is_unshared` |
+| the workspace's X socket | bound in (only that workspace's `/tmp/.X11-unix/X<n>`, never the host's) | xeyes test |
+
+What the sandbox does **not** do: no seccomp filter; GPU devices are passed through; the compositor and the workspace session bus are outside and trusted; `--cap-drop ALL` and `--new-session` only. Mounts that contain the base directory, your runtime directory, `/`, `/etc`, `/run`, `~/.ssh`, `~/.gnupg`, browser profiles, `~/.claude`, `~/.codex` and similar, or your whole home, are refused (`E_BAD_SANDBOX`); a working directory outside the sandbox is refused. A sandboxed workspace needs `home=private`.
+
+Measured overhead (`scripts/measure_sandbox.py`, this workstation, a GTK4 app with Vulkan, 5 runs, medians): process start `1.6 ms` plain vs `9.5 ms` wrapped (about +8 ms per launch, 200 runs each); launch to first frame 313 ms plain vs 273 ms sandboxed (within run-to-run noise of about 50 ms, no measurable cost); memory of the app's systemd scope 74.2 vs 74.8 MiB; processes per app 1 vs 3 (bubblewrap and its init).
+
+Compatibility actually run inside the sandbox: a GTK4 window with input and screenshots (GPU accelerated), an X11 app on the workspace's XWayland (xeyes), Google Chrome. **Chrome only starts with `--no-sandbox`** (its own setuid/user-namespace sandbox cannot start inside bubblewrap here: measured, "No usable sandbox"), so inside this sandbox the isolation Chrome would add itself is replaced by bubblewrap's. Firefox, Qt, Electron: not tried.
+
+## Failures and recovery (tested with real compositors)
+
+* **Compositor killed** (`kill -9` of one workspace's labwc): every route to that workspace (screenshot, click, type, windows, launch, clipboard) answers `E_NOT_RUNNING`, the workspace is recorded `stopped` within a second, its apps, private session bus and systemd scopes are removed, a `workspace.state` event with `reason: compositor_exited` is sent; other workspaces are not touched (same compositor pid, input and screenshots keep working). `workspace.start` brings it back with the same credential. Automatic restart is **not** done.
+* **App killed**: the workspace and its other apps are unaffected, `app.exited` is sent, the app can be launched again.
+* **Daemon killed (SIGKILL) and restarted**: workspaces, apps and credentials survive and are re-adopted; a compositor that dies after adoption is still noticed (a watcher thread, no `Popen` needed) and cleaned up; a clean daemon stop and start adopts again; `destroy` leaves no process, scope or directory.
+* **Client vanishes** mid-request (closed, reset, half-written line, event subscriber, viewer): the daemon stays up, viewer counts return to zero, nothing keeps a lock. The Python client re-sends only read-only calls after a lost connection; a state-changing call raises `E_DISCONNECTED` (outcome unknown) instead of being repeated.
+* **Browser profile conflicts**: see the security model; launching an app with a `--user-data-dir`/`-profile` directory that a running app of another workspace uses is refused (`E_PROFILE_BUSY`).
+
 ## Honest edges
 
-* Same user, same kernel, same filesystem, same network. Any process of your user can read `/proc`, the workspace sockets and the API socket.
+* Same user, same kernel, same filesystem (unless `--sandbox`), same network. Any process of your user can read `/proc`, the workspace sockets and the API socket and token files.
 * The workspace has no audio (no PipeWire/Pulse socket is exposed).
 * GPU memory and engines are shared with your desktop; there is no GPU partitioning.
 * Window listing uses wlr-foreign-toplevel, which labwc 0.9.3 does not populate for X11 windows (observed): XWayland apps render, take input and appear in screenshots, but not in `window.list`.

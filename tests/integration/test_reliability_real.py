@@ -9,6 +9,7 @@ Requires: labwc, python3-gi (GTK4), systemd --user; Chrome tests skip when it is
 import base64
 import json
 import os
+import shutil
 import signal
 import socket
 import subprocess
@@ -648,6 +649,113 @@ class TakeoverAndRelease(unittest.TestCase):
             destroy("tk2")
 
 
+# ---------------------------------------------------------------- human-only grants through the real daemon
+class HumanGrants(unittest.TestCase):
+    """Agents can only ask. The decision is taken on a human channel: here a real pseudo-terminal running the real
+    CLI; a process without a terminal (an agent's shell, a script) is refused even with the admin credential."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.w = new_ws("gr", start=False)
+        cls.env = {"PATH": os.environ["PATH"], "HOME": os.path.expanduser("~"), "AW_BASE_DIR": K.BASE,
+                   "PYTHONPATH": K.ROOT, "LANG": "C.UTF-8", "AW_NO_AUTOSTART": "1"}
+
+    @classmethod
+    def tearDownClass(cls):
+        destroy("gr")
+
+    def cli(self, *args, env=None):
+        return subprocess.run([sys.executable, "-m", "aw", *args], env=env or self.env, capture_output=True,
+                              text=True, timeout=30, stdin=subprocess.DEVNULL)
+
+    def cli_on_pty(self, *args, answer):
+        import pty
+        import select
+        pid, fd = pty.fork()
+        if pid == 0:
+            os.execve(sys.executable, [sys.executable, "-m", "aw", *args], self.env)
+        out = b""
+        sent = False
+        end = time.time() + 20
+        while time.time() < end:
+            r, _, _ = select.select([fd], [], [], 0.5)
+            if r:
+                try:
+                    chunk = os.read(fd, 4096)
+                except OSError:
+                    break
+                if not chunk:
+                    break
+                out += chunk
+                if b"cancels)" in out and not sent:
+                    os.write(fd, answer.encode() + b"\n")
+                    sent = True
+        _, status = os.waitpid(pid, 0)
+        return os.waitstatus_to_exitcode(status), out.decode(errors="replace")
+
+    def test_request_by_agent_decision_only_on_a_terminal_and_everything_is_logged(self):
+        ag = agent(self.w["id"])
+        g = ag.call("grant.request", workspace="gr", kind="browser_profile", resource="Default",
+                    detail="needs the logged-in session of the shop")
+        self.assertEqual(g["status"], "pending")
+        # the agent cannot decide, whatever it tries
+        for m in ("grant.resolve", "grant.revoke"):
+            self.assertEqual(code_of(lambda: ag.call(m, id=g["id"], decision="granted")), "E_FORBIDDEN")
+        # the admin credential without a terminal (agent shell / script / MCP-like process) is refused too
+        self.assertEqual(code_of(lambda: C.call("grant.resolve", id=g["id"], decision="granted")),
+                         "E_NOT_HUMAN_CHANNEL")
+        r = self.cli("grants", "approve", g["id"])
+        self.assertEqual(r.returncode, 7, r.stdout + r.stderr)
+        self.assertFalse(ag.call("grant.check", workspace="gr", kind="browser_profile", resource="Default")["granted"])
+        # the person at a terminal: types the confirmation word; anything else cancels
+        code, out = self.cli_on_pty("grants", "approve", g["id"], "--ttl", "120", answer="nope")
+        self.assertEqual(code, 1, out)
+        self.assertIn("shop", out)
+        self.assertFalse(ag.call("grant.check", workspace="gr", kind="browser_profile", resource="Default")["granted"])
+        code, out = self.cli_on_pty("grants", "approve", g["id"], "--ttl", "120", answer="yes")
+        self.assertEqual(code, 0, out)
+        chk = ag.call("grant.check", workspace="gr", kind="browser_profile", resource="Default")
+        self.assertTrue(chk["granted"])
+        self.assertLess(chk["expires_at"] - time.time(), 125)
+        self.assertFalse(ag.call("grant.check", workspace="gr", kind="browser_profile", resource="Work")["granted"])
+        # revoke (terminal again), after which the use is refused
+        code, out = self.cli_on_pty("grants", "revoke", g["id"], answer="revoke")
+        self.assertEqual(code, 0, out)
+        self.assertFalse(ag.call("grant.check", workspace="gr", kind="browser_profile", resource="Default")["granted"])
+        log = [json.loads(line) for line in open(os.path.join(K.BASE, "audit.log"))]
+        events = [e["event"] for e in log]
+        for ev in ("grant.requested", "grant.refused_channel", "grant.granted", "grant.revoked", "auth.denied"):
+            self.assertIn(ev, events)
+        granted = [e for e in log if e["event"] == "grant.granted"][-1]
+        self.assertEqual(granted["channel"], "tty")
+        self.assertNotIn("shop", json.dumps(log))            # the free-text detail is not copied into the log
+        for secret in (open(token_file(self.w["id"])).read().strip(),
+                       open(os.path.join(K.BASE, "admin.token")).read().strip()):
+            self.assertNotIn(secret, json.dumps(log))
+
+    def test_cli_credential_commands(self):
+        r = self.cli("token", "list", "gr")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        d = json.loads(r.stdout)
+        self.assertEqual(d["token_file"], token_file(self.w["id"]))
+        self.assertEqual(oct(os.stat(d["token_file"]).st_mode & 0o777), "0o600")
+        r = self.cli("token", "issue", "gr", "--scopes", "screenshot", "--ttl", "30")
+        tok = r.stdout.strip()
+        self.assertTrue(tok.startswith("awt1_"), r.stdout + r.stderr)
+        # that token, given to a process through its environment, is the only thing that process can use
+        env = dict(self.env, AW_TOKEN=tok)
+        self.assertEqual(self.cli("token", "whoami", env=env).returncode, 0)
+        out = json.loads(self.cli("token", "whoami", env=env).stdout)
+        self.assertEqual((out["kind"], out["scopes"], out["workspace"]), ("workspace", ["screenshot"], self.w["id"]))
+        r = self.cli("create", "--name", "forbidden", "--no-start", env=env)
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("E_FORBIDDEN", r.stderr)
+        r = self.cli("list", env=dict(self.env, AW_TOKEN_FILE=token_file(self.w["id"])))
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("gr", r.stdout)
+        self.assertNotIn("ua-", r.stdout)
+
+
 # ---------------------------------------------------------------- browser profile conflicts (real Chrome)
 @unittest.skipUnless(K.have("google-chrome"), "google-chrome not installed")
 class BrowserProfileConflicts(unittest.TestCase):
@@ -659,6 +767,7 @@ class BrowserProfileConflicts(unittest.TestCase):
     def test_two_workspaces_may_not_share_a_profile_and_each_gets_its_own_by_default(self):
         import tempfile
         shared = tempfile.mkdtemp(prefix="aw-prof-", dir="/tmp")
+        self.addCleanup(shutil.rmtree, shared, True)
         a, b = new_ws("prof-a", width=1000, height=600), new_ws("prof-b", width=1000, height=600)
         try:
             ag_a, ag_b = agent(a["id"]), agent(b["id"])
@@ -678,6 +787,7 @@ class BrowserProfileConflicts(unittest.TestCase):
                              titles_a, "workspace A's browser received something from B")
             # the same workspace may reuse its own profile; a different directory in B is fine
             other = tempfile.mkdtemp(prefix="aw-prof-", dir="/tmp")
+            self.addCleanup(shutil.rmtree, other, True)
             ag_b.call("workspace.launch", workspace="prof-b", argv=["google-chrome", *self.FLAGS,
                       "--user-data-dir=" + other, "--app=" + self.page("2b6cb0", "PAGE-B")])
             self.assertTrue(K.wait_for(lambda: ag_b.call("window.list", workspace="prof-b")["windows"], 25))

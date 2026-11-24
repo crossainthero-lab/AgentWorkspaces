@@ -37,6 +37,8 @@ The MCP server sends this in its `initialize` result and in tool descriptions, a
 
 `AW_AGENT_KIND` (who is calling), `AW_WORKSPACE` (optional default), `AW_BASE_DIR` (optional, to use a different daemon instance). The server is lazy: it does not start the daemon until the first tool call.
 
+**Credentials (API v2).** The MCP server holds a workspace credential, not the human's: it takes `AW_TOKEN` / `AW_TOKEN_FILE` if set (give a session a short-lived one with `agent-workspaces token issue NAME --ttl 3600`), otherwise the token file of `AW_WORKSPACE`, otherwise the token files of the workspaces assigned to `AW_AGENT_KIND`; with none it reports `E_NO_CREDENTIALS`. It can therefore only see and drive its own workspace(s) (`E_FORBIDDEN` otherwise), cannot resume a takeover, change the clipboard policy or approve anything. The registration commands above do not contain a token (nothing secret goes into the agent's config or argv). Order and details: [api.md](api.md). Asking for permission to use a signed-in browser profile or to share the host clipboard is `grant.request` (not yet an MCP tool); only the human can answer it.
+
 ## Other agents
 
 Any MCP client can run `python3 ~/.local/share/agent-workspaces/bin/agent-workspaces mcp` over stdio. Agents without MCP support can use the CLI (`agent-workspaces screenshot NAME`, `click`, `type`, ...) following the same instruction text.

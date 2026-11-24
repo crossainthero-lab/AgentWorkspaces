@@ -21,3 +21,11 @@
 **Leftover processes** Everything of a workspace lives in the systemd slice `aw-<id>.slice`: `systemctl --user stop aw-<id>.slice`.
 
 **GNOME extension does not capture Ctrl+Alt+Up/Down** See [gnome-extension.md](gnome-extension.md): another extension may own the accelerator; the extension reports conflicts instead of overriding them.
+
+## `E_UNAUTHENTICATED`, `E_NO_CREDENTIALS`, `E_FORBIDDEN`
+
+* `E_NO_CREDENTIALS` (client side): nothing to authenticate with. As the human, run the CLI as yourself (it reads `admin.token` next to the socket). For an agent, set `AW_TOKEN_FILE` to the workspace's token file (`agent-workspaces token path NAME`), or `AW_TOKEN` to a token from `agent-workspaces token issue NAME --ttl 3600`.
+* `E_UNAUTHENTICATED`: the token is unknown, was rotated or revoked. Re-read the token file; an API v1 client (no credential) gets this too.
+* `E_FORBIDDEN`: the credential is valid but bound to another workspace, lacks the scope, or the method is for the human only. The message names the workspace it is bound to.
+* `E_INSECURE_CREDENTIAL_FILE`: a token file is group/world accessible or not yours; `chmod 600` it or rotate (`agent-workspaces token rotate NAME`).
+

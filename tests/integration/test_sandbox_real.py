@@ -79,6 +79,9 @@ class Containment(unittest.TestCase):
         C.call("workspace.create", name="nonet", width=640, height=400, sandbox=True, sandbox_net=False,
                sandbox_mounts=[os.path.join(K.ROOT, "tests") + ":ro", cls.rw + ":rw"])
         cls.nonet = run_probe("nonet", "nonet", cls.canary, os.path.join(K.BASE, cls.other["id"]), cls.rw)
+        for r in (cls.plain, cls.sb, cls.nonet):
+            if os.path.exists(r["tmp_marker"]):
+                os.unlink(r["tmp_marker"])      # the unsandboxed control writes into the host /tmp
         C.call("workspace.destroy", workspace="nonet")
 
     @classmethod
@@ -190,6 +193,22 @@ class GraphicalAppsInsideTheSandbox(unittest.TestCase):
             self.assertIn((0x2b, 0x6c, 0xb0), cols)
         finally:
             C.call("workspace.destroy", workspace="sgtk")
+
+    @unittest.skipUnless(K.have("xeyes") and K.have("xwininfo"), "xeyes/xwininfo not installed")
+    def test_x11_app_runs_on_the_workspaces_own_xwayland_inside_the_sandbox(self):
+        import subprocess
+        C.call("workspace.create", name="sx11", width=800, height=500, sandbox=True)
+        try:
+            xd = C.call("screen.info", workspace="sx11")["x_display"]
+            C.call("workspace.launch", workspace="sx11", argv=["xeyes"])
+
+            def in_x():
+                r = subprocess.run(["xwininfo", "-display", xd, "-root", "-tree"], capture_output=True, text=True,
+                                   timeout=5)
+                return "xeyes" in r.stdout.lower()
+            self.assertTrue(K.wait_for(in_x, 10), "xeyes did not reach the workspace's X server from the sandbox")
+        finally:
+            C.call("workspace.destroy", workspace="sx11")
 
     @unittest.skipUnless(K.have("google-chrome"), "google-chrome not installed")
     def test_chrome_runs_inside_the_sandbox_only_with_its_own_sandbox_off(self):
