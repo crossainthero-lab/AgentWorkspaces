@@ -587,6 +587,7 @@ class Handler(socketserver.StreamRequestHandler):
                     if req.get("token") is not None:
                         # per-request credential (stateless clients); authenticates this request only
                         st = dict(state)
+                        st["viewer_of"] = state.setdefault("viewer_of", [])   # shared: attach counts live per connection
                         try:
                             st["principal"] = self.daemon.creds.authenticate(req["token"], pid)
                         except AuthError as e:

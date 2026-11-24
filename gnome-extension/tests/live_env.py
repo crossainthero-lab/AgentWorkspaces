@@ -52,7 +52,12 @@ class Daemon:
         return self
 
     def client(self) -> Client:
-        return Client(autostart=False)
+        """The human's client (admin credential, like the CLI and the viewer)."""
+        return Client(autostart=False, role="admin")
+
+    def agent_client(self, workspace) -> Client:
+        """An agent's client: only the workspace's own token file, exactly like an MCP session."""
+        return Client(autostart=False, role="agent", workspace=workspace)
 
     def stop(self):
         c = None
@@ -108,7 +113,7 @@ class ScriptedAgent(threading.Thread):
         self.paused_rejections = 0
 
     def run(self):
-        c = Client(autostart=False)
+        c = Client(autostart=False, role="agent", workspace=self.ws)   # the workspace's own credential
         try:
             for line in self.LINES:
                 for word in line.split(" "):

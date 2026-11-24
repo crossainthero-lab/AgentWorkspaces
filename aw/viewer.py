@@ -171,24 +171,44 @@ def register_approval_view(kind: str, fn: Callable[["Viewer", Dict[str, Any], st
     APPROVAL_VIEWS[kind] = fn
 
 
-def default_approval_view(viewer: "Viewer", a: Dict[str, Any], ws_name: str) -> Gtk.Widget:
+def _request_row(viewer: "Viewer", title: str, detail: str, buttons) -> Gtk.Widget:
     row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
     text = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=1, hexpand=True)
-    t = Gtk.Label(label=f"{ws_name}: {a.get('title', 'Agent needs input')}", xalign=0, wrap=True)
+    t = Gtk.Label(label=title, xalign=0, wrap=True)
     t.add_css_class("aw-title")
     text.append(t)
-    if a.get("detail"):
-        d = Gtk.Label(label=a["detail"], xalign=0, wrap=True)
+    if detail:
+        d = Gtk.Label(label=detail, xalign=0, wrap=True)
         d.add_css_class("aw-sub")
         text.append(d)
     row.append(text)
-    deny = Gtk.Button(label="Deny", valign=Gtk.Align.CENTER)
-    ok = Gtk.Button(label="Approve", valign=Gtk.Align.CENTER)
-    deny.connect("clicked", lambda b: viewer.resolve_approval(a["id"], "denied"))
-    ok.connect("clicked", lambda b: viewer.resolve_approval(a["id"], "approved"))
-    row.append(deny)
-    row.append(ok)
+    for label, cb in buttons:
+        b = Gtk.Button(label=label, valign=Gtk.Align.CENTER)
+        b.connect("clicked", lambda _b, cb=cb: cb())
+        row.append(b)
     return row
+
+
+# Human-only grants (docs/security-model.md): the daemon only accepts grant.resolve from the shipped viewer, an
+# interactive terminal or GNOME Shell, and only with the admin credential, which this viewer uses.
+GRANT_TITLES = {"browser_profile": "{ws} wants to use a copy of your browser profile{res}",
+                "host_clipboard": "{ws} wants to share your clipboard"}
+
+
+def grant_view(viewer: "Viewer", g: Dict[str, Any], ws_name: str) -> Gtk.Widget:
+    res = f" \u201c{g['resource']}\u201d" if g.get("resource") else ""
+    title = GRANT_TITLES.get(g.get("kind", ""), "{ws} asks for permission: " + g.get("kind", "")).format(ws=ws_name, res=res)
+    detail = g.get("description") or ""
+    if g.get("detail"):
+        detail = (detail + " " if detail else "") + g["detail"]
+    return _request_row(viewer, title, detail, [("Deny", lambda: viewer.resolve_grant(g["id"], "denied")),
+                                                ("Allow for 15 minutes", lambda: viewer.resolve_grant(g["id"], "granted"))])
+
+
+def default_approval_view(viewer: "Viewer", a: Dict[str, Any], ws_name: str) -> Gtk.Widget:
+    return _request_row(viewer, f"{ws_name}: {a.get('title', 'Agent needs input')}", a.get("detail", ""),
+                        [("Deny", lambda: viewer.resolve_approval(a["id"], "denied")),
+                         ("Approve", lambda: viewer.resolve_approval(a["id"], "approved"))])
 
 
 # ---- live feed of one workspace --------------------------------------------------------------------------------
@@ -658,6 +678,10 @@ class Viewer(Gtk.Application):
                     self.agent_kinds = c.call("hello").get("agent_kinds", {})
                 wl = c.call("workspace.list")["workspaces"]
                 ap = c.call("approval.list", pending=True)["approvals"]
+                try:
+                    ap += [dict(g, _grant=True) for g in c.call("grant.list", pending=True)["grants"]]
+                except ApiError:
+                    pass          # a daemon without grants
             finally:
                 c.close()
         except (ApiError, OSError):
@@ -681,7 +705,7 @@ class Viewer(Gtk.Application):
                 w.setdefault("activity", {}).update(last_action=f"{d.get('actor')}:{d.get('action')}",
                                                     last_action_at=d.get("at"))
                 self.refresh_texts()
-        elif t.startswith(("workspace.", "approval.", "viewer.")) or t == "input.rejected":
+        elif t.startswith(("workspace.", "approval.", "grant.", "viewer.")) or t == "input.rejected":
             if t == "workspace.input_mode":
                 w = self.ws.get(d.get("id"))
                 if w:
@@ -696,6 +720,8 @@ class Viewer(Gtk.Application):
         self.connected = True
         self.ws = {w["id"]: w for w in wl}
         self.approvals = ap
+        for w in self.ws.values():    # the badge counts approvals and grants waiting for this workspace
+            w["pending_approvals"] = sum(1 for a in ap if a.get("workspace") == w["id"])
         if self.sel not in self.ws:
             self.sel = None
         if not self.sel:
@@ -1010,9 +1036,12 @@ class Viewer(Gtk.Application):
         for a in self.approvals:
             w = self.ws.get(a.get("workspace") or a.get("workspace_id", ""))
             name = w["name"] if w else a.get("workspace", "")
-            view = APPROVAL_VIEWS.get(a.get("kind", ""), default_approval_view)
+            view = APPROVAL_VIEWS.get(a.get("kind", ""), grant_view if a.get("_grant") else default_approval_view)
             self.appr_box.append(view(self, a, name))
         self.appr_rev.set_reveal_child(bool(self.approvals))
+
+    def resolve_grant(self, grant_id: str, decision: str):
+        self.rpc("grant.resolve", id=grant_id, decision=decision, ok=lambda r: self.schedule_refresh())
 
     def resolve_approval(self, approval_id: str, decision: str):
         self.rpc("approval.resolve", id=approval_id, decision=decision, ok=lambda r: self.schedule_refresh())

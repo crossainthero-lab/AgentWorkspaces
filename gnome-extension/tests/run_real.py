@@ -121,7 +121,7 @@ def main():
         cur = sel
 
         # ---- activity: an agent action shows up (in the sidebar row and header)
-        c.call("input.click", workspace=cur, x=400, y=300)
+        d.agent_client(cur).call("input.click", workspace=cur, x=400, y=300)
         time.sleep(1.2)
         shot("viewer-activity.png")
 
@@ -130,7 +130,7 @@ def main():
         got = wait_for(lambda: c.call("workspace.get", workspace=cur)["input_mode"] == "manual", 5)
         check("'You' puts the workspace into manual takeover", bool(got))
         try:
-            c.call("input.click", workspace=cur, x=100, y=100)
+            d.agent_client(cur).call("input.click", workspace=cur, x=100, y=100)
             check("agent input is rejected with E_PAUSED during takeover", False, "call succeeded")
         except ApiError as e:
             check("agent input is rejected with E_PAUSED during takeover", e.code == "E_PAUSED", e.code)
@@ -162,7 +162,7 @@ def main():
         time.sleep(0.8)
         n2 = len([e for e in log_events(logs[cur]) if e.get("ev") == "text"])
         try:
-            c.call("input.click", workspace=cur, x=100, y=100)
+            d.agent_client(cur).call("input.click", workspace=cur, x=100, y=100)
             rej = False
         except ApiError as e:
             rej = e.code == "E_PAUSED"
@@ -172,7 +172,7 @@ def main():
         wait_for(lambda: c.call("workspace.get", workspace=cur)["input_mode"] == "agent", 5)
 
         # ---- approvals bar (agent asks the human)
-        a = c.call("approval.request", workspace=cur, title="Use the shared browser profile?",
+        a = d.agent_client(cur).call("approval.request", workspace=cur, title="Use the shared browser profile?",
                    detail="The agent wants to open a page that needs your signed-in session.", kind="input")
         time.sleep(1.8)
         shot("viewer-approval.png")
@@ -205,7 +205,7 @@ def main():
         s.click(1544, 104)
         got = wait_for(lambda: c.call("approval.get", id=a["id"])["status"] == "approved", 5)
         check("Approve in the viewer resolves the agent's request as approved", bool(got))
-        a2 = c.call("approval.request", workspace=cur, title="Copy from the host clipboard?", kind="input")
+        a2 = d.agent_client(cur).call("approval.request", workspace=cur, title="Copy from the host clipboard?", kind="input")
         time.sleep(1.5)
         s.click(1455, 104)
         got = wait_for(lambda: c.call("approval.get", id=a2["id"])["status"] == "denied", 5)
@@ -214,6 +214,17 @@ def main():
         check("the bar and the badge go away when nothing is pending",
               c.call("approval.list", pending=True)["approvals"] == [] and
               all(w["pending_approvals"] == 0 for w in c.call("workspace.list")["workspaces"]))
+
+        # human-only grants (SA3's `grant.*`): an agent can only ask, the viewer is a human channel that can decide
+        g = d.agent_client(cur).call("grant.request", workspace=cur, kind="browser_profile", resource="Work profile")
+        time.sleep(1.8)
+        shot("viewer-grant.png")
+        check("grant.request from the workspace credential is pending until a person decides",
+              c.call("grant.check", workspace=cur, kind="browser_profile", resource="Work profile")["granted"] is False)
+        s.click(1500, 104)                       # 'Allow for 15 minutes'
+        got = wait_for(lambda: c.call("grant.check", workspace=cur, kind="browser_profile", resource="Work profile")["granted"], 5)
+        check("'Allow for 15 minutes' in the viewer grants it (viewer is accepted as a human channel)", bool(got))
+        time.sleep(1.0)
 
         s.click(*UI["menu"])
         time.sleep(0.8)
@@ -232,7 +243,7 @@ def main():
               bool(gone) and all(w["viewers"] == 0 and w["state"] == "running" for w in ws.values()),
               str({n: (w["viewers"], w["state"]) for n, w in ws.items()}))
         n3 = len([e for e in log_events(logs[cur]) if e.get("ev") in ("button", "motion")])
-        c.call("input.click", workspace=cur, x=640, y=360)
+        d.agent_client(cur).call("input.click", workspace=cur, x=640, y=360)
         time.sleep(0.5)
         n4 = len([e for e in log_events(logs[cur]) if e.get("ev") in ("button", "motion")])
         check("the agent can still drive the workspace with no viewer attached", n4 > n3)

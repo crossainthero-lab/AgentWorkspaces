@@ -86,6 +86,7 @@ def main():
         s.eval("Main.overview.hide(); return 1")
         d = Daemon(s).start()
         c = d.client()
+        ag = d.agent_client("research")
         c.call("workspace.create", name="research", agent_kind="claude-code", width=1280, height=720)
         lg = s.base + "/p.log"
         open(lg, "w").close()
@@ -123,7 +124,7 @@ def main():
             end = time.monotonic() + seconds
             i = 0
             while time.monotonic() < end:
-                c.call("input.move", workspace="research", x=200 + (i * 7) % 900, y=200 + (i * 5) % 300)
+                ag.call("input.move", workspace="research", x=200 + (i * 7) % 900, y=200 + (i * 5) % 300)
                 i += 1
                 time.sleep(max(0, 1 / 60 - 0.002))
             out["busy_moves_sent"] = i
@@ -149,7 +150,7 @@ def main():
         for i in range(30):
             time.sleep(0.45)
             t = time.monotonic()
-            c.call("input.move", workspace="research", x=150 + i * 17, y=250 + (i % 5) * 31)
+            ag.call("input.move", workspace="research", x=150 + i * 17, y=250 + (i % 5) * 31)
             marks.append(t)
         time.sleep(1)
         # close the viewer window: it prints its frame timeline on exit
