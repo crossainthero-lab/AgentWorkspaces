@@ -356,7 +356,7 @@ class Daemon:
             argv = p.get("argv")
             if not isinstance(argv, list) or not all(isinstance(a, str) for a in argv):
                 raise ManagerError("E_BAD_ARGS", "'argv' must be a list of strings")
-            m.note_action(ws, "launch", "agent")
+            m.note_action(ws, "launch", self._actor(p, pr))
             return m.launch(ws, argv, cwd=p.get("cwd"), extra_env=p.get("env"))
         if method == "app.list":
             ws = self._ws(p)

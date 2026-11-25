@@ -108,12 +108,20 @@ wrapped: the agent workspace is skipped in the row (the trailing empty workspace
 workspaces can still be started) and Left/Right cannot sidestep out of it. Our own moves bypass the wrapper. Known: GNOME's
 workspace-switcher popup still draws the agent workspace as a dot.
 
-**Silent unless there is something to go up to.** Ctrl+Alt+Up asks the service (bounded start, below) for its workspaces and does
-**nothing at all** unless at least one is running: no viewer window, no overlay, no notification, no animation, nothing in the
-overview. The same for Ctrl+Alt+Up from the overview, and for a service that cannot be started (the reason goes to the shell
-log only). Nothing is created at login or when the extension is enabled; the overview strip is built the first time the overview
-opens after start-up. The only message the extension ever shows on its own is when you did go up (workspaces exist) but the
-viewer could not be opened: it goes back down and says so.
+**Up always goes up, and never makes a noise.** Ctrl+Alt+Up (also from the Super overview) always ends on the agent
+desktop. With a workspace running it opens the viewer as before. With **nothing running** the extension asks the service for the
+default desktop, `workspace.ensure_default` (admin credential, idempotent, docs/api.md): a workspace called `agents`, no agent
+assigned yet, created if it does not exist, started if it is stopped, left alone if it runs. It takes about 260 ms; the viewer
+window is sent to the agent desktop the moment it maps and the slide starts on that first frame, so no empty desktop slides in
+(measured: viewer mapped and slide started within 6 ms of each other). If the service or the desktop is not ready after 1.2 s
+the slide happens anyway and the viewer shows its quiet "Starting the agent desktop..." state, then picks the desktop up when it
+exists. There is never a notification, toast or dialog. If something is wrong, the **viewer** says so once, in its own window:
+"The agent desktop is not running" with a "Start it" button after 8 s without a workspace, or "The AgentWorkspaces service is
+not running and could not be started: <reason>" with a "Start the service" button; the details also go to the shell log. The one
+fully silent case is when there is no service and no `agent-workspaces` command to start it or the viewer with: nothing can be
+shown, so you stay where you are (the reason is in the shell log). Nothing is created at login or when the extension is enabled
+(lazy: the first Up); once created the desktop keeps running until it is stopped, and the overview then shows its tile like any
+running workspace. Ctrl+Alt+Down while the desktop is still being prepared cancels the trip.
 
 **The service.** If the socket does not answer: `systemctl --user start agent-workspaces.service` (5 s), then, if that did not
 bring the socket up, `setsid -f <agent-workspaces> daemon` (the `daemon-command` setting, else `~/.local/share/agent-workspaces/bin`,
@@ -148,7 +156,8 @@ Settings (`org.gnome.shell.extensions.agent-workspaces`): `enter-shortcut` (defa
 ## 4. Defects found while testing entering and leaving (and fixed)
 
 * Ctrl+Alt+Right from the last personal workspace walked into the agent desktop (it is a workspace in the row): now skipped.
-* Entering with no workspace running left you on an empty, invisible desktop and showed a notification: now a silent no-op.
+* Entering with no workspace running left you on an empty, invisible desktop and showed a notification; a silent no-op was
+  tried next and was wrong too (nothing happened when you pressed the key): now Up creates and enters the default desktop.
 * Pressing Ctrl+Alt+Up while sitting on an empty agent desktop (viewer closed by hand) did nothing; closing the viewer stranded you
   there: now reopened / taken back down.
 * The overview strip built while the shell was still starting up (it starts in the overview) crashed the shell on the next
@@ -160,9 +169,9 @@ Settings (`org.gnome.shell.extensions.agent-workspaces`): `enter-shortcut` (defa
 
 | suite | what | result |
 |---|---|---|
-| `gnome-extension/tests/run_isolated.py` | stand-in daemon and viewer: bindings taken over / restored exactly (including after a SIGKILL and a restart), silent no-op without a service, slide direction and samples (-720 to 0 going up, +720 to 0 coming back), Left/Right skip the agent desktop, desktop-cube + Tiling Shell coexistence, prefs write | 27/27 |
+| `gnome-extension/tests/run_isolated.py` | stand-in daemon and viewer: bindings taken over / restored exactly (including after a SIGKILL and a restart), no visible effect when there is no service and no way to start one, slide direction and samples (-720 to 0 going up, +720 to 0 coming back), Left/Right skip the agent desktop, desktop-cube + Tiling Shell coexistence, prefs write | 27/27 |
 | `gnome-extension/tests/run_cube.py --personal 2` and `--personal 4` | the real stack with Desktop Cube, Tiling Shell, Blur my Shell, Just Perfection, User Themes, Ubuntu Dock (settings read into a private keyfile): slide (never a cube) both ways, nothing left behind, Super overview strip (tile, live preview, controls scaled, agent thumbnail hidden), click a preview, Up/Down from the overview, rapid keys, focus returns, Left/Right walk the personal workspaces with the cube's own turn and never land on the agent desktop, viewer closed by hand, no JS errors, disable restores the keys | 25/25 and 25/25 |
-| `gnome-extension/tests/run_silent.py` | (a) daemon up and no workspace, (b) daemon down and no workspace, (d) empty overview, nothing at enable time: no window actor, overlay, animation or notification; the service is started by the extension and re-found after a restart; (c) with one running workspace it enters | 12/12 |
+| `gnome-extension/tests/run_silent.py` | nothing at login/enable time; (A) cold start with the service down and nothing running creates `agents` and enters it; (B) repeated Up/Down reuse one workspace and one viewer; (C) a stopped `agents` is started by Up; (D) the overview tile, a click on it and Ctrl+Alt+Up from the overview; (E) service up, `agents` gone: re-created, slide starts when the viewer maps; (F) creation fails and (G) the service cannot be started: the viewer says so, no popup or notification; recovery; no JS errors | see below |
 | `gnome-extension/tests/run_real.py` | the viewer as an ordinary window: control, approvals, grants, create/stop/close, taskbar, agent pointer | see docs/testing.md |
 | `tests/unit/test_install_service.py` | `install.sh --enable-service` and `uninstall.sh` against a fake `systemctl` in a throw-away HOME | 3/3 |
 

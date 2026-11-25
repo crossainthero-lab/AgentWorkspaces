@@ -53,15 +53,17 @@ if its systemd unit cannot). The keys `backup`, `conflicts`, `test-hooks` are st
 
 ## How it behaves
 
-* Up: only when the service lists at least one running workspace (the service is started first if it is not up: the systemd
-  user unit, else the daemon itself, bounded waits; see `../docs/gnome-extension.md`). Records the workspace you are on and
+* Up: always goes up. The service is started first if it is not up (the systemd user unit, else the daemon itself, bounded
+  waits; see `../docs/gnome-extension.md`) and, when nothing is running, asked for the default desktop (`workspace.ensure_default`:
+  a workspace called `agents`, no agent assigned, created or started on the first Up; never at login). The slide starts when the
+  viewer has its first frame. Records the workspace you are on and
   the window that has focus, finds or creates the GNOME workspace that holds the viewer (the empty workspace GNOME keeps at
   the end, or a new one), slides to it and asks the daemon (`workspace.enter`, `docs/api.md`, admin credential: `AW_ADMIN_TOKEN`,
-  the file `AW_ADMIN_TOKEN_FILE`, else `<base>/admin.token`) to open the viewer there. If nothing is running, nothing happens.
+  the file `AW_ADMIN_TOKEN_FILE`, else `<base>/admin.token`) to open the viewer there. Never a notification or popup: if something is wrong the viewer says so, once, in its own window.
 * Down: back to the recorded workspace and the window you were in; if it no longer exists (GNOME removes empty workspaces), to
   the neighbouring one. Closing the viewer window by hand while up there takes you back down.
 * Super overview: Ctrl+Alt+Up/Down work there too (the overview closes first). Agent previews appear above the personal
-  workspaces only while a workspace is running; they are refreshed only while the overview is open.
+  workspaces for the workspaces that are running (after the first Up that includes `agents`); they are refreshed only while the overview is open.
 * On a vertical workspace layout (for example with V-Shell) Ctrl+Alt+Up already means "the workspace above", so the keys are
   passed through to the normal neighbour switch.
 * Animations follow GNOME's *enable-animations* setting and are skipped while the Overview is open.

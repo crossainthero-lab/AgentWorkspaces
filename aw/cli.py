@@ -39,6 +39,10 @@ def build_parser() -> argparse.ArgumentParser:
         p.add_argument("--as-agent", metavar="KIND", help="identify as an agent kind (claude-code, codex, ...)")
 
     sub.add_parser("daemon", help="run the workspace daemon in the foreground")
+    vw = sub.add_parser("viewer", help="open the viewer window (starts the service if it is not running)")
+    vw.add_argument("workspace", nargs="?")
+    vw.add_argument("--environment", action="store_true", help="full-screen agent desktop, no window chrome")
+    vw.add_argument("--maximized", action="store_true")
     sub.add_parser("stop-daemon", help="stop the daemon process (workspaces keep running and are re-adopted)")
     sub.add_parser("status", help="daemon status + workspace summary").add_argument("workspace", nargs="?")
     sub.add_parser("list", help="list workspaces").add_argument("--all", action="store_true")
@@ -185,6 +189,10 @@ def main(argv: Optional[List[str]] = None) -> int:
     if args.cmd == "daemon":
         from .daemon import serve
         return serve()
+    if args.cmd == "viewer":
+        # The viewer needs no running service: it starts the service itself and says so when it cannot.
+        from .viewer import main as viewer_main
+        return viewer_main((["--environment"] if args.environment else []) + (["--maximized"] if args.maximized else []) + ([args.workspace] if args.workspace else []))
     if args.cmd == "mcp":
         from .mcp import run
         return run(args.workspace)

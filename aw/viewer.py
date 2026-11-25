@@ -34,6 +34,7 @@ try:
 except ImportError:  # pragma: no cover
     cairo = None
 
+from . import apps as appsmod  # noqa: E402
 from . import paths  # noqa: E402
 from . import service  # noqa: E402
 from .client import ApiError, Client  # noqa: E402
@@ -59,6 +60,8 @@ OBSERVE_DT = 1 / 30          # frame interval cap while you only watch; no cap w
 THUMB_WIDTH = 480
 THUMB_EVERY = 1.5            # seconds between thumbnail refreshes, only while the overview is visible
 SIDEBAR_W, RAIL_W = 244, 56
+EMPTY_GRACE = 8.0            # seconds an environment-mode viewer waits for the first workspace before saying there is none
+STARTING_TEXT = "Starting the agent desktop\u2026"
 
 CSS = b"""
 window.aw-window, .aw-main { background: #000; }
@@ -87,6 +90,11 @@ headerbar togglebutton:checked { background: alpha(white, 0.2); }
 .aw-taskbar button:hover { background: alpha(white, 0.08); }
 .aw-taskbar button.aw-focused { background: alpha(white, 0.14); box-shadow: inset 0 -2px #ff7a00; }
 .aw-taskbar button.aw-min label { opacity: 0.5; }
+.aw-taskbar button.aw-launch { padding: 2px 7px; margin-right: 4px; opacity: 0.75; }
+.aw-taskbar button.aw-launch:hover, .aw-taskbar button.aw-launch:checked { opacity: 1; }
+.aw-launcher { min-width: 280px; }
+.aw-launcher list { background: transparent; }
+.aw-launcher row { border-radius: 6px; padding: 4px 8px; }
 .aw-taskbar .aw-who { padding-right: 8px; margin-right: 4px; border-right: 1px solid alpha(white, 0.14); }
 """
 
@@ -358,6 +366,98 @@ class AgentMarker(Gtk.DrawingArea):
         cr.fill()
 
 
+class Launcher(Gtk.MenuButton):
+    """A tiny 'open an app' entry at the start of the agent taskbar, for a person: it lists the installed graphical
+    apps (desktop files) and starts the one you pick INSIDE this workspace, as you (agent_kind "human", through
+    workspace.launch). Nothing of the personal desktop is touched."""
+
+    def __init__(self, viewer: "Viewer"):
+        super().__init__(icon_name="view-app-grid-symbolic", tooltip_text="Open an app in this workspace",
+                         direction=Gtk.ArrowType.UP, sensitive=False)
+        self.v = viewer
+        self.add_css_class("aw-launch")
+        self.apps: Optional[List[Dict[str, Any]]] = None
+        pop = Gtk.Popover()
+        pop.add_css_class("aw-launcher")
+        pop.set_position(Gtk.PositionType.TOP)
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+        for m in ("top", "bottom", "start", "end"):
+            getattr(box, f"set_margin_{m}")(8)
+        self.entry = Gtk.SearchEntry(placeholder_text="Search")
+        self.entry.connect("search-changed", lambda e: self.lst.invalidate_filter())
+        self.entry.connect("activate", self.on_entry_activate)
+        box.append(self.entry)
+        self.lst = Gtk.ListBox(selection_mode=Gtk.SelectionMode.NONE)
+        self.lst.set_activate_on_single_click(True)
+        self.lst.set_filter_func(self.visible)
+        self.lst.connect("row-activated", lambda lb, row: self.launch(row.app))
+        sc = Gtk.ScrolledWindow(hscrollbar_policy=Gtk.PolicyType.NEVER, min_content_height=300, max_content_height=300)
+        sc.set_child(self.lst)
+        box.append(sc)
+        pop.set_child(box)
+        pop.connect("show", self.on_show)
+        pop.connect("closed", lambda p: self.entry.set_text(""))
+        self.pop = pop
+        self.set_popover(pop)
+
+    def on_show(self, *_):
+        self.entry.grab_focus()
+        if self.apps is not None:
+            return
+
+        def work():
+            try:
+                found = appsmod.list_apps()
+            except Exception:           # unreadable desktop files must never break the viewer
+                found = []
+            seen, out = set(), []
+            for a in sorted(found, key=lambda a: a["name"].lower()):
+                if a["name"].lower() not in seen:
+                    seen.add(a["name"].lower())
+                    out.append(a)
+            GLib.idle_add(self.fill, out)
+        threading.Thread(target=work, daemon=True).start()
+
+    def fill(self, apps):
+        self.apps = apps
+        theme = Gtk.IconTheme.get_for_display(Gdk.Display.get_default())
+        for a in apps:
+            row = Gtk.ListBoxRow()
+            row.app = a
+            box = Gtk.Box(spacing=10)
+            icon = a.get("icon") or ""
+            img = Gtk.Image.new_from_icon_name(icon if icon and theme.has_icon(icon) else "application-x-executable-symbolic")
+            img.set_pixel_size(20)
+            box.append(img)
+            box.append(Gtk.Label(label=a["name"], halign=Gtk.Align.START, ellipsize=Pango.EllipsizeMode.END))
+            row.set_child(box)
+            self.lst.append(row)
+        return False
+
+    def visible(self, row) -> bool:
+        q = self.entry.get_text().strip().lower()
+        return not q or q in row.app["name"].lower()
+
+    def on_entry_activate(self, *_):
+        for row in self.rows():
+            if self.visible(row):
+                self.launch(row.app)
+                return
+
+    def rows(self):
+        r = self.lst.get_first_child()
+        while r:
+            yield r
+            r = r.get_next_sibling()
+
+    def launch(self, app: Dict[str, Any]):
+        w = self.v.current()
+        self.pop.popdown()
+        if not w or w.get("state") != "running":
+            return
+        self.v.rpc("workspace.launch", workspace=w["id"], argv=appsmod.launch_argv(app), agent_kind="human")
+
+
 class Taskbar(Gtk.Box):
     """The agent environment's own taskbar: only the windows inside THIS workspace (Wayland and its private
     XWayland, from the daemon's window service). The orange line and the agent's name mark it as the agent's world,
@@ -373,16 +473,17 @@ class Taskbar(Gtk.Box):
         self.who_icon = Gtk.Box()
         self.who_dim = Gtk.Label(label="Agent")
         self.who_dim.add_css_class("aw-sub")
+        self.who.set_visible(False)                 # nothing to name until the workspace is known
         self.who_name = Gtk.Label()
         self.who_name.add_css_class("aw-title")
         self.who.append(self.who_icon)
         self.who.append(self.who_dim)
         self.who.append(self.who_name)
         self.append(self.who)
+        self.launcher = Launcher(viewer)
+        self.append(self.launcher)
         self.items = Gtk.Box(spacing=2)
         self.append(self.items)
-        self.empty = Gtk.Label(label="No windows yet")
-        self.empty.add_css_class("aw-sub")
         self.sig = None
         self.set_tooltip_text("The agent's workspace: only windows inside it. Click one to focus it (as you, through the API).")
 
@@ -395,8 +496,15 @@ class Taskbar(Gtk.Box):
                 self.who_icon.remove(c)
             self.who_icon.append(agent_icon(hint, 16))
         label = ws["agent"].get("label") or "Agent"
-        self.who_name.set_text(label)
-        self.who_dim.set_visible("agent" not in label.lower())      # "Hermes Agent" already says it
+        self.launcher.set_sensitive(ws.get("state") == "running")
+        self.who.set_visible(True)
+        if ws["agent"].get("kind") == "none":
+            # no agent assigned yet (the default desktop): it is called what it is, not "Agent Unassigned"
+            self.who_name.set_text(ws.get("name") or label)
+            self.who_dim.set_visible(False)
+        else:
+            self.who_name.set_text(label)
+            self.who_dim.set_visible("agent" not in label.lower())      # "Hermes Agent" already says it
         sig = [(w["id"], w.get("title"), w.get("focused"), w.get("minimized")) for w in windows]
         if sig == self.sig:
             return
@@ -406,8 +514,6 @@ class Taskbar(Gtk.Box):
             n = c.get_next_sibling()
             self.items.remove(c)
             c = n
-        if not windows:
-            self.items.append(self.empty)
         for w in windows:
             b = Gtk.Button()
             box = Gtk.Box(spacing=6)
@@ -515,6 +621,7 @@ class Viewer(Gtk.Application):
         self.collapsed = False
         self.win: Optional[Gtk.ApplicationWindow] = None
         self.connected = False
+        self.t0 = time.monotonic()
         self.alive = True
         self.shell_ext = False
         self.rows: Dict[str, "Row"] = {}
@@ -758,6 +865,11 @@ class Viewer(Gtk.Application):
         self.stack.add_named(self.build_overview(), "overview")
         self.stack.add_named(self.build_live(), "live")
         self.stack.add_named(self.build_empty(), "empty")
+        if self.env_mode:
+            # the agent desktop opens straight on its (still empty) live view, never on the workspace list
+            self.stack.set_visible_child_name("live")
+            GLib.timeout_add(1200, self.starting_hint)
+            GLib.timeout_add(int(EMPTY_GRACE * 1000) + 300, self.grace_over)
 
         win.connect("close-request", self.on_close)
         win.connect("realize", lambda w: w.get_surface().connect("notify::state", self.on_surface_state))
@@ -834,10 +946,43 @@ class Viewer(Gtk.Application):
         self.empty_lbl = Gtk.Label(label="No workspaces yet")
         self.empty_lbl.add_css_class("title-2")
         self.empty_btn = Gtk.Button(label="Create a workspace", halign=Gtk.Align.CENTER)
-        self.empty_btn.connect("clicked", lambda b: self.show_create_dialog())
+        if self.env_mode:
+            # the agent desktop itself: with nothing running, one button starts the default one
+            self.empty_lbl.set_label("The agent desktop is not running")
+            self.empty_btn.set_label("Start it")
+            self.empty_btn.connect("clicked", lambda b: self.start_default())
+        else:
+            self.empty_btn.connect("clicked", lambda b: self.show_create_dialog())
         box.append(self.empty_lbl)
         box.append(self.empty_btn)
         return box
+
+    def start_default(self):
+        """Environment mode with no workspace: ask the service for the default desktop ('agents')."""
+        self.empty_btn.set_sensitive(False)
+
+        def ok(r):
+            self.empty_btn.set_sensitive(True)
+            self.want_name = r.get("name")
+            threading.Thread(target=self.refresh_now, daemon=True).start()
+
+        def err(e):
+            self.empty_btn.set_sensitive(True)
+            self.flash_error(e)
+        self.rpc("workspace.ensure_default", ok=ok, err=err)
+
+    def starting_hint(self, force: bool = False):
+        """Still no picture after a moment: say, quietly, that it is starting (never before, so a normal start
+        shows nothing but the desktop arriving)."""
+        if self.alive and self.env_mode and self.pic.get_paintable() is None and not self.msg_box.get_visible() \
+                and self.stack.get_visible_child_name() == "live" and (force or time.monotonic() - self.t0 >= 1.1):
+            self.msg_show(STARTING_TEXT)
+        return False
+
+    def grace_over(self):
+        if self.alive and not self.ws:
+            self.update_view()
+        return False
 
     # ---- optional GNOME Shell extension ------------------------------------------------------------------
     def set_shell_ext(self, present: bool):
@@ -1154,7 +1299,12 @@ class Viewer(Gtk.Application):
     def update_view(self):
         self._syncing = True
         if not self.ws:
-            self.stack.set_visible_child_name("empty")
+            if self.env_mode and time.monotonic() - self.t0 < EMPTY_GRACE:
+                # the agent desktop is probably being created right now: the quiet "starting" state, not an error
+                self.stack.set_visible_child_name("live")
+                self.starting_hint(force=True)
+            else:
+                self.stack.set_visible_child_name("empty")
             self.ov_btn.set_active(False)
         elif self.mode == "overview" or not self.sel:
             self.stack.set_visible_child_name("overview")
@@ -1252,7 +1402,8 @@ class Viewer(Gtk.Application):
             return
         if w["state"] != "running":
             self.pic.set_paintable(None)
-            self.msg_show(f"Workspace is {w['state']}", "Start workspace" if w["state"] in ("stopped", "failed") else None)
+            self.msg_show("Workspace failed to start" if w["state"] == "failed" else f"Workspace is {w['state']}",
+                          "Start workspace" if w["state"] in ("stopped", "failed") else None)
             return
         if self.stack.get_visible_child_name() != "live" or self.feed:
             if self.feed:
@@ -1317,6 +1468,8 @@ class Viewer(Gtk.Application):
             return
         tex = Gdk.MemoryTexture.new(w, h, fm, GLib.Bytes.new(data), stride)
         self.pic.set_paintable(tex)
+        if self.msg_box.get_visible() and self.msg.get_label() == STARTING_TEXT:
+            self.msg_show(None)
         if (w, h) != self.texture_size:
             self.texture_size = (w, h)
             self.apply_fit()

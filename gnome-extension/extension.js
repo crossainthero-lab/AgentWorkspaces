@@ -23,6 +23,7 @@ const VIEWER_TITLE_PREFIX = 'AgentWorkspaces:';
 const GNOME_WM = 'org.gnome.desktop.wm.keybindings';
 const TAKEOVER_KEYS = ['switch-to-workspace-up', 'switch-to-workspace-down'];
 const SLIDE_MS = 250; // same as GNOME Shell's own workspace switch
+const VIEWER_WAIT_MS = 1200; // slide up anyway when the viewer window has not appeared by then
 // Small public interface so the viewer's "Back to desktop" button (and any other program) can do what the
 // shortcuts do. Same-user session bus only; it can only switch workspace.
 const PUBLIC_NAME = 'dev.agentworkspaces.ShellExtension';
@@ -87,6 +88,7 @@ export default class AgentWorkspacesExtension extends Extension {
         this._origin = null;
         this._slide = null;
         this._pendingViewer = false;
+        this._entering = null;
         this._lastSamples = [];
         this._boundKeys = new Set();
 
@@ -118,6 +120,11 @@ export default class AgentWorkspacesExtension extends Extension {
 
     disable() {
         this._queued = null;
+        if (this._entering) {
+            this._entering.cancelled = true;
+            this._entering.abort?.();
+            this._entering = null;
+        }
         if (this._sessionId) {
             Main.sessionMode.disconnect(this._sessionId);
             this._sessionId = 0;
@@ -291,14 +298,16 @@ export default class AgentWorkspacesExtension extends Extension {
         return i >= 0 && i < this._wm().n_workspaces && this._wm().get_workspace_by_index(i) === ws;
     }
 
+    _isViewerWindow(w) {
+        if (!w || w.is_override_redirect())
+            return false;
+        const id = w.get_gtk_application_id?.() ?? w.get_wm_class?.();
+        return id === VIEWER_APP_ID || w.get_wm_class?.() === VIEWER_APP_ID ||
+            (w.get_title?.() ?? '').startsWith(VIEWER_TITLE_PREFIX);
+    }
+
     _viewerWindows() {
-        return global.get_window_actors().map(a => a.meta_window).filter(w => {
-            if (!w || w.is_override_redirect())
-                return false;
-            const id = w.get_gtk_application_id?.() ?? w.get_wm_class?.();
-            return id === VIEWER_APP_ID || w.get_wm_class?.() === VIEWER_APP_ID ||
-                (w.get_title?.() ?? '').startsWith(VIEWER_TITLE_PREFIX);
-        });
+        return global.get_window_actors().map(a => a.meta_window).filter(w => this._isViewerWindow(w));
     }
 
     // Ctrl+Alt+Left/Right walk through your PERSONAL workspaces only. The agent desktop is a GNOME workspace too (it holds
@@ -400,6 +409,9 @@ export default class AgentWorkspacesExtension extends Extension {
     }
 
     // name: open that agent workspace (a click in the overview); omitted: where you left off.
+    // Ctrl+Alt+Up ALWAYS goes up to the agent desktop. With nothing running the service is asked for the default one
+    // ('agents', no agent assigned yet) first. Never a notification or a dialog: whatever goes wrong is said, quietly,
+    // inside the viewer, and details go to the log.
     enter(name = null) {
         const active = this._wm().get_active_workspace();
         if (this._isVertical() && !(this._agentWs && active.get_neighbor(Meta.MotionDirection.UP) === this._agentWs)) {
@@ -407,67 +419,192 @@ export default class AgentWorkspacesExtension extends Extension {
             this._passThrough(Meta.MotionDirection.UP);
             return;
         }
-        if (this._agentWs && this._wsValid(this._agentWs) && active === this._agentWs) {
-            // Already up there. If the viewer window is gone (closed by hand) or a particular workspace is wanted, open it
-            // again; otherwise nothing to do.
-            if (name || this._viewerWindows().length === 0) {
-                this._gateEnter().then(ok => {
-                    if (ok)
-                        this._requestViewer(name);
-                }).catch(e => log(`enter: ${e}`));
-            }
-            return;
-        }
-        // Nothing happens (no window, no slide, no message) unless at least one workspace is running: with no agent
-        // workspace there is nothing to go up to, and a desktop with nothing on it would be worse than staying put.
-        this._gateEnter().then(ok => {
-            if (ok)
-                this._enterNow(name);
-        }).catch(e => log(`enter: ${e}`));
+        const onAgent = this._agentWs && this._wsValid(this._agentWs) && active === this._agentWs;
+        if (onAgent && !name && this._viewerWindows().length > 0)
+            return;                                   // already up there
+        // Up there with the viewer gone (closed by hand) or a particular workspace wanted: open it again, no slide.
+        this._startAgentDesktop(name, !onAgent).catch(e => log(`enter: ${e}\n${e.stack}`));
     }
 
-    /** true only when the service answers and lists at least one running workspace. Silent otherwise: reasons go to the log. */
-    async _gateEnter() {
-        if (!this._daemonAlive()) {
-            if (!await this._startDaemon()) {
-                log('enter ignored: the service is not running');
-                return false;
-            }
-        }
+    /** Make sure the service runs and a workspace exists to look at. Resolves {daemon, name}: daemon false when the
+     *  service could not be started (the viewer then says so itself); name is the workspace to open (null: where you
+     *  left off). Every failure goes to the log only. */
+    async _prepareDesktop(name) {
+        if (!this._daemonAlive() && !await this._startDaemon())
+            return {daemon: false, name};
         try {
+            if (name)
+                return {daemon: true, name};
             const {workspaces} = await this._daemonCall('workspace.list', {});
-            if (!(workspaces ?? []).some(w => w.state === 'running')) {
-                log('enter ignored: no running agent workspace');
-                return false;
-            }
+            if ((workspaces ?? []).some(w => w.state === 'running'))
+                return {daemon: true, name: null};
+            const r = await this._daemonCall('workspace.ensure_default', {}, 15000);
+            log(`default agent desktop ${r?.created ? 'created' : 'started'}: ${r?.name}`);
+            return {daemon: true, name: r?.name ?? null};
         } catch (e) {
-            log(`enter ignored: cannot list workspaces (${e.message})`);
+            log(`no workspace to go up to (${e.message}); the viewer will say so`);
+            return {daemon: true, name: null};
+        }
+    }
+
+    async _startAgentDesktop(name, slide) {
+        if (this._entering || this._slide)
+            return;
+        const token = {cancelled: false, abort: null};
+        this._entering = token;
+        try {
+            const haveViewer = slide && !name && this._viewerWindows().length > 0;
+            let target = {daemon: true, name};
+            if (!haveViewer) {
+                // Normally the service answers (and creates the default desktop) well inside VIEWER_WAIT_MS. When it
+                // does not, go up anyway: the viewer shows its quiet "starting" state and picks the desktop up when it
+                // exists. The preparation carries on in the background.
+                const prep = this._prepareDesktop(name);
+                const late = new Promise(resolve => {
+                    let id = GLib.timeout_add(GLib.PRIORITY_DEFAULT, VIEWER_WAIT_MS, () => {
+                        id = 0;
+                        resolve(null);
+                        return GLib.SOURCE_REMOVE;
+                    });
+                    const stop = () => {
+                        if (id)
+                            GLib.source_remove(id);
+                        id = 0;
+                    };
+                    prep.then(stop, stop);
+                });
+                const first = await Promise.race([prep, late]);
+                if (token.cancelled)
+                    return;
+                if (first) {
+                    target = first;
+                } else {
+                    log('the agent desktop is not ready yet: going up, the viewer shows that it is starting');
+                    prep.catch(e => log(`prepare: ${e}`));
+                    target = {daemon: this._daemonAlive(), name};
+                }
+            }
+            const active = this._wm().get_active_workspace();
+            if (slide && this._agentWs && this._wsValid(this._agentWs) && active === this._agentWs)
+                return;
+            const ws = this._ensureAgentWorkspace(active);
+            if (!ws)
+                return;
+            if (slide) {
+                this._origin = active;
+                this._originFocus = global.display.focus_window ?? null;
+            }
+            if (haveViewer) {
+                for (const w of this._viewerWindows()) {      // a viewer left on a personal desktop belongs up here
+                    if (w.get_workspace() === active)
+                        w.change_workspace(ws);
+                }
+                this._switchTo(ws, -1);                       // the agent desktop comes down from above
+                // The viewer is already there, so no waiting: whatever is missing (service stopped, desktop stopped
+                // or gone) is made good in the background and the viewer follows it.
+                this._prepareDesktop(null).catch(e => log(`prepare: ${e}`));
+                return;
+            }
+            await this._openViewer(ws, target, slide, token);
+        } finally {
+            if (this._entering === token)
+                this._entering = null;
+        }
+    }
+
+    // Open the viewer and, when going up, slide as soon as its window has its first frame: the window is sent to the
+    // agent desktop the moment it maps, so the slide shows a finished picture, never an empty desktop. If it takes
+    // longer than VIEWER_WAIT_MS the slide happens anyway and the viewer's own quiet "starting" state shows.
+    _openViewer(ws, target, slide, token) {
+        return new Promise(resolve => {
+            let finished = false;
+            let mapId = 0;
+            let timer = 0;
+            const finish = doSlide => {
+                if (finished)
+                    return;
+                finished = true;
+                token.abort = null;
+                if (mapId)
+                    global.window_manager.disconnect(mapId);
+                if (timer)
+                    GLib.source_remove(timer);
+                mapId = timer = 0;
+                if (doSlide && slide && !token.cancelled && this._wsValid(ws) && this._wm().get_active_workspace() !== ws)
+                    this._switchTo(ws, -1);
+                resolve();
+            };
+            token.abort = () => finish(false);
+            if (slide) {
+                mapId = global.window_manager.connect('map', (_wm, actor) => {
+                    const w = actor.meta_window;
+                    if (finished || !this._isViewerWindow(w))
+                        return;
+                    actor.remove_all_transitions();           // no pop-in animation: the slide is the entrance
+                    try {
+                        if (w.get_workspace() !== ws)
+                            w.change_workspace(ws);
+                    } catch (e) {
+                        log(`could not move the viewer up: ${e}`);
+                    }
+                    GLib.idle_add(GLib.PRIORITY_HIGH, () => {
+                        finish(true);
+                        return GLib.SOURCE_REMOVE;
+                    });
+                });
+                timer = GLib.timeout_add(GLib.PRIORITY_DEFAULT, VIEWER_WAIT_MS, () => {
+                    timer = 0;
+                    finish(true);
+                    return GLib.SOURCE_REMOVE;
+                });
+            }
+            this._launchViewer(target).then(ok => {
+                if (!ok) {
+                    log('the viewer could not be opened; staying where you are');
+                    finish(false);
+                } else if (!slide) {
+                    finish(false);
+                }
+            }).catch(e => {
+                log(`viewer: ${e}`);
+                finish(false);
+            });
+        });
+    }
+
+    // Through the service when it answers; else the viewer program itself, which starts the service and says what
+    // happened. Resolves false only when neither worked.
+    async _launchViewer(target) {
+        if (target.daemon && await this._requestViewer(target.name))
+            return true;
+        return this._spawnViewer();
+    }
+
+    _spawnViewer() {
+        const cmd = this._daemonCommand();
+        if (!cmd) {
+            log('no agent-workspaces command found (set daemon-command in the extension settings)');
             return false;
         }
-        return true;
-    }
-
-    async _enterNow(name) {
-        const active = this._wm().get_active_workspace();
-        if (this._slide || (this._agentWs && this._wsValid(this._agentWs) && active === this._agentWs))
-            return;
-        const ws = this._ensureAgentWorkspace(active);
-        if (!ws)
-            return;
-        this._origin = active;
-        this._originFocus = global.display.focus_window ?? null;
-        const needViewer = !!name || this._viewerWindows().length === 0;
-        this._switchTo(ws, -1);                       // the agent desktop comes down from above
-        if (needViewer && !await this._requestViewer(name)) {
-            // The person asked to go up and there are workspaces, but the viewer could not be opened: do not leave
-            // them on an empty desktop. Go back and say so (the only message this extension ever shows on its own).
-            this._afterOverview(() => this.leave());
-            Main.notify('AgentWorkspaces', 'The viewer could not be opened; see the shell log for the reason.');
+        const envMode = this._settings.get_boolean('environment-mode');
+        try {
+            GLib.spawn_async(null, ['setsid', '-f', cmd, 'viewer', envMode ? '--environment' : '--maximized'], null,
+                GLib.SpawnFlags.SEARCH_PATH | GLib.SpawnFlags.STDOUT_TO_DEV_NULL | GLib.SpawnFlags.STDERR_TO_DEV_NULL,
+                null);
+            return true;
+        } catch (e) {
+            log(`could not run ${cmd} viewer: ${e.message}`);
+            return false;
         }
     }
 
     leave() {
         const active = this._wm().get_active_workspace();
+        if (this._entering && !(this._agentWs && this._wsValid(this._agentWs) && active === this._agentWs)) {
+            this._entering.cancelled = true;          // Down while the agent desktop is still being prepared: stay put
+            this._entering.abort?.();
+            return;
+        }
         if (!(this._agentWs && this._wsValid(this._agentWs) && active === this._agentWs)) {
             this._passThrough(Meta.MotionDirection.DOWN);
             return;
@@ -507,7 +644,7 @@ export default class AgentWorkspacesExtension extends Extension {
         this._watchId = ws.connect('window-removed', () => {
             GLib.timeout_add(GLib.PRIORITY_DEFAULT, 400, () => {
                 if (this._agentWs && this._wsValid(this._agentWs) && this._wm().get_active_workspace() === this._agentWs &&
-                    this._viewerWindows().length === 0 && !this._slide && !this._pendingViewer)
+                    this._viewerWindows().length === 0 && !this._slide && !this._pendingViewer && !this._entering)
                     this._afterOverview(() => this.leave());
                 return GLib.SOURCE_REMOVE;
             });
@@ -779,11 +916,11 @@ export default class AgentWorkspacesExtension extends Extension {
             this._readTokenFile(GLib.build_filenamev([this._baseDir(), 'admin.token']));
     }
 
-    _daemonCall(method, params) {
+    _daemonCall(method, params, timeoutMs = 4000) {
         return new Promise((resolve, reject) => {
             const client = new Gio.SocketClient();
             const cancel = new Gio.Cancellable();
-            const timer = GLib.timeout_add(GLib.PRIORITY_DEFAULT, 4000, () => {
+            const timer = GLib.timeout_add(GLib.PRIORITY_DEFAULT, timeoutMs, () => {
                 cancel.cancel();
                 return GLib.SOURCE_REMOVE;
             });
@@ -1033,7 +1170,7 @@ export default class AgentWorkspacesExtension extends Extension {
             origin: this._wsValid(this._origin) ? this._origin.index() : -1,
             layout_rows: wm.layout_rows, windows: wins, keys, backup: this._settings.get_string('backup'),
             conflicts: this._settings.get_strv('conflicts'), slide_samples: this._lastSamples,
-            sliding: !!this._slide, daemon_socket: this._socketPath(),
+            sliding: !!this._slide, entering: !!this._entering, daemon_socket: this._socketPath(),
             animations: St.Settings.get().enable_animations, pointer: global.get_pointer().slice(0, 2),
             notifications: Main.messageTray.getSources().map(x => `${x.title}:${x.notifications?.length ?? 0}`),
             window_actors: global.get_window_actors().length, overview: Main.overview.visible,

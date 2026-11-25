@@ -428,18 +428,19 @@ def main():
               bk.get("switch-to-workspace-down", {}).get("before") == original["switch-to-workspace-down"])
         check("animations enabled in isolated shell", st["animations"] is True)
 
-        # ---- 1) NO daemon (and no workspaces): Ctrl+Alt+Up is a silent no-op: no switch, no window, no message, no animation
+        # ---- 1) NO service and no way to start one or to open a viewer without it: nothing to show, so nothing happens (log only).
+        #         (With a startable service Ctrl+Alt+Up always goes up: see run_silent.py.)
         s0 = st["active"]
         n_actors, n_ws = st["window_actors"], st["n_workspaces"]
         hook.press("Control_L", "Alt_L", "Up")
         settle(2.0)
         st1 = hook.state()
-        check("no daemon: Ctrl+Alt+Up does nothing visible (same workspace, no new window or workspace, no slide, no notification)",
+        check("no service and no command to start it or the viewer: Ctrl+Alt+Up does nothing visible (same workspace, no new window or workspace, no slide, no notification)",
               st1["active"] == s0 and st1["window_actors"] == n_actors and st1["n_workspaces"] == n_ws and not st1["sliding"] and
               st1["slide_samples"] == [] and st1["notifications"] == st["notifications"] and st1["wg"] == [0, 0, 0] and shell.poll() is None,
               json.dumps({k: st1[k] for k in ("active", "window_actors", "n_workspaces", "sliding", "notifications", "wg")}))
         log = open(logf, errors="replace").read()
-        check("... and the reason is only in the shell log", "enter ignored" in log)
+        check("... and the reason is only in the shell log", "could not be started" in log and "no agent-workspaces command found" in log)
         check("no JS error from the extension in shell log", "JS ERROR" not in log or "agent-workspaces" not in
               "\n".join(l for l in log.splitlines() if "JS ERROR" in l))
 
