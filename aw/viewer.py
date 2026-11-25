@@ -35,6 +35,7 @@ except ImportError:  # pragma: no cover
     cairo = None
 
 from . import paths  # noqa: E402
+from . import service  # noqa: E402
 from .client import ApiError, Client  # noqa: E402
 from .session import SessionError, WorkspaceSession  # noqa: E402
 
@@ -611,7 +612,7 @@ class Viewer(Gtk.Application):
             hb.add_css_class("aw-overlay-top")
         else:
             win.set_titlebar(hb)
-        self.hb_back = Gtk.Button(icon_name="go-up-symbolic", tooltip_text="Back to your desktop (Ctrl+Alt+Up)",
+        self.hb_back = Gtk.Button(icon_name="go-down-symbolic", tooltip_text="Back to your desktop (Ctrl+Alt+Down)",
                                   visible=False)
         self.hb_back.connect("clicked", lambda b: self.return_to_desktop())
         hb.pack_start(self.hb_back)
@@ -726,11 +727,11 @@ class Viewer(Gtk.Application):
         nb.append(self.new_lbl)
         self.new_btn.set_child(nb)
         self.new_btn.connect("clicked", lambda b: self.show_create_dialog())
-        self.back_btn = Gtk.Button(tooltip_text="Back to your desktop (Ctrl+Alt+Up)", visible=False)
+        self.back_btn = Gtk.Button(tooltip_text="Back to your desktop (Ctrl+Alt+Down)", visible=False)
         self.back_btn.add_css_class("flat")
         self.back_lbl = Gtk.Label(label="Back to desktop")
         bb = Gtk.Box(spacing=8)
-        bb.append(Gtk.Image.new_from_icon_name("go-up-symbolic"))
+        bb.append(Gtk.Image.new_from_icon_name("go-down-symbolic"))
         bb.append(self.back_lbl)
         self.back_btn.set_child(bb)
         self.back_btn.connect("clicked", lambda b: self.return_to_desktop())
@@ -845,7 +846,7 @@ class Viewer(Gtk.Application):
         self.hb_back.set_visible(present and self.env_mode)
 
     def return_to_desktop(self):
-        """Ask the optional extension to slide back to the personal workspace (same as Ctrl+Alt+Up)."""
+        """Ask the optional extension to slide back to the personal workspace (same as Ctrl+Alt+Down)."""
         try:
             conn = Gio.bus_get_sync(Gio.BusType.SESSION, None)
             conn.call(SHELL_EXT_NAME, SHELL_EXT_PATH, SHELL_EXT_NAME + "1", "Return", None, None,
@@ -941,9 +942,20 @@ class Viewer(Gtk.Application):
         self.h_sub.set_text(text)
 
     def event_loop(self):
+        tried = False
         while self.alive:
             c = Client(autostart=False, role="admin")
             try:
+                if not service.alive():
+                    # The service is not running: start it (systemd unit first, else the daemon), then say what happened.
+                    GLib.idle_add(self.service_message, "Starting the AgentWorkspaces service…", False)
+                    ok, why = service.ensure_daemon()
+                    tried = True
+                    if not ok:
+                        GLib.idle_add(self.service_message, "The AgentWorkspaces service is not running and could not be "
+                                      f"started: {why}", True)
+                        time.sleep(3.0)
+                        continue
                 c.subscribe()
                 GLib.idle_add(self.set_connected, True)
                 self.refresh_now()                    # after subscribing: nothing can be missed in between
@@ -964,9 +976,15 @@ class Viewer(Gtk.Application):
             self.close_feed()
             self.ws.clear()
             self.sync_widgets()
-            self.msg_show("The AgentWorkspaces service is not running", None)
-            self.stack.set_visible_child_name("live")
-            self.h_sub.set_text("Start it with: agent-workspaces daemon")
+            self.service_message("The AgentWorkspaces service is not running", True)
+        return False
+
+    def service_message(self, text: str, can_retry: bool):
+        """A quiet, accurate message in the middle of the view; 'Try again' starts the service now."""
+        self.msg_show(text, "Start the service" if can_retry else None)
+        self.msg_btn_action = "service"
+        self.stack.set_visible_child_name("live")
+        self.h_sub.set_text("")
         return False
 
     def refresh_now(self):
@@ -1269,7 +1287,19 @@ class Viewer(Gtk.Application):
         if button:
             self.msg_btn.set_label(button)
 
+    msg_btn_action = ""
+
     def on_msg_button(self, b):
+        if self.msg_btn_action == "service" and not self.connected:
+            self.msg_btn_action = ""
+            self.msg_show("Starting the AgentWorkspaces service…", None)
+
+            def go():
+                ok, why = service.ensure_daemon()
+                if not ok:
+                    GLib.idle_add(self.service_message, f"Could not start the AgentWorkspaces service: {why}", True)
+            threading.Thread(target=go, daemon=True).start()
+            return
         w = self.current()
         if not w:
             return

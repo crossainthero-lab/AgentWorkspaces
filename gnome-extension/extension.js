@@ -1,7 +1,8 @@
 // AgentWorkspaces: optional GNOME Shell navigation.
 //
-// Ctrl+Alt+Down enters the AgentWorkspaces viewer on its own GNOME workspace; Ctrl+Alt+Up returns to the
-// personal workspace you came from. Everything else (Ctrl+Alt+Left/Right, other workspaces) is untouched.
+// The agent desktop is ON TOP of your personal ones. Ctrl+Alt+Up goes up to it (the personal desktop slides down
+// and out, the agent desktop slides down into place from above); Ctrl+Alt+Down comes back to the personal workspace
+// you came from. Ctrl+Alt+Left/Right keep walking through your personal workspaces only.
 // The AgentWorkspaces service does not depend on this extension.
 
 import Clutter from 'gi://Clutter';
@@ -15,13 +16,13 @@ import {Extension} from 'resource:///org/gnome/shell/extensions/extension.js';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 import * as Background from 'resource:///org/gnome/shell/ui/background.js';
 
+import {OverviewStrip} from './overviewStrip.js';
+
 const VIEWER_APP_ID = 'dev.agentworkspaces.Viewer';
 const VIEWER_TITLE_PREFIX = 'AgentWorkspaces:';
 const GNOME_WM = 'org.gnome.desktop.wm.keybindings';
 const TAKEOVER_KEYS = ['switch-to-workspace-up', 'switch-to-workspace-down'];
 const SLIDE_MS = 250; // same as GNOME Shell's own workspace switch
-const CUBE_UUID = 'desktop-cube@schneegans.github.com';
-const CUBE_MS = 450; // a 90 degree turn is a longer way than Desktop Cube's 250 ms between neighbouring faces
 // Small public interface so the viewer's "Back to desktop" button (and any other program) can do what the
 // shortcuts do. Same-user session bus only; it can only switch workspace.
 const PUBLIC_NAME = 'dev.agentworkspaces.ShellExtension';
@@ -100,10 +101,26 @@ export default class AgentWorkspacesExtension extends Extension {
         ];
         this._syncTestHooks();
         this._exportPublic(true);
+        this._patchNeighbors();
+        this._strip = new OverviewStrip(this);
+        // Locking the screen ends whatever is animating or queued: nothing may fire behind the lock screen.
+        this._sessionId = Main.sessionMode.connect('updated', () => {
+            if (Main.sessionMode.isLocked) {
+                this._queued = null;
+                this._cancelSlide();
+            }
+        });
     }
 
     disable() {
         this._queued = null;
+        if (this._sessionId) {
+            Main.sessionMode.disconnect(this._sessionId);
+            this._sessionId = 0;
+        }
+        this._strip?.destroy();
+        this._strip = null;
+        this._unpatchNeighbors();
         this._exportPublic(false);
         for (const id of this._handlers ?? [])
             this._settings.disconnect(id);
@@ -275,6 +292,38 @@ export default class AgentWorkspacesExtension extends Extension {
         });
     }
 
+    // Ctrl+Alt+Left/Right walk through your PERSONAL workspaces only. The agent desktop is a GNOME workspace too (it holds
+    // the viewer), so Meta.Workspace.get_neighbor is wrapped: the agent workspace is skipped in the row (the trailing empty
+    // workspace GNOME keeps stays reachable) and you cannot sidestep out of it. Our own switch bypasses the wrapper.
+    _patchNeighbors() {
+        const proto = Meta.Workspace.prototype;
+        const orig = proto.get_neighbor;
+        const ext = this;
+        this._origNeighbor = orig;
+        this._neighborPatch = function (direction) {
+            const agent = ext._agentWs;
+            if (ext._allowAgentNeighbor || !agent || !ext._wsValid(agent))
+                return orig.call(this, direction);
+            if (this === agent)
+                return this;
+            let n = orig.call(this, direction);
+            if (n === agent) {
+                n = orig.call(agent, direction);
+                if (n === agent)
+                    n = this;
+            }
+            return n;
+        };
+        proto.get_neighbor = this._neighborPatch;
+    }
+
+    _unpatchNeighbors() {
+        const proto = Meta.Workspace.prototype;
+        if (this._origNeighbor && proto.get_neighbor === this._neighborPatch)
+            proto.get_neighbor = this._origNeighbor;
+        this._origNeighbor = this._neighborPatch = null;
+    }
+
     _passThrough(direction) {
         // The GNOME binding for this accelerator was taken over, so reproduce its behaviour:
         // move to the neighbouring workspace if the current layout has one (V-Shell's vertical layout does).
@@ -282,6 +331,11 @@ export default class AgentWorkspacesExtension extends Extension {
         const next = active.get_neighbor(direction);
         if (next && next !== active)
             next.activate(global.get_current_time());
+    }
+
+    // A click on an agent desktop's preview in the overview: close the overview, then go up to that workspace.
+    _enterFromOverview(name) {
+        this._afterOverview(() => this.enter(name));
     }
 
     // From the Activities overview (Super): close it first, then travel. The slide needs the normal workspace view,
@@ -336,28 +390,71 @@ export default class AgentWorkspacesExtension extends Extension {
         }
     }
 
-    enter() {
+    // name: open that agent workspace (a click in the overview); omitted: where you left off.
+    enter(name = null) {
         const active = this._wm().get_active_workspace();
-        if (this._isVertical() && !(this._agentWs && active.get_neighbor(Meta.MotionDirection.DOWN) === this._agentWs)) {
-            // Vertical workspace layout (e.g. V-Shell): Down already means "next workspace".
-            this._passThrough(Meta.MotionDirection.DOWN);
+        if (this._isVertical() && !(this._agentWs && active.get_neighbor(Meta.MotionDirection.UP) === this._agentWs)) {
+            // Vertical workspace layout (e.g. V-Shell): Up already means "the workspace above".
+            this._passThrough(Meta.MotionDirection.UP);
             return;
         }
-        if (this._agentWs && this._wsValid(this._agentWs) && active === this._agentWs)
-            return; // already there
+        if (this._agentWs && this._wsValid(this._agentWs) && active === this._agentWs) {
+            if (name)
+                this._requestViewer(name);        // already up there: just show that workspace
+            return;
+        }
+        // Nothing happens (no window, no slide, no message) unless at least one workspace is running: with no agent
+        // workspace there is nothing to go up to, and a desktop with nothing on it would be worse than staying put.
+        this._gateEnter().then(ok => {
+            if (ok)
+                this._enterNow(name);
+        }).catch(e => log(`enter: ${e}`));
+    }
+
+    /** true only when the service answers and lists at least one running workspace. Silent otherwise: reasons go to the log. */
+    async _gateEnter() {
+        if (!this._daemonAlive()) {
+            if (!await this._startDaemon()) {
+                log('enter ignored: the service is not running');
+                return false;
+            }
+        }
+        try {
+            const {workspaces} = await this._daemonCall('workspace.list', {});
+            if (!(workspaces ?? []).some(w => w.state === 'running')) {
+                log('enter ignored: no running agent workspace');
+                return false;
+            }
+        } catch (e) {
+            log(`enter ignored: cannot list workspaces (${e.message})`);
+            return false;
+        }
+        return true;
+    }
+
+    async _enterNow(name) {
+        const active = this._wm().get_active_workspace();
+        if (this._slide || (this._agentWs && this._wsValid(this._agentWs) && active === this._agentWs))
+            return;
         const ws = this._ensureAgentWorkspace(active);
         if (!ws)
             return;
         this._origin = active;
-        this._switchTo(ws, +1);
-        if (this._viewerWindows().length === 0)
-            this._requestViewer();
+        this._originFocus = global.display.focus_window ?? null;
+        const needViewer = !!name || this._viewerWindows().length === 0;
+        this._switchTo(ws, -1);                       // the agent desktop comes down from above
+        if (needViewer && !await this._requestViewer(name)) {
+            // The person asked to go up and there are workspaces, but the viewer could not be opened: do not leave
+            // them on an empty desktop. Go back and say so (the only message this extension ever shows on its own).
+            this._afterOverview(() => this.leave());
+            Main.notify('AgentWorkspaces', 'The viewer could not be opened; see the shell log for the reason.');
+        }
     }
 
     leave() {
         const active = this._wm().get_active_workspace();
         if (!(this._agentWs && this._wsValid(this._agentWs) && active === this._agentWs)) {
-            this._passThrough(Meta.MotionDirection.UP);
+            this._passThrough(Meta.MotionDirection.DOWN);
             return;
         }
         let target = this._wsValid(this._origin) && this._origin !== active ? this._origin : null;
@@ -373,8 +470,17 @@ export default class AgentWorkspacesExtension extends Extension {
             else
                 target = wm.append_new_workspace(false, global.get_current_time());
         }
-        if (target && target !== active)
-            this._switchTo(target, -1);
+        if (target && target !== active) {
+            const focus = this._originFocus;
+            this._switchTo(target, +1);               // the personal desktop comes back up from below
+            // keyboard focus returns to the window you were in
+            if (focus && focus.get_workspace?.() === target && global.display.focus_window !== focus) {
+                try {
+                    focus.activate(global.get_current_time());
+                } catch (e) { /* window went away */ }
+            }
+            this._originFocus = null;
+        }
     }
 
     _ensureAgentWorkspace(active) {
@@ -392,8 +498,7 @@ export default class AgentWorkspacesExtension extends Extension {
             }
         }
         if (!this._settings.get_boolean('create-on-demand')) {
-            Main.notify('AgentWorkspaces', 'No AgentWorkspaces viewer is open. Turn on "Create the AgentWorkspaces ' +
-                'workspace on demand" in the extension preferences, or run: agent-workspaces enter NAME');
+            log('no viewer window is open and create-on-demand is off: nothing to go up to');
             return null;
         }
         const wm = this._wm();
@@ -411,6 +516,11 @@ export default class AgentWorkspacesExtension extends Extension {
     // desktop-cube). For enter/return we skip that animation and play our own vertical one: a snapshot of the
     // old windows slides out while the live windows slide in from the other side.
 
+    // The agent desktop is stacked above the personal ones. dir -1: you go up (the personal desktop slides down and
+    // out, the agent desktop slides down into place); dir +1: you come back (the reverse). Two full-screen
+    // faces move together: the live window group, which already carries the real wallpaper, and a snapshot of
+    // the face you leave with its own wallpaper and your bar and dock. Same 250 ms and ease-out-cubic as GNOME's
+    // own workspace slide. Desktop Cube is not involved: its cube is for your personal workspaces only.
     _switchTo(ws, dir) {
         const active = this._wm().get_active_workspace();
         if (!ws || ws === active)
@@ -422,9 +532,8 @@ export default class AgentWorkspacesExtension extends Extension {
             ws.activate(global.get_current_time());
             return;
         }
-        const cube = this._cubeEnabled();
         try {
-            snap = this._snapshotWindows(cube);
+            snap = this._snapshotWindows();
         } catch (e) {
             log(`no snapshot of the old windows: ${e}`);
         }
@@ -441,52 +550,35 @@ export default class AgentWorkspacesExtension extends Extension {
             };
             patched = true;
         }
-        ws.activate(global.get_current_time());
+        this._allowAgentNeighbor = true;
+        try {
+            ws.activate(global.get_current_time());
+        } finally {
+            this._allowAgentNeighbor = false;
+        }
         if (patched) { // the switch did not go through animateSwitch (e.g. animations blocked)
             delete ctrl.animateSwitch;
         }
-        if (cube && snap) {
-            try {
-                this._playCube(snap, dir);
-            } catch (e) {
-                log(`cube turn failed, no animation: ${e}`);
-                this._slide = null;
-                const g = global.window_group;
-                g.rotation_angle_x = 0;
-                g.translation_z = 0;
-                g.pivot_point_z = 0;
-                g.set_pivot_point(0, 0);
-                snap._bg && this._destroyFace(snap._bg);
-                snap.destroy();
-            }
-        } else {
+        if (!snap)
+            return;
+        try {
             this._playSlide(snap, dir);
+        } catch (e) {
+            log(`slide failed, no animation: ${e}`);
+            this._slide = null;
+            this._resetFaces(snap);
         }
     }
 
-    _snapshotWindows(withBackground = false) {
-        // Clutter clones of the windows currently on screen. A clone keeps painting its source after the
-        // switch hides the source window actor, which is what lets the old workspace slide away.
-        // withBackground: the face also carries the wallpaper, so that it turns like a cube face.
+    _snapshotWindows() {
+        // The face you leave: its own wallpaper, your bar and dock, and Clutter clones of the windows on screen. A
+        // clone keeps painting its source after the switch hides the source window actor, which is what lets the
+        // old workspace slide away.
         const group = global.window_group;
         const snap = new Clutter.Actor({reactive: false});
-        let count = 0;
-        if (withBackground) {
-            snap.set_size(global.stage.width, global.stage.height);
-            snap._bg = this._backgroundClone();
-            snap.add_child(snap._bg);
-            snap._chrome = [];
-            for (const a of this._chromeActors()) {
-                if (!a.visible)
-                    continue;
-                const [x, y] = a.get_transformed_position();
-                const c = new Clutter.Clone({source: a, reactive: false});
-                c.set_position(x, y);
-                c.set_size(a.width, a.height);
-                snap.add_child(c);
-                snap._chrome.push(c);
-            }
-        }
+        snap.set_size(global.stage.width, global.stage.height);
+        snap._bg = this._wallpaperFace();
+        snap.add_child(snap._bg);
         for (const a of group.get_children()) {
             if (!a.visible || !a.meta_window)
                 continue;
@@ -494,19 +586,23 @@ export default class AgentWorkspacesExtension extends Extension {
             clone.set_position(a.x, a.y);
             clone.set_size(a.width, a.height);
             snap.add_child(clone);
-            count++;
         }
-        if (!count && !withBackground) {
-            snap.destroy();
-            return null; // empty workspace: nothing to slide out, the new content alone slides in
+        for (const a of this._chromeActors()) {
+            if (!a.visible)
+                continue;
+            const [x, y] = a.get_transformed_position();
+            const c = new Clutter.Clone({source: a, reactive: false});
+            c.set_position(x, y);
+            c.set_size(a.width, a.height);
+            snap.add_child(c);
         }
         Main.uiGroup.insert_child_above(snap, group);
         return snap;
     }
 
     _chromeActors() {
-        // Your own desktop's furniture: the top bar and the dock. They belong to the personal world, so they turn away
-        // with the personal face and are not on the agent's face (the viewer is full screen).
+        // Your own desktop's furniture: the top bar and the dock. They belong to the personal world, so they slide away
+        // with the personal face; the agent desktop is full screen and has its own taskbar.
         const out = [Main.layoutManager.panelBox];
         for (const c of Main.uiGroup.get_children()) {
             if (c.constructor.name === 'DashToDock')
@@ -515,9 +611,9 @@ export default class AgentWorkspacesExtension extends Extension {
         return out.filter(a => a);
     }
 
-    _backgroundClone() {
-        // A cube face carries its own wallpaper: a fresh BackgroundManager per monitor in a holder the size of the
-        // stage, exactly what the shell's own workspace-switch groups do (clones of the live background paint blank).
+    _wallpaperFace() {
+        // A face carries its own wallpaper: a fresh BackgroundManager per monitor in a holder the size of the stage,
+        // what the shell's own workspace-switch groups do (clones of the live background paint blank).
         const holder = new Meta.BackgroundGroup();
         holder.set_size(global.stage.width, global.stage.height);
         holder._mgrs = [];
@@ -529,29 +625,19 @@ export default class AgentWorkspacesExtension extends Extension {
         return holder;
     }
 
-    _destroyFace(f) {
-        for (const m of f._mgrs ?? [])
-            m.destroy();
-        f.destroy();
-    }
-
-    _cubeEnabled() {
-        // Desktop Cube loaded and active in THIS shell, and not switched off in our own settings.
-        try {
-            return this._settings.get_boolean('use-cube-transition') &&
-                Main.extensionManager.lookup(CUBE_UUID)?.state === 1;
-        } catch (e) {
-            return false;
+    _resetFaces(snap) {
+        const g = global.window_group;
+        g.remove_all_transitions();
+        g.translation_y = 0;
+        for (const c of this._chromeActors()) {
+            c.remove_all_transitions();
+            c.opacity = 255;
         }
-    }
-
-    _cubeParallax() {
-        // Desktop Cube's own `window-parallax` (how far the cube is pushed back while it turns), read from its
-        // settings when they are reachable, else its default.
-        try {
-            return Main.extensionManager.lookup(CUBE_UUID).stateObj._settings.get_double('window-parallax');
-        } catch (e) {
-            return 0.5;
+        if (snap) {
+            for (const m of snap._bg?._mgrs ?? [])
+                m.destroy();
+            snap.remove_all_transitions();
+            snap.destroy();
         }
     }
 
@@ -560,7 +646,10 @@ export default class AgentWorkspacesExtension extends Extension {
         const H = global.stage.height;
         const samples = [];
         const sid = group.connect('notify::translation-y', () => samples.push(Math.round(group.translation_y)));
-        this._slide = {kind: 'slide', snap, sid, samples};
+        const chrome = this._chromeActors();
+        for (const c of chrome)
+            c.opacity = 0;                    // the personal desktop's bar and dock are on the snapshot, they leave with it
+        this._slide = {kind: 'slide', snap, sid, samples, chrome};
         group.translation_y = dir * H;
         group.ease({
             translation_y: 0,
@@ -568,65 +657,11 @@ export default class AgentWorkspacesExtension extends Extension {
             mode: Clutter.AnimationMode.EASE_OUT_CUBIC,
             onStopped: () => this._finishSlide(),
         });
-        snap?.ease({
+        snap.ease({
             translation_y: -dir * H,
             duration: SLIDE_MS,
             mode: Clutter.AnimationMode.EASE_OUT_CUBIC,
         });
-    }
-
-    // The cube-native version, used while Desktop Cube is enabled. The two faces are two faces of a cube that
-    // turns about a horizontal axis: the face you leave (a snapshot of its windows plus the wallpaper) and the face you
-    // arrive on (the live window group plus a wallpaper clone). Same ingredients as Desktop Cube's own turn: faces
-    // rotated about a pivot `centerDepth` behind them (pivot_point_z), the whole cube pushed back while it turns
-    // (its `window-parallax`, strongest half way), the shell's own stage perspective, ease-out-cubic.
-    _playCube(snap, dir) {
-        // The live window group already carries the real wallpaper (the shell keeps its background group inside it), so
-        // it is a complete face; the face you leave brings its own wallpaper (see _snapshotWindows).
-        const group = global.window_group;
-        const H = global.stage.height;
-        const D = H / 2;                                     // face to axis: 90 degrees between faces
-        const corner = Math.sqrt(D * D + (H / 2) * (H / 2));
-        const maxBack = corner - D;                          // keeps the edge that swings towards you on the screen plane
-        const backdrop = new St.Widget({reactive: false, style: 'background-color: #0b141b;'});
-        backdrop.set_size(global.stage.width, global.stage.height);
-        Main.uiGroup.insert_child_below(backdrop, group);
-        const orig = {pivot: group.get_pivot_point(), pivotZ: group.pivot_point_z};
-        const chrome = this._chromeActors().map(a => ({a, opacity: 255}));
-        for (const c of chrome)
-            c.a.opacity = 0;                                   // the personal desktop's bar and dock turn with its face
-        const faces = [snap, group];
-        for (const f of faces) {
-            f.set_pivot_point(0.5, 0.5);
-            f.pivot_point_z = -D;
-        }
-        const samples = [];
-        const tl = new Clutter.Timeline({actor: global.stage, duration: this._cubeMs ?? CUBE_MS,
-            progress_mode: Clutter.AnimationMode.EASE_OUT_CUBIC});
-        let nearer = null;
-        const apply = p => {
-            const back = maxBack * (1 - Math.abs(2 * p - 1));
-            // dir +1 (down): the face you leave turns up and away, the new one comes up from below
-            snap.rotation_angle_x = dir * 90 * p;
-            group.rotation_angle_x = -dir * 90 * (1 - p);
-            for (const f of faces)
-                f.translation_z = -back;
-            // painter's order: the face that is turned further away is painted first
-            const oldNearer = p < 0.5;
-            if (nearer !== oldNearer) {
-                nearer = oldNearer;
-                if (oldNearer)
-                    Main.uiGroup.set_child_above_sibling(snap, group);
-                else
-                    Main.uiGroup.set_child_below_sibling(snap, group);
-            }
-            samples.push(Math.round(group.rotation_angle_x));
-        };
-        apply(0);
-        tl.connect('new-frame', () => apply(tl.get_progress()));
-        tl.connect('completed', () => this._finishSlide());
-        this._slide = {kind: 'cube', snap, backdrop, tl, orig, samples, chrome};
-        tl.start();
     }
 
     _finishSlide() {
@@ -635,33 +670,16 @@ export default class AgentWorkspacesExtension extends Extension {
             return;
         this._slide = null;
         const group = global.window_group;
-        if (s.kind === 'cube') {
-            try {
-                s.tl.stop();
-            } catch (e) { /* already finished */ }
-            group.rotation_angle_x = 0;
-            group.translation_z = 0;
-            group.pivot_point_z = s.orig.pivotZ;
-            group.set_pivot_point(s.orig.pivot[0], s.orig.pivot[1]);
-            s.backdrop.destroy();
-            for (const c of s.chrome) {                          // arriving on a personal workspace: bar and dock fade in
-                c.a.remove_all_transitions();
-                c.a.ease({opacity: c.opacity, duration: 160, mode: Clutter.AnimationMode.EASE_OUT_QUAD});
-            }
-            if (s.snap._bg)
-                this._destroyFace(s.snap._bg);
-            s.snap.destroy();
-            this._lastSamples = s.samples;
-            this._lastKind = 'cube';
-            this._runQueued();
-            return;
-        }
         group.disconnect(s.sid);
         group.remove_all_transitions();
         group.translation_y = 0;
-        if (s.snap) {
-            s.snap.remove_all_transitions();
-            s.snap.destroy();
+        for (const m of s.snap._bg?._mgrs ?? [])
+            m.destroy();
+        s.snap.remove_all_transitions();
+        s.snap.destroy();
+        for (const c of s.chrome) {            // arriving on a personal workspace: bar and dock fade back in
+            c.remove_all_transitions();
+            c.ease({opacity: 255, duration: 160, mode: Clutter.AnimationMode.EASE_OUT_QUAD});
         }
         this._lastSamples = s.samples;
         this._lastKind = 'slide';
@@ -767,29 +785,145 @@ export default class AgentWorkspacesExtension extends Extension {
         });
     }
 
-    async _requestViewer() {
-        if (this._pendingViewer)
-            return;
-        this._pendingViewer = true;
+    // ---- the service: never a silent no-op, never an invisible desktop ---------------------------------
+
+    _daemonAlive() {
+        // A unix-socket connect to a local file answers at once, so this is fine to do synchronously on a key press.
         try {
-            const {workspaces} = await this._daemonCall('workspace.list', {});
-            const running = (workspaces ?? []).filter(w => w.state === 'running');
-            if (!running.length) {
-                Main.notify('AgentWorkspaces', 'No agent workspace is running. Create one with: agent-workspaces create --name NAME');
+            const c = new Gio.SocketClient();
+            const conn = c.connect(Gio.UnixSocketAddress.new(this._socketPath()), null);
+            conn.close(null);
+            return true;
+        } catch (e) {
+            return false;
+        }
+    }
+
+    _daemonCommand() {
+        const custom = this._settings.get_string('daemon-command');
+        if (custom)
+            return custom;
+        const home = GLib.get_home_dir();
+        for (const c of [GLib.build_filenamev([home, '.local', 'share', 'agent-workspaces', 'bin', 'agent-workspaces']),
+            GLib.build_filenamev([home, '.local', 'bin', 'agent-workspaces']),
+            GLib.find_program_in_path('agent-workspaces')]) {
+            if (c && GLib.file_test(c, GLib.FileTest.IS_EXECUTABLE))
+                return c;
+        }
+        return null;
+    }
+
+    _run(argv, timeoutMs) {
+        // Run a command, resolve with its exit status (-1: could not run, -2: timed out). Never blocks the shell.
+        return new Promise(resolve => {
+            let proc;
+            try {
+                proc = Gio.Subprocess.new(argv, Gio.SubprocessFlags.STDOUT_SILENCE | Gio.SubprocessFlags.STDERR_SILENCE);
+            } catch (e) {
+                resolve(-1);
                 return;
             }
+            const timer = GLib.timeout_add(GLib.PRIORITY_DEFAULT, timeoutMs, () => {
+                try {
+                    proc.force_exit();
+                } catch (e) { /* gone */ }
+                resolve(-2);
+                return GLib.SOURCE_REMOVE;
+            });
+            proc.wait_async(null, (p, res) => {
+                GLib.source_remove(timer);
+                try {
+                    p.wait_finish(res);
+                    resolve(p.get_exit_status());
+                } catch (e) {
+                    resolve(-1);
+                }
+            });
+        });
+    }
+
+    _waitForSocket(ms) {
+        return new Promise(resolve => {
+            const t0 = GLib.get_monotonic_time();
+            GLib.timeout_add(GLib.PRIORITY_DEFAULT, 100, () => {
+                if (this._daemonAlive()) {
+                    resolve(true);
+                    return GLib.SOURCE_REMOVE;
+                }
+                if ((GLib.get_monotonic_time() - t0) / 1000 > ms) {
+                    resolve(false);
+                    return GLib.SOURCE_REMOVE;
+                }
+                return GLib.SOURCE_CONTINUE;
+            });
+        });
+    }
+
+    /** Start the AgentWorkspaces service: the systemd user unit first, else the daemon itself, with bounded waits.
+     *  Resolves true when the socket answers; otherwise says exactly why in a notification and resolves false. */
+    async _startDaemon() {
+        if (this._daemonAlive())
+            return true;
+        if (this._startingDaemon)
+            return this._startingDaemon;
+        this._startingDaemon = (async () => {
+            const why = [];
+            const st = await this._run(['systemctl', '--user', 'start', 'agent-workspaces.service'], 5000);
+            if (st === 0 && await this._waitForSocket(4000))
+                return true;
+            why.push(st === 0 ? 'the systemd unit started but the socket did not appear' :
+                st === -2 ? 'systemctl timed out' : 'no usable agent-workspaces.service user unit');
+            const cmd = this._daemonCommand();
+            if (!cmd) {
+                why.push('no agent-workspaces command found (set daemon-command in the extension settings)');
+            } else {
+                const base = this._baseDir();
+                GLib.mkdir_with_parents(base, 0o700);
+                try {
+                    GLib.spawn_async(null, ['setsid', '-f', cmd, 'daemon'], null,
+                        GLib.SpawnFlags.SEARCH_PATH | GLib.SpawnFlags.STDOUT_TO_DEV_NULL | GLib.SpawnFlags.STDERR_TO_DEV_NULL,
+                        null);
+                } catch (e) {
+                    why.push(`could not run ${cmd}: ${e.message}`);
+                }
+                if (await this._waitForSocket(6000))
+                    return true;
+                why.push(`${cmd} daemon did not open ${this._socketPath()} within 6 s`);
+            }
+            log(`the AgentWorkspaces service could not be started (${why.join('; ')})`);
+            return false;
+        })();
+        try {
+            return await this._startingDaemon;
+        } finally {
+            this._startingDaemon = null;
+        }
+    }
+
+    // name: a workspace to open; omitted: the viewer opens where you left off. Resolves true when the viewer was started
+    // (or is already open); false with the reason in the log.
+    async _requestViewer(name = null) {
+        if (this._pendingViewer)
+            return true;
+        this._pendingViewer = true;
+        try {
             const env = {};
             for (const k of ['WAYLAND_DISPLAY', 'DISPLAY', 'XDG_RUNTIME_DIR', 'DBUS_SESSION_BUS_ADDRESS'])
                 if (GLib.getenv(k))
                     env[k] = GLib.getenv(k);
-            // no workspace named: the viewer opens on the one you used last (else the most recently active)
-            await this._daemonCall('workspace.enter', {display_env: env, environment: this._settings.get_boolean('environment-mode'),
-                maximized: !this._settings.get_boolean('environment-mode')});
+            const envMode = this._settings.get_boolean('environment-mode');
+            const params = {display_env: env, environment: envMode, maximized: !envMode};
+            if (name)
+                params.workspace = name;
+            const r = await this._daemonCall('workspace.enter', params);
+            if (r && r.launched === false) {
+                log(`the viewer could not be opened: ${r.reason ?? 'unknown reason'}`);
+                return false;
+            }
+            return true;
         } catch (e) {
-            if (String(e.message).includes('daemon-unavailable'))
-                Main.notify('AgentWorkspaces', 'The AgentWorkspaces service is not running. Start it with: agent-workspaces daemon');
-            else
-                log(`workspace.enter failed: ${e.message}`);
+            log(`workspace.enter failed: ${e.message}`);
+            return false;
         } finally {
             this._pendingViewer = false;
         }

@@ -32,7 +32,7 @@ if [ "$MODE" = uninstall ]; then
 fi
 command -v glib-compile-schemas >/dev/null || { echo "glib-compile-schemas is required (libglib2.0-bin)" >&2; exit 1; }
 mkdir -p "$TARGET/schemas"
-for f in metadata.json extension.js prefs.js; do cp "$HERE/$f" "$TARGET/$f"; done
+for f in metadata.json extension.js prefs.js overviewStrip.js stylesheet.css; do cp "$HERE/$f" "$TARGET/$f"; done
 cp "$HERE"/schemas/*.gschema.xml "$TARGET/schemas/"
 glib-compile-schemas --strict "$TARGET/schemas"
 echo "installed to $TARGET (not enabled)"

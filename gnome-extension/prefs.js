@@ -7,8 +7,8 @@ import Gtk from 'gi://Gtk';
 import {ExtensionPreferences} from 'resource:///org/gnome/Shell/Extensions/js/extensions/prefs.js';
 
 const ROWS = [
-    {key: 'enter-shortcut', title: 'Enter AgentWorkspaces', subtitle: 'From a personal workspace, move down to the agent workspace.'},
-    {key: 'return-shortcut', title: 'Return to personal workspace', subtitle: 'From the agent workspace, move back up to where you came from.'},
+    {key: 'enter-shortcut', title: 'Go up to AgentWorkspaces', subtitle: 'The agent desktop is stacked above your personal ones.'},
+    {key: 'return-shortcut', title: 'Come back down', subtitle: 'From the agent desktop, back to the personal workspace you came from.'},
 ];
 
 export default class AgentWorkspacesPrefs extends ExtensionPreferences {
