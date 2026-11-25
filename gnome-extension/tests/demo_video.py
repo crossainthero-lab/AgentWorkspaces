@@ -63,11 +63,20 @@ def main():
         check("Desktop Cube, Tiling Shell and AgentWorkspaces are all ENABLED",
               all(s.ext_state(u) == 1 for u in (UUID, CUBE, "tilingshell@ferrarodomenico.com")))
         original = ["<Control><Alt>Down"]       # GNOME's value, as written by the harness (the extension already ran)
-        check("GNOME's Ctrl+Alt+Up/Up were taken over while enabled", s.state()["keys"]["switch-to-workspace-down"] == [])
+        check("GNOME's Ctrl+Alt+Up/Down were taken over while enabled", s.state()["keys"]["switch-to-workspace-down"] == [] and
+              s.state()["keys"]["switch-to-workspace-up"] == [])
 
         # ---- a real daemon, a real workspace with a real app, a scripted client
         d = Daemon(s).start()
         c = d.client()
+        # a second agent workspace (another agent), so the overview shows one compact entry per workspace
+        c.call("workspace.create", name="web", agent_kind="codex", width=1280, height=720)
+        lg = f"{s.base}/web.log"
+        open(lg, "w").close()
+        c.call("workspace.launch", workspace="web", argv=[sys.executable, PROBE_APP, "WEB", lg, "#2f855a"])
+        assert wait_for(lambda: os.path.getsize(lg) > 0, 20), "web probe did not start"
+        time.sleep(1.0)
+
         c.call("workspace.create", name="research", agent_kind="claude-code", width=1280, height=720, window_policy="floating")
         c.call("workspace.launch", workspace="research", argv=["gnome-calculator"])
         assert wait_for(lambda: c.call("window.list", workspace="research")["windows"], 25), "calculator did not appear"
@@ -78,7 +87,6 @@ def main():
         calc = next(w for w in c.call("window.list", workspace="research")["windows"] if "alculator" in w["title"])
         c.call("window.set_geometry", workspace="research", window=calc["id"], x=60, y=70, width=380, height=560, agent_kind="human")
         time.sleep(1.0)
-
         # ---- the personal desktop: ordinary windows
         s.launch(["gnome-text-editor", "--new-window"], "ed.log")
         assert wait_for(lambda: windows(s), 25), "personal editor did not appear"
@@ -120,7 +128,7 @@ def main():
         marks = {}
         s.move(1585, 440)                                     # park your own pointer at the right edge, out of the way
         agent = DemoAgent("research")
-        with record(s, out, fps=30) as rec:
+        with record(s, out, fps=60) as rec:
             time.sleep(2.0)                                   # personal desktop, ordinary windows
             marks["cube"] = time.monotonic() - rec._t0
             s.chord("Control_L", "Alt_L", "Right")            # cube
@@ -134,19 +142,20 @@ def main():
             marks["super"] = time.monotonic() - rec._t0
             s.chord("Super_L")                                # GNOME's Activities overview animates in
             check("Super opened the Activities overview", bool(wait_for(lambda: s.state()["overview"], 5, 0.1)))
-            time.sleep(2.2)
-            marks["down"] = time.monotonic() - rec._t0
+            time.sleep(3.2)                                   # the agent previews above the personal desktops, live
+            marks["overview_full"] = time.monotonic() - rec._t0 - 1.0
+            marks["enter"] = time.monotonic() - rec._t0
             s.chord("Control_L", "Alt_L", "Up")             # from inside the overview to the agent workspace
             check("Ctrl+Alt+Up from the overview reached the viewer with the overview closed",
                   bool(wait_for(lambda: s.state()["active"] != 0 and not s.state()["overview"], 5, 0.1)))
             time.sleep(9.5)                                   # the user watches the agent work
             n_in = (agent.clicks, agent.focus_calls)
-            marks["up"] = time.monotonic() - rec._t0
+            marks["leave"] = time.monotonic() - rec._t0
             s.chord("Control_L", "Alt_L", "Down")               # back
             time.sleep(2.5)
             check("Ctrl+Alt+Down returned to workspace 0 with the overview closed", s.state()["active"] == 0 and not s.state()["overview"])
             time.sleep(2.5)                                   # the agent keeps working while not visible
-            marks["down2"] = time.monotonic() - rec._t0
+            marks["enter2"] = time.monotonic() - rec._t0
             s.chord("Control_L", "Alt_L", "Up")             # second visit, from the normal desktop
             time.sleep(6.5)
             check("the agent kept working while the workspace was not visible", agent.clicks > n_in[0],
@@ -169,10 +178,12 @@ def main():
                                 "-vf", f"scale=400:-1,tile={cols}x{rows}", "-frames:v", "1", os.path.join(strips, f"strip-{name}.png")], check=True)
             off = 0.4                                        # the video starts ~0.4 s before the marks
             strip("cube", marks["cube"] + off, 0.06, 8)
-            strip("super", marks["super"] + off, 0.1, 8)
-            strip("down", marks["down"] + off - 0.05, 1 / 30, 20, cols=5)
-            strip("glide", marks["down"] + off + 2.0, 0.12, 8)
-            strip("up", marks["up"] + off - 0.05, 1 / 30, 20, cols=5)
+            strip("overview", marks["super"] + off, 0.12, 8)
+            strip("enter", marks["enter"] + off + 0.30, 1 / 60, 24, cols=6)
+            strip("glide", marks["enter"] + off + 2.0, 0.12, 8)
+            strip("leave", marks["leave"] + off - 0.02, 1 / 60, 20, cols=5)
+            strip("enter2", marks["enter2"] + off - 0.02, 1 / 60, 20, cols=5)
+            extract_frames(out, os.path.join(strips, "full"), [round(marks["overview_full"] + off, 2)])
         # ---- cube state is intact
         info = s.eval(f"""
           const ext = Main.extensionManager.lookup('{CUBE}');
