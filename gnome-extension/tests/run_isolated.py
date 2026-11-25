@@ -448,12 +448,15 @@ def main():
         daemon = FakeDaemon()
         daemon.start()
         hook.press("Control_L", "Alt_L", "Up")
-        stv = wait_for(lambda: (lambda s: s if any(w["app_id"] == "dev.agentworkspaces.Viewer" for w in s["windows"]) else None)(hook.state()), 20, 0.5)
+        stv = wait_for(lambda: (lambda s: s if any(w["app_id"] == "dev.agentworkspaces.Viewer" for w in s["windows"]) and s["active"] == s["agent"] and not s["sliding"] else None)(hook.state()), 20, 0.5)
         check("daemon asked: workspace.list + workspace.enter", daemon.calls[:2] == ["workspace.list", "workspace.enter"],
               str(daemon.calls))
         check("stand-in viewer window appeared on the agent workspace", stv is not None and any(
             w["app_id"] == "dev.agentworkspaces.Viewer" and w["ws"] == stv["agent"] == stv["active"] for w in stv["windows"]),
             json.dumps(stv["windows"]) if stv else "")
+        if not (stv is not None and any(w["app_id"] == "dev.agentworkspaces.Viewer" and w["ws"] == stv["agent"] == stv["active"] for w in stv["windows"])):
+            print("--- extension log:\n" + "\n".join(l for l in open(logf, errors="replace").read().splitlines() if "agent-workspaces" in l)[-2500:])
+            print("--- state:", json.dumps(hook.state()))
         settle(0.8)
         try:
             hook.call("ClearNotifications")

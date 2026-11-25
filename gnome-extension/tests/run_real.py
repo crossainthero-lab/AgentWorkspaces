@@ -366,7 +366,7 @@ def main():
         s.click(627, 879)                              # the editor's entry
         got = wait_for(lambda: next(w for w in c.call("window.list", workspace="desk")["windows"] if w["id"] == edit["id"])["focused"], 5)
         check("clicking the editor's taskbar entry focuses it in the workspace", bool(got))
-        s.click(465, 879)                              # the calculator's entry
+        s.click(512, 879)                              # the calculator's entry (the launcher is the first entry)
         got = wait_for(lambda: next(w for w in c.call("window.list", workspace="desk")["windows"] if w["id"] == calc["id"])["focused"], 5)
         check("clicking the calculator's taskbar entry focuses it", bool(got))
         # the agent focuses a window through the API: the taskbar follows (event driven)
@@ -374,12 +374,12 @@ def main():
         time.sleep(1.2)
         s.shot(os.path.join(media, "_tb.png"))
         tb = os.path.join(media, "_tb.png")
-        a, b = orange(tb, (520, 886, 740, 896)), orange(tb, (410, 886, 520, 896))
+        a, b = orange(tb, (572, 886, 790, 896)), orange(tb, (461, 886, 566, 896))
         check("agent focus via the API moves the taskbar highlight to the editor", a > 80 and b < 20, f"editor underline={a}, calculator={b}")
         ag.call("window.action", workspace="desk", window=calc["id"], action="focus")
         time.sleep(1.2)
         s.shot(tb)
-        a, b = orange(tb, (520, 886, 740, 896)), orange(tb, (410, 886, 520, 896))
+        a, b = orange(tb, (572, 886, 790, 896)), orange(tb, (461, 886, 566, 896))
         check("and back to the calculator", b > 60 and a < 20, f"editor={a}, calculator underline={b}")
         os.unlink(tb)
         # the agent's pointer: a real position from the daemon, drawn by the viewer in orange

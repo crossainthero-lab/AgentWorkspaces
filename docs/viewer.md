@@ -37,6 +37,16 @@ of your desktop; it needs no extension and uses the daemon API with the admin cr
   it works in every mode, moves no pointer and does not pause the agent. If the agent is typing into another window it
   will find the focus changed, so choose Paused first when that matters. The agent can focus windows through the same API
   and the bar follows.
+* **The launcher** (first entry of the taskbar, a small grid icon): for a person, so the agent desktop is useful when it is
+  empty. It lists the installed graphical apps (the desktop files, as `list_apps` of the MCP server does; a search field
+  filters, Enter starts the first match) and starts the one you pick INSIDE this workspace through `workspace.launch`, as you
+  (`agent_kind: "human"`: the activity record says "You", not the agent). Disabled while the workspace is not running. It
+  does not touch your own desktop and an agent does not use it (agents launch through the API).
+* **Starting and empty states** (environment mode): the viewer opens straight on the agent desktop. While the first
+  picture is not there yet it shows nothing but the taskbar; after about 1.2 s it says "Starting the agent desktop...".
+  A default desktop named after what it is (`agents`, no agent assigned) is shown under its own name in the taskbar. With no
+  workspace for 8 s it says "The agent desktop is not running" with a "Start it" button (`workspace.ensure_default`); with no
+  service, "The AgentWorkspaces service is not running and could not be started: <reason>" with "Start the service".
 * **Request bar** above the workspace: approvals (`approval.request`) with Deny / Approve, and human-only grants
   (`grant.request`: `browser_profile`, `host_clipboard`) with Deny / "Allow for 15 minutes". Grants are accepted by the
   daemon from the viewer because it is a human channel. To show another kind of request, register a renderer:

@@ -256,6 +256,21 @@ def main():
               t[1] > 0 and t[1] >= t[0] - 5 and t[1] - t[0] < 400, f"map {t[0]:.0f} ms, slide {t[1]:.0f} ms")
         a = snap(s)
         check("(E) no notification or popup", {k: a[k] for k in quiet} == {k: a1[k] for k in quiet} and not newer(a, a1), json.dumps(newer(a, a1)))
+        # the launcher in the agent taskbar: a person opens an app INSIDE this workspace
+        s.click(114, 880)
+        time.sleep(1.2)
+        s.shot(f"{s.base}/launcher-open.png")
+        s.type_text("calculator")
+        time.sleep(0.6)
+        s.key("Return")
+        got = wait_for(lambda: any("alculator" in (w["title"] or "") for w in call(base, "window.list", workspace="agents")["windows"]), 25, 0.3)
+        time.sleep(1.0)
+        info = call(base, "workspace.get", workspace="agents")
+        personal = [w["title"] for w in s.state()["windows"] if "alculator" in (w["title"] or "")]
+        s.shot(f"{s.base}/launcher-app.png")
+        check("(E) the launcher in the agent taskbar opens an app inside the `agents` workspace, as you (activity 'You'), and nothing on your own desktop",
+              bool(got) and not personal and (info.get("activity") or {}).get("last_action") == "human:launch",
+              f"windows={[w['title'] for w in info.get('windows', [])]} activity={(info.get('activity') or {}).get('last_action')} personal={personal}")
         s.chord("Control_L", "Alt_L", "Down")
         time.sleep(1.8)
 
