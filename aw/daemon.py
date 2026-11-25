@@ -80,7 +80,7 @@ class EventBus:
 
 
 # Methods whose successful use is written to the audit log (never with parameters).
-AUDITED = {"workspace.create", "workspace.destroy", "workspace.start", "workspace.stop", "workspace.pause",
+AUDITED = {"workspace.create", "workspace.ensure_default", "workspace.destroy", "workspace.start", "workspace.stop", "workspace.pause",
            "workspace.takeover", "workspace.resume", "workspace.configure", "workspace.assign", "workspace.rename",
            "workspace.enter", "workspace.launch", "app.kill", "approval.request", "approval.resolve",
            "credential.issue", "credential.rotate", "credential.revoke", "auth.exchange", "viewer.attach"}
@@ -90,6 +90,7 @@ MAX_LINE = 16 * 1024 * 1024
 class Daemon:
     def __init__(self):
         self.bus = EventBus()
+        self._ensure_lock = threading.Lock()
         self.mgr = Manager(emit=self.bus.emit)
         self.creds = self.mgr.creds
         self.audit = auth.AuditLog(paths.base_dir())
@@ -299,6 +300,27 @@ class Daemon:
             ws = m.create(p.get("name", ""), start=p.get("start", True), **kw)
             d = m.summary(ws)
             d["token_file"] = self.creds.token_path(ws.id)
+            return d
+        if method == "workspace.ensure_default":
+            # Idempotent: the default desktop for people ("agents", no agent assigned). Created on first use, started
+            # when stopped, otherwise returned as it is. Used by the shell extension when Ctrl+Alt+Up is pressed with
+            # nothing running, so the agent desktop is always there to go to.
+            name = p.get("name") or "agents"
+            if not isinstance(name, str):
+                raise ManagerError("E_BAD_NAME", "name must be a string")
+            with self._ensure_lock:
+                try:
+                    ws = m.get(name)
+                    created = False
+                except ManagerError as e:
+                    if e.code != "E_NOT_FOUND":
+                        raise
+                    ws = m.create(name, agent_kind="none", start=True)
+                    created = True
+                if ws.state != "running":
+                    ws = m.start(ws)
+                d = m.summary(ws)
+            d["created"] = created
             return d
         if method == "workspace.rename":
             return m.summary(m.rename(self._ws(p).id, p.get("name", "")))
