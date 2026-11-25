@@ -88,7 +88,7 @@ def main():
                   all(s.ext_state(u) == 1 for u in REALISTIC_COPY + REALISTIC_SYSTEM),
                   str({u.split('@')[0]: s.ext_state(u) for u in REALISTIC_COPY + REALISTIC_SYSTEM}))
         st = s.state()
-        check("GNOME's Ctrl+Alt+Up/Down were removed while the extension is enabled; Left/Right untouched",
+        check("GNOME's Ctrl+Alt+Down/Down were removed while the extension is enabled; Left/Right untouched",
               st["keys"]["switch-to-workspace-up"] == [] and st["keys"]["switch-to-workspace-down"] == [] and
               "<Control><Alt>Left" in st["keys"]["switch-to-workspace-left"] and
               "<Control><Alt>Right" in st["keys"]["switch-to-workspace-right"])
@@ -114,9 +114,9 @@ def main():
         shown = wait_for(lambda: s.state()["overview"], 5, 0.1)
         check("Super opens GNOME's Activities overview (real key event)", bool(shown))
         time.sleep(1.2)
-        s.chord("Control_L", "Alt_L", "Down")
+        s.chord("Control_L", "Alt_L", "Up")
         ok = wait_for(lambda: any(w["app_id"] == VIEWER for w in s.state()["windows"]), 20, 0.1)
-        check("Ctrl+Alt+Down from inside the overview: the daemon starts the real viewer on its own GNOME workspace", bool(ok))
+        check("Ctrl+Alt+Up from inside the overview: the daemon starts the real viewer on its own GNOME workspace", bool(ok))
         time.sleep(2.5)
         st = s.state()
         check("the overview was closed on the way (not left open on the agent workspace)", st["overview"] is False and
@@ -277,9 +277,9 @@ def main():
         check("the agent can still drive the workspace with no viewer attached", n4 > n3)
 
         # ---- re-enter: one viewer again, remembers what I was looking at
-        s.chord("Control_L", "Alt_L", "Up")
-        time.sleep(1.0)
         s.chord("Control_L", "Alt_L", "Down")
+        time.sleep(1.0)
+        s.chord("Control_L", "Alt_L", "Up")
         ok = wait_for(lambda: any(w["app_id"] == VIEWER for w in s.state()["windows"]), 20, 0.1)
         time.sleep(2.5)
         ws = {w["name"]: w for w in c.call("workspace.list")["workspaces"]}
@@ -319,19 +319,19 @@ def main():
         check("Close workspace (confirmed) destroys it", bool(got))
         time.sleep(1.5)
 
-        # ---- Super + Ctrl+Alt+Up from the agent workspace: back to the previous personal workspace, overview closed
+        # ---- Super + Ctrl+Alt+Down from the agent workspace: back to the previous personal workspace, overview closed
         s.chord("Super_L")
         wait_for(lambda: s.state()["overview"], 5, 0.1)
         time.sleep(1.0)
-        s.chord("Control_L", "Alt_L", "Up")
+        s.chord("Control_L", "Alt_L", "Down")
         wait_for(lambda: s.state()["overview"] is False and s.state()["active"] == personal_ws, 6, 0.1)
         time.sleep(1.2)
         st = s.state()
-        check("Ctrl+Alt+Up from inside the overview returns to the previous personal workspace with the overview closed",
+        check("Ctrl+Alt+Down from inside the overview returns to the previous personal workspace with the overview closed",
               st["active"] == personal_ws and st["overview"] is False, f"active={st['active']} overview={st['overview']}")
-        s.chord("Control_L", "Alt_L", "Down")
+        s.chord("Control_L", "Alt_L", "Up")
         time.sleep(2.0)
-        check("Ctrl+Alt+Down from the normal desktop enters again", s.state()["active"] != personal_ws)
+        check("Ctrl+Alt+Up from the normal desktop enters again", s.state()["active"] != personal_ws)
 
         # ---- the agent's world has its own taskbar and its own pointer marker
         c.call("workspace.create", name="desk", agent_kind="claude-code", width=1280, height=720, window_policy="floating")
@@ -444,12 +444,12 @@ def main():
                       globalThis.__restoreCube = () => { P._prepareWorkspaceSwitch = o; };
                       return 1""")
             calls = lambda: s.eval("return globalThis.__cubeCalls")  # noqa: E731
-            s.chord("Control_L", "Alt_L", "Up")
-            time.sleep(1.5)
             s.chord("Control_L", "Alt_L", "Down")
             time.sleep(1.5)
-            c_vertical = calls()
             s.chord("Control_L", "Alt_L", "Up")
+            time.sleep(1.5)
+            c_vertical = calls()
+            s.chord("Control_L", "Alt_L", "Down")
             time.sleep(1.5)
             s.chord("Control_L", "Alt_L", "Right")
             time.sleep(1.8)
@@ -474,7 +474,7 @@ def main():
         time.sleep(1.5)
         down = s.keyfile_get("org/gnome/desktop/wm/keybindings", "switch-to-workspace-down")
         up = s.keyfile_get("org/gnome/desktop/wm/keybindings", "switch-to-workspace-up")
-        check("disable restores GNOME's Ctrl+Alt+Up/Down exactly", down == ["<Control><Alt>Down"] and up == ["<Control><Alt>Up"],
+        check("disable restores GNOME's Ctrl+Alt+Down/Down exactly", down == ["<Control><Alt>Down"] and up == ["<Control><Alt>Up"],
               f"up={up} down={down}")
     finally:
         if agent:

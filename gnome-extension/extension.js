@@ -126,6 +126,7 @@ export default class AgentWorkspacesExtension extends Extension {
             Main.overview.disconnect(this._overviewId);
             this._overviewId = 0;
         }
+        this._unwatchAgent();
         this._strip?.destroy();
         this._strip = null;
         this._unpatchNeighbors();
@@ -407,8 +408,14 @@ export default class AgentWorkspacesExtension extends Extension {
             return;
         }
         if (this._agentWs && this._wsValid(this._agentWs) && active === this._agentWs) {
-            if (name)
-                this._requestViewer(name);        // already up there: just show that workspace
+            // Already up there. If the viewer window is gone (closed by hand) or a particular workspace is wanted, open it
+            // again; otherwise nothing to do.
+            if (name || this._viewerWindows().length === 0) {
+                this._gateEnter().then(ok => {
+                    if (ok)
+                        this._requestViewer(name);
+                }).catch(e => log(`enter: ${e}`));
+            }
             return;
         }
         // Nothing happens (no window, no slide, no message) unless at least one workspace is running: with no agent
@@ -491,7 +498,40 @@ export default class AgentWorkspacesExtension extends Extension {
         }
     }
 
+    // When the viewer window is closed while you are up on the agent desktop, you are left on an empty desktop: go back down.
+    _watchAgent(ws) {
+        if (this._watchedWs === ws)
+            return;
+        this._unwatchAgent();
+        this._watchedWs = ws;
+        this._watchId = ws.connect('window-removed', () => {
+            GLib.timeout_add(GLib.PRIORITY_DEFAULT, 400, () => {
+                if (this._agentWs && this._wsValid(this._agentWs) && this._wm().get_active_workspace() === this._agentWs &&
+                    this._viewerWindows().length === 0 && !this._slide && !this._pendingViewer)
+                    this._afterOverview(() => this.leave());
+                return GLib.SOURCE_REMOVE;
+            });
+        });
+    }
+
+    _unwatchAgent() {
+        if (this._watchedWs && this._watchId) {
+            try {
+                this._watchedWs.disconnect(this._watchId);
+            } catch (e) { /* workspace already gone */ }
+        }
+        this._watchedWs = null;
+        this._watchId = 0;
+    }
+
     _ensureAgentWorkspace(active) {
+        const ws = this._ensureAgentWorkspace0(active);
+        if (ws)
+            this._watchAgent(ws);
+        return ws;
+    }
+
+    _ensureAgentWorkspace0(active) {
         if (this._agentWs && this._wsValid(this._agentWs))
             return this._agentWs;
         this._agentWs = null;
