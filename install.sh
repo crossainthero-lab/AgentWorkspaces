@@ -60,8 +60,10 @@ if [ "$ENABLE" = 1 ]; then
   run systemctl --user enable --now agent-workspaces.service
 else
   run systemctl --user daemon-reload || true
-  echo "  daemon unit installed but not enabled (the CLI starts the daemon on demand)."
-  echo "  to run it as a service:  systemctl --user enable --now agent-workspaces.service"
+  echo "  daemon unit installed but not enabled (the CLI and agents start the daemon on demand, and it exits when idle)."
+  echo "  to keep it running as a service (recommended with the GNOME extension and the viewer):"
+  echo "      ./install.sh --enable-service        or        systemctl --user enable --now agent-workspaces.service"
+  echo "  undo: uninstall.sh, or systemctl --user disable --now agent-workspaces.service"
 fi
 
 cat <<MSG
