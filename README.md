@@ -37,7 +37,7 @@ agent-workspaces enter research
 
 The service (daemon) starts on demand when an agent or the CLI needs it and exits when idle. To keep it running, which the GNOME extension and the viewer like: `./install.sh --enable-service` (reverse: `./uninstall.sh`, or `systemctl --user disable --now agent-workspaces.service`).
 
-Optional GNOME Shell extension (Ctrl+Alt+Up goes up to the AgentWorkspaces desktop, Ctrl+Alt+Down comes back; silent when no agent workspace is running; while enabled it rewrites those two shortcuts and restores them when disabled):
+Optional GNOME Shell extension (Ctrl+Alt+Up goes up to the AgentWorkspaces desktop, Ctrl+Alt+Down comes back; with nothing running, the first Up creates a default `agents` desktop; no popups; while enabled it rewrites those two shortcuts and restores them when disabled):
 
 ```bash
 gnome-extension/install.sh      # copies files and compiles the schema, enables nothing
