@@ -50,6 +50,8 @@ export class OverviewStrip {
             Main.overview.connect('showing', () => this._onShowing()),
             Main.overview.connect('hidden', () => this._onHidden()),
         ];
+        if (Main.overview.visible)
+            this._onShowing();       // created while the overview is already opening (first time it opens)
     }
 
     destroy() {
@@ -89,6 +91,9 @@ export class OverviewStrip {
     }
 
     async _onShowing() {
+        // The shell opens in the overview at login: do nothing until it has finished starting up.
+        if (Main.layoutManager._startingUp)
+            return;
         this._open = true;
         const gen = ++this._gen;
         this._hideAgentWorkspace();

@@ -102,7 +102,11 @@ export default class AgentWorkspacesExtension extends Extension {
         this._syncTestHooks();
         this._exportPublic(true);
         this._patchNeighbors();
-        this._strip = new OverviewStrip(this);
+        // The overview strip is built only when the overview first opens: nothing exists at login or enable time.
+        this._overviewId = Main.overview.connect('showing', () => {
+            if (!this._strip && this._settings && !Main.layoutManager._startingUp)
+                this._strip = new OverviewStrip(this);
+        });
         // Locking the screen ends whatever is animating or queued: nothing may fire behind the lock screen.
         this._sessionId = Main.sessionMode.connect('updated', () => {
             if (Main.sessionMode.isLocked) {
@@ -117,6 +121,10 @@ export default class AgentWorkspacesExtension extends Extension {
         if (this._sessionId) {
             Main.sessionMode.disconnect(this._sessionId);
             this._sessionId = 0;
+        }
+        if (this._overviewId) {
+            Main.overview.disconnect(this._overviewId);
+            this._overviewId = 0;
         }
         this._strip?.destroy();
         this._strip = null;
