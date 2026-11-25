@@ -3,9 +3,11 @@
 // The agent desktop is stacked ABOVE your personal ones, so in the overview it sits above them too: a strip at the very top
 // with one small live preview per RUNNING agent workspace (nothing at all when there is none). Click one to go up to it.
 //
-// Built as its own widget, not by patching GNOME's workspace thumbnails: it is inserted into the overview's own vertical box
-// layout above GNOME's controls (search entry, thumbnails, workspaces, dash), so it works the same with Just Perfection,
-// Blur my Shell, Dash to Dock and Tiling Shell, which change what is inside the controls but not this box.
+// Built as its own widget, not by patching GNOME's workspace thumbnails or its controls layout: the strip is an overlay at
+// the top of the overview, and the whole of GNOME's controls (search entry, thumbnails, workspaces, dash) is moved down and
+// scaled uniformly to make room (the controls lay themselves out against the monitor, so shrinking their box is not an
+// option). It therefore works the same with Just Perfection, Blur my Shell, Dash to Dock and Tiling Shell, which change
+// what is inside the controls but not how they are placed.
 //
 // Cost: while the overview is closed, nothing runs. When it opens, one `workspace.list` call (only if the service is
 // already up: this never starts it) and then one low-resolution screenshot per tile every 1.5 s, one at a time, until it
@@ -24,11 +26,13 @@ const REFRESH_MS = 1500;
 const PREVIEW_W = 144;
 const PREVIEW_H = 90;
 const TILES_H = 124;           // preview + caption + padding
+const GAP = 12;                // between the tiles and GNOME's search entry
 
 export class OverviewStrip {
     constructor(ext) {
         this._ext = ext;
         this._tiles = new Map();          // workspace id -> {button, preview, name}
+        this._hidden = [];                // undo functions for what was hidden in the overview
         this._open = false;
         this._gen = 0;                    // invalidates in-flight requests when the overview closes
         this._timer = 0;
@@ -40,8 +44,7 @@ export class OverviewStrip {
         this.actor.set_height(0);
         this._row = new St.BoxLayout({style_class: 'aw-ov-row', x_align: Clutter.ActorAlign.CENTER, x_expand: true});
         this.actor.add_child(this._row);
-        // First child of the overview's vertical box: above GNOME's controls.
-        Main.overview._overview.insert_child_at_index(this.actor, 0);
+        Main.layoutManager.overviewGroup.add_child(this.actor);
 
         this._ids = [
             Main.overview.connect('showing', () => this._onShowing()),
@@ -58,9 +61,37 @@ export class OverviewStrip {
 
     // ---- open / close --------------------------------------------------------------------------------------
 
+    // The agent desktop is a GNOME workspace too (it holds the viewer). In the overview it is already shown above, so its
+    // own thumbnail and its peek at the edge of the workspace view are hidden: one place for it, not two.
+    _hideAgentWorkspace() {
+        const agent = this._ext._agentWs;
+        if (!agent || !this._ext._wsValid(agent))
+            return;
+        try {
+            const c = Main.overview._overview.controls;
+            for (const t of c._thumbnailsBox?._thumbnails ?? []) {
+                if (t.metaWorkspace === agent) {
+                    t.hide();
+                    this._hidden.push(() => t.show());
+                }
+            }
+            for (const v of c._workspacesDisplay?._workspacesViews ?? []) {
+                for (const w of v._workspaces ?? []) {
+                    if (w.metaWorkspace === agent) {
+                        w.opacity = 0;
+                        this._hidden.push(() => (w.opacity = 255));
+                    }
+                }
+            }
+        } catch (e) {
+            console.log(`[agent-workspaces] overview: cannot hide the agent workspace: ${e}`);
+        }
+    }
+
     async _onShowing() {
         this._open = true;
         const gen = ++this._gen;
+        this._hideAgentWorkspace();
         if (!this._ext._daemonAlive())
             return;                        // no service: nothing extra, and the overview must not start it
         let list;
@@ -75,21 +106,33 @@ export class OverviewStrip {
         if (!running.length)
             return;                        // nothing running: nothing in the overview
         this._build(running);
-        // The top bar is drawn over the overview: leave its height free above the tiles, and take the same amount
-        // back from the controls below, which already keep clear of the bar themselves.
+        // The top bar is drawn over the overview: leave its height free above the tiles.
         const bar = Main.panel.height;
+        const mon = Main.layoutManager.primaryMonitor;
         this._row.style = `padding-top: ${bar + 6}px;`;
+        this.actor.set_position(mon.x, mon.y);
+        this.actor.set_width(mon.width);
         this._controls = Main.overview._overview.controls;
-        this._controls.set_margin_top(-bar);
+        this._controls.set_pivot_point(0.5, 0);
+        const scale = (mon.height - TILES_H - GAP) / mon.height;
         this.actor.visible = true;
         this.actor.remove_all_transitions();
-        this.actor.ease({height: bar + TILES_H, duration: 180, mode: Clutter.AnimationMode.EASE_OUT_CUBIC});
+        this.actor.opacity = 0;
+        this.actor.set_height(bar + TILES_H);
+        this.actor.ease({opacity: 255, duration: 180, mode: Clutter.AnimationMode.EASE_OUT_CUBIC});
+        this._controls.ease({scale_x: scale, scale_y: scale, translation_y: TILES_H + GAP, duration: 180,
+            mode: Clutter.AnimationMode.EASE_OUT_CUBIC});
         this._refresh(gen);
     }
 
     _onHidden() {
         this._open = false;
         this._gen++;
+        for (const undo of this._hidden.splice(0)) {
+            try {
+                undo();
+            } catch (e) { /* the actor is gone */ }
+        }
         if (this._timer) {
             GLib.source_remove(this._timer);
             this._timer = 0;
@@ -97,8 +140,12 @@ export class OverviewStrip {
         this.actor.remove_all_transitions();
         this.actor.visible = false;
         this.actor.set_height(0);
-        this._controls?.set_margin_top(0);
-        this._controls = null;
+        if (this._controls) {
+            this._controls.remove_all_transitions();
+            this._controls.set_scale(1, 1);
+            this._controls.translation_y = 0;
+            this._controls = null;
+        }
         this._row.destroy_all_children();
         this._tiles.clear();
     }

@@ -47,6 +47,39 @@ REALISTIC_COPY = ["desktop-cube@schneegans.github.com", "tilingshell@ferrarodome
 REALISTIC_SYSTEM = ["ubuntu-dock@ubuntu.com"]
 
 
+FORBIDDEN_COMMANDS = {"loginctl", "gnome-session-quit", "gnome-session", "gnome-screensaver-command", "dbus-send", "gdbus",
+                      "busctl", "systemctl"}
+
+
+def real_bus_address():
+    return f"unix:path=/run/user/{os.getuid()}/bus"
+
+
+def assert_private_bus(addr, session_base=None):
+    """SAFETY: a tool that talks D-Bus and finds no (or the wrong) address silently falls back to the REAL session bus,
+    where org.gnome.SessionManager, org.gnome.ScreenSaver or login1 would act on the person's real desktop. Every
+    subprocess of the isolated session must be given the PRIVATE address explicitly, and this aborts when it is missing,
+    empty, the real bus, or not inside this session's private directory."""
+    if not addr or not addr.startswith("unix:path="):
+        raise SystemExit(f"ABORT: DBUS_SESSION_BUS_ADDRESS is missing or not a private unix path: {addr!r}")
+    path = addr[len("unix:path="):].split(",")[0]
+    real = real_bus_address()
+    if addr == real or path == real[len("unix:path="):] or os.path.realpath(path) == os.path.realpath(real[len("unix:path="):]):
+        raise SystemExit(f"ABORT: D-Bus address {addr!r} is the REAL session bus")
+    if session_base and not os.path.realpath(path).startswith(os.path.realpath(session_base) + os.sep):
+        raise SystemExit(f"ABORT: D-Bus address {addr!r} is outside the isolated session {session_base!r}")
+
+
+def guard_command(argv, env):
+    """Used for every program the harness starts: private bus in its environment, no session/lock/login tools at all."""
+    assert_private_bus(env.get("DBUS_SESSION_BUS_ADDRESS"))
+    if os.path.basename(argv[0]) in FORBIDDEN_COMMANDS:
+        raise SystemExit(f"ABORT: {argv[0]} is never run by the isolated tests")
+    for k in ("WAYLAND_DISPLAY", "DISPLAY"):
+        if k in env and not (k == "WAYLAND_DISPLAY" and env[k] == DISPLAY_NAME):
+            raise SystemExit(f"ABORT: {k} in the environment of {argv[0]} is not the isolated shell's")
+
+
 def _b(s):
     return s.encode() if isinstance(s, str) else s
 
@@ -101,6 +134,8 @@ class Session:
         }
         for k in ("WAYLAND_DISPLAY", "DISPLAY", "XAUTHORITY"):
             assert k not in self.env
+        assert_private_bus(self.env["DBUS_SESSION_BUS_ADDRESS"], self.base)
+        assert_private_bus(self.env["DBUS_SYSTEM_BUS_ADDRESS"], self.base)
         self._conn = None
         self._probe = None
         self.shell = None
@@ -145,6 +180,7 @@ class Session:
 </busconfig>""")
 
     def _spawn(self, argv, env, logfile):
+        guard_command(argv, env) if "DBUS_SESSION_BUS_ADDRESS" in env else None
         p = subprocess.Popen(argv, env=env, stdin=subprocess.DEVNULL, stdout=open(logfile, "ab"),
                              stderr=subprocess.STDOUT, start_new_session=True)
         self.procs.append(p)
@@ -152,6 +188,7 @@ class Session:
 
     def start(self, timeout=45):
         self._write_config()
+        assert_private_bus(self.env["DBUS_SESSION_BUS_ADDRESS"], self.base)
         for n in ("system", "session"):
             self._spawn(["dbus-daemon", f"--config-file={self.bus}/{n}.conf", "--nofork", "--nopidfile"], self.env,
                         f"{self.base}/{n}-bus.log")
@@ -210,16 +247,19 @@ class Session:
             pass
 
     def mine(self):
-        """pids whose environment carries our private XDG_RUNTIME_DIR (exact match of that entry)."""
-        needle = _b(f"XDG_RUNTIME_DIR={self.rt}\0")
+        """pids whose XDG_RUNTIME_DIR is this session's private one or lies inside its private directory tree (the
+        workspaces' own runtime dirs): an exact path match on that environment entry, never a name search."""
         out = []
+        prefix = _b(f"XDG_RUNTIME_DIR={self.base}/")
+        exact = _b(f"XDG_RUNTIME_DIR={self.rt}\0")
         for p in glob.glob("/proc/[0-9]*/environ"):
             try:
                 with open(p, "rb") as f:
-                    if needle in f.read():
-                        out.append(int(p.split("/")[2]))
+                    env = f.read()
             except OSError:
                 continue
+            if exact in env or any(e.startswith(prefix) for e in env.split(b"\0")):
+                out.append(int(p.split("/")[2]))
         return [p for p in out if p != os.getpid()]
 
     def _reap(self):
@@ -266,10 +306,13 @@ class Session:
         assert d and self.rt.startswith("/run/user/") and "awx-" in self.rt, "isolated shell display missing"
         e = dict(self.env, WAYLAND_DISPLAY=d, GDK_BACKEND="wayland", GSETTINGS_BACKEND="memory")
         e.update(extra)
+        assert_private_bus(e.get("DBUS_SESSION_BUS_ADDRESS"), self.base)
         return e
 
     def launch(self, argv, logname="app.log", **extra):
-        p = subprocess.Popen(argv, env=self.app_env(**extra), stdin=subprocess.DEVNULL,
+        env = self.app_env(**extra)
+        guard_command(argv, env)
+        p = subprocess.Popen(argv, env=env, stdin=subprocess.DEVNULL,
                              stdout=open(f"{self.base}/{logname}", "ab"), stderr=subprocess.STDOUT, start_new_session=True)
         self.apps.append(p)
         return p
