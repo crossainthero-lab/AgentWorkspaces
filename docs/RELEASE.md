@@ -58,7 +58,7 @@ your browser profiles, any other Claude Code or Hermes setting, hook, plugin or 
 
 ## Idle cost
 
-No service is enabled. The MCP server starts when the agent starts it and does nothing until a graphical tool is called. On
+No service is enabled by default (`./install.sh --enable-service` enables and starts the user unit; `./uninstall.sh` disables and removes it). The GNOME extension and the viewer start the service themselves when they need it (the unit first, else the daemon, bounded waits), and Ctrl+Alt+Up does nothing at all while no workspace is running, so a service that is not enabled costs nothing visible; enable it if you want the Super overview to show agent desktops without an agent having started the daemon. The MCP server starts when the agent starts it and does nothing until a graphical tool is called. On
 the first call it starts the daemon (about 15 MiB) which, when it was started on demand, **exits by itself 30 minutes after the
 last workspace is gone** (`AW_IDLE_EXIT_SECONDS`). `agent-workspaces stop-daemon` stops it at once. A workspace itself costs
 about 210 MiB with one app (more with a browser) and about 1.6 % of a core with Chrome open; it is destroyed with

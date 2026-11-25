@@ -84,9 +84,7 @@ The test harness (`tests/harness.py`) provides **HostSim**, the stand-in desktop
 `python3 -I gnome-extension/tests/run_real.py [--plain] [--media DIR]`: 53 checks (50 with `--plain`) with the real daemon, real workspaces, the real
 viewer and the developer's extension set in a private headless GNOME Shell; `demo_video.py` records the demo video;
 `measure_gs.py` prints the numbers in [measurements.md](measurements.md). Details: [gnome-extension.md](gnome-extension.md).
-`python3 -I gnome-extension/tests/run_cube.py --personal N` (N = 2 and 4): 21 checks of the cube-native Ctrl+Alt+Down/Up turn with Desktop Cube, Tiling Shell and the other extensions of the developer's session (copied; their settings are read once with `dconf dump` into a private keyfile), full-screen environment mode and what the turn leaves behind.
-They use the user's systemd manager only to create workspace scopes (as the integration tests do), nothing on the real
-screen, no write to the real dconf (the user's extension settings are only *read* with `dconf dump`).
+`python3 -I gnome-extension/tests/run_cube.py --personal N` (N = 2 and 4): 25 checks each of the stacked agent desktop with Desktop Cube enabled (slide both ways, overview strip, rapid keys, Left/Right with the cube, focus, bar and dock). `run_silent.py`: 12 checks that nothing is visible without a running workspace and that the service is started and re-found. `run_isolated.py`: 27 checks with stand-ins. All use a private D-Bus; the harness aborts when the address is missing, empty or the real one.
 
 ## GNOME extension tests (earlier, with stand-ins)
 
