@@ -43,6 +43,10 @@ def check(name, ok, detail=""):
     print(f"{'PASS' if ok else 'FAIL'}  {name}" + (f"   [{detail}]" if detail else ""), flush=True)
 
 
+sys.path.insert(0, HERE)
+from gnome_session import assert_private_bus  # noqa: E402
+
+
 def private_env(extra=None):
     e = {"PATH": "/usr/bin:/bin", "HOME": HOME, "XDG_CONFIG_HOME": CFG, "XDG_CACHE_HOME": CACHE,
          "XDG_DATA_HOME": DATA, "XDG_RUNTIME_DIR": RT, "XDG_DATA_DIRS": "/usr/share",
@@ -51,6 +55,8 @@ def private_env(extra=None):
          "DBUS_SYSTEM_BUS_ADDRESS": f"unix:path={BUS}/system.sock", "GIO_USE_VFS": "local",
          "NO_AT_BRIDGE": "1", "XDG_SESSION_TYPE": "wayland", "XDG_CURRENT_DESKTOP": "GNOME"}
     e.update(extra or {})
+    assert_private_bus(e["DBUS_SESSION_BUS_ADDRESS"], BASE)      # SAFETY: never the real bus
+    assert_private_bus(e["DBUS_SYSTEM_BUS_ADDRESS"], BASE)
     return e
 
 
@@ -258,6 +264,7 @@ def main_coexist():
         except GLib.Error:
             return None
     check("shell starts with desktop-cube + tilingshell + this extension", wait_for(ready, 40, 0.5) is not None)
+    FakeDaemon().start()      # the stand-in service lists one running workspace, so going up is allowed
     settle(2.5)
     hook.call("HideOverview")
     settle(1)
@@ -272,16 +279,16 @@ def main_coexist():
     wait_for(lambda: any(w["app_id"] == "dev.agentworkspaces.TestPersonal" for w in hook.state()["windows"]), 20, 0.5)
     settle(0.5)
     s0 = hook.state()["active"]
-    hook.press("Control_L", "Alt_L", "Down")
-    settle(1.4)
-    st = hook.state()
-    smp = st["slide_samples"]
-    check("enter works next to desktop-cube/tilingshell and slides vertically (not the cube)",
-          st["active"] == s0 + 1 and len(smp) >= 3 and smp[0] == 720 and smp[-1] == 0, f"active={st['active']} first={smp[:1]}")
     hook.press("Control_L", "Alt_L", "Up")
     settle(1.4)
     st = hook.state()
-    check("return works next to them", st["active"] == s0 and st["slide_samples"][:1] == [-720])
+    smp = st["slide_samples"]
+    check("Ctrl+Alt+Up goes up next to desktop-cube/tilingshell and slides vertically, stacked above (not the cube)",
+          st["active"] == s0 + 1 and len(smp) >= 3 and smp[0] == -720 and smp[-1] == 0, f"active={st['active']} first={smp[:1]}")
+    hook.press("Control_L", "Alt_L", "Down")
+    settle(1.4)
+    st = hook.state()
+    check("return works next to them", st["active"] == s0 and st["slide_samples"][:1] == [720])
     hook.press("Control_L", "Alt_L", "Right")
     settle(1.5)
     check("Ctrl+Alt+Right still switches (desktop-cube's own animation)", hook.state()["active"] == s0 + 1)
@@ -316,6 +323,7 @@ def main_prefs(out):
         except GLib.Error:
             return None
     check("shell started", wait_for(ready, 40, 0.5) is not None)
+    FakeDaemon().start()
     settle(2)
     hook.call("HideOverview")
     hook.call("ExtOpenPrefs") if False else None
@@ -333,18 +341,18 @@ def main_prefs(out):
     hook.call("SetShortcut", ("enter-shortcut", ["<Control><Alt>e"]), "(sas)")
     settle(1.2)
     st = hook.state()
-    check("changing the enter shortcut re-binds live and GNOME's Ctrl+Alt+Down is restored (no longer ours)",
-          st["keys"]["switch-to-workspace-down"] == ["<Control><Alt>Down"] and
-          st["keys"]["switch-to-workspace-up"] == [], str(st["keys"]))
+    check("changing the enter shortcut re-binds live and GNOME's Ctrl+Alt+Up is restored (no longer ours)",
+          st["keys"]["switch-to-workspace-up"] == ["<Control><Alt>Up"] and
+          st["keys"]["switch-to-workspace-down"] == [], str(st["keys"]))
     s0 = st["active"]
     hook.press("Control_L", "Alt_L", "e")
     settle(1.4)
     check("the new accelerator Ctrl+Alt+E enters the agent workspace", hook.state()["active"] != s0)
-    hook.press("Control_L", "Alt_L", "Up")
+    hook.press("Control_L", "Alt_L", "Down")
     settle(1.2)
-    hook.call("SetShortcut", ("enter-shortcut", ["<Control><Alt>Down"]), "(sas)")
+    hook.call("SetShortcut", ("enter-shortcut", ["<Control><Alt>Up"]), "(sas)")
     settle(1.2)
-    check("setting it back takes Ctrl+Alt+Down over again", hook.state()["keys"]["switch-to-workspace-down"] == [])
+    check("setting it back takes Ctrl+Alt+Up over again", hook.state()["keys"]["switch-to-workspace-up"] == [])
     return 0
 
 
@@ -420,35 +428,25 @@ def main():
               bk.get("switch-to-workspace-down", {}).get("before") == original["switch-to-workspace-down"])
         check("animations enabled in isolated shell", st["animations"] is True)
 
-        # ---- 1) enter with NO daemon: degrades gracefully, still switches
+        # ---- 1) NO daemon (and no workspaces): Ctrl+Alt+Up is a silent no-op: no switch, no window, no message, no animation
         s0 = st["active"]
-        hook.press("Control_L", "Alt_L", "Down")
-        settle(1.2)
-        st1 = hook.state()
-        check("Ctrl+Alt+Down (real key events) moves to a new dedicated workspace with daemon absent",
-              st1["active"] != s0 and st1["agent"] == st1["active"] and shell.poll() is None,
-              f"before={s0} after={st1['active']} agent={st1['agent']} n={st1['n_workspaces']}")
-        samples = st1["slide_samples"]
-        H = 720
-        down_ok = len(samples) >= 3 and max(samples) >= H * 0.5 and samples[-1] == 0 and all(
-            samples[i] >= samples[i + 1] for i in range(len(samples) - 1))
-        check("transition is a vertical slide (window group translation-y runs H -> 0, monotone)", down_ok,
-              f"{len(samples)} frames, first={samples[:1]} last={samples[-1:]}")
+        n_actors, n_ws = st["window_actors"], st["n_workspaces"]
         hook.press("Control_L", "Alt_L", "Up")
-        settle(1.2)
-        st2 = hook.state()
-        check("Ctrl+Alt+Up returns to the previous personal workspace", st2["active"] == s0, f"active={st2['active']}")
-        up_samples = st2["slide_samples"]
-        check("return slides the other way (translation-y runs -H -> 0)",
-              len(up_samples) >= 3 and min(up_samples) <= -H * 0.5 and up_samples[-1] == 0, f"first={up_samples[:1]}")
+        settle(2.0)
+        st1 = hook.state()
+        check("no daemon: Ctrl+Alt+Up does nothing visible (same workspace, no new window or workspace, no slide, no notification)",
+              st1["active"] == s0 and st1["window_actors"] == n_actors and st1["n_workspaces"] == n_ws and not st1["sliding"] and
+              st1["slide_samples"] == [] and st1["notifications"] == st["notifications"] and st1["wg"] == [0, 0, 0] and shell.poll() is None,
+              json.dumps({k: st1[k] for k in ("active", "window_actors", "n_workspaces", "sliding", "notifications", "wg")}))
         log = open(logf, errors="replace").read()
+        check("... and the reason is only in the shell log", "enter ignored" in log)
         check("no JS error from the extension in shell log", "JS ERROR" not in log or "agent-workspaces" not in
               "\n".join(l for l in log.splitlines() if "JS ERROR" in l))
 
         # ---- 2) with daemon: viewer is requested and opened on the agent workspace
         daemon = FakeDaemon()
         daemon.start()
-        hook.press("Control_L", "Alt_L", "Down")
+        hook.press("Control_L", "Alt_L", "Up")
         stv = wait_for(lambda: (lambda s: s if any(w["app_id"] == "dev.agentworkspaces.Viewer" for w in s["windows"]) else None)(hook.state()), 20, 0.5)
         check("daemon asked: workspace.list + workspace.enter", daemon.calls[:2] == ["workspace.list", "workspace.enter"],
               str(daemon.calls))
@@ -466,22 +464,22 @@ def main():
         agent_idx = hook.state()["agent"]
         origin_idx = hook.state()["origin"]
         check("origin workspace recorded", origin_idx == s0, f"origin={origin_idx}")
-        hook.press("Control_L", "Alt_L", "Down")
-        settle(0.8)
-        check("Ctrl+Alt+Down while already in agent workspace is a no-op", hook.state()["active"] == agent_idx)
         hook.press("Control_L", "Alt_L", "Up")
+        settle(0.8)
+        check("Ctrl+Alt+Up while already on the agent desktop is a no-op", hook.state()["active"] == agent_idx)
+        hook.press("Control_L", "Alt_L", "Down")
         settle(1.2)
         check("return keeps the viewer window on the agent workspace",
               hook.state()["active"] == s0 and any(w["app_id"] == "dev.agentworkspaces.Viewer" and w["ws"] == agent_idx
                                                    for w in hook.state()["windows"]))
         daemon.calls.clear()
-        hook.press("Control_L", "Alt_L", "Down")
+        hook.press("Control_L", "Alt_L", "Up")
         settle(1.2)
         s3 = hook.state()
         check("re-enter reuses the existing viewer workspace without a second viewer",
               s3["active"] == agent_idx and "workspace.enter" not in daemon.calls and
               sum(1 for w in s3["windows"] if w["app_id"] == "dev.agentworkspaces.Viewer") == 1, str(daemon.calls))
-        hook.press("Control_L", "Alt_L", "Up")
+        hook.press("Control_L", "Alt_L", "Down")
         settle(1.0)
 
         # ---- 3) horizontal navigation untouched
@@ -491,11 +489,11 @@ def main():
         hook.press("Control_L", "Alt_L", "Left")
         settle(1.0)
         l1 = hook.state()["active"]
-        check("Ctrl+Alt+Right/Left still move between workspaces (GNOME default behaviour)",
-              r1 == s0 + 1 and l1 == s0, f"right->{r1} left->{l1}")
-        hook.press("Control_L", "Alt_L", "Up")
+        check("Ctrl+Alt+Right/Left walk the personal workspaces only: Right skips the agent desktop above and reaches the trailing empty workspace",
+              r1 == s0 + 2 and l1 == s0, f"right->{r1} left->{l1} (agent desktop is workspace {agent_idx})")
+        hook.press("Control_L", "Alt_L", "Down")
         settle(0.6)
-        check("Ctrl+Alt+Up on a personal workspace is passed through (no-op in horizontal layout)", hook.state()["active"] == s0)
+        check("Ctrl+Alt+Down on a personal workspace is passed through (no-op in horizontal layout)", hook.state()["active"] == s0)
 
         # ---- 4) disable restores bindings; enable takes over again
         before_disable = hook.state()

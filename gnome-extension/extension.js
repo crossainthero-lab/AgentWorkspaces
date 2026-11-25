@@ -987,6 +987,9 @@ export default class AgentWorkspacesExtension extends Extension {
             conflicts: this._settings.get_strv('conflicts'), slide_samples: this._lastSamples,
             sliding: !!this._slide, daemon_socket: this._socketPath(),
             animations: St.Settings.get().enable_animations, pointer: global.get_pointer().slice(0, 2),
+            notifications: Main.messageTray.getSources().map(x => `${x.title}:${x.notifications?.length ?? 0}`),
+            window_actors: global.get_window_actors().length, overview: Main.overview.visible,
+            wg: [global.window_group.translation_y, global.window_group.rotation_angle_x, global.window_group.translation_z],
         });
     }
 
