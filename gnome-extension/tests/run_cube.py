@@ -93,7 +93,7 @@ def main():
         time.sleep(1.0)
 
         # ---- cold: Ctrl+Alt+Up starts the viewer on the agent desktop
-        s.chord("Control_L", "Alt_L", "Up")
+        s.chord("Control_L", "Shift_L", "Alt_L", "Up")
         ok = wait_for(lambda: any(w["app_id"] == VIEWER for w in s.state()["windows"]), 20, 0.1)
         time.sleep(3.0)
         st = s.state()
@@ -119,18 +119,18 @@ def main():
         hidden1 = dark(shotp, (1100, 8, 1400, 40))
         check(f"{T} environment: header hidden at rest, appears on mouse movement, hides again",
               hidden0 < 400 and shown > 5000 and hidden1 < 400, f"dark px at rest={hidden0}, after move={shown}, after idle={hidden1}")
-        s.chord("Control_L", "Alt_L", "Down")
+        s.chord("Control_L", "Shift_L", "Alt_L", "Down")
         time.sleep(1.5)
         check(f"{T} Ctrl+Alt+Down returns to the previous personal workspace", s.state()["active"] == 0)
         time.sleep(1.0)
-        s.chord("Control_L", "Alt_L", "Up")        # one more full cycle so dock items etc. exist before we count actors
+        s.chord("Control_L", "Shift_L", "Alt_L", "Up")        # one more full cycle so dock items etc. exist before we count actors
         time.sleep(2.0)
-        s.chord("Control_L", "Alt_L", "Down")
+        s.chord("Control_L", "Shift_L", "Alt_L", "Down")
         time.sleep(2.0)
         base = leftovers(s)
 
         # ---- the stacked slide, with Desktop Cube on
-        s.chord("Control_L", "Alt_L", "Up")
+        s.chord("Control_L", "Shift_L", "Alt_L", "Up")
         time.sleep(1.5)
         samples = ext(s, "e._lastSamples")
         check(f"{T} going up is a vertical slide (kind=slide, never a cube): the agent desktop comes down into place from above "
@@ -140,7 +140,7 @@ def main():
         check(f"{T} nothing left behind after going up: window group untransformed, no overlay actor, nothing in flight",
               a["rx"] == 0 and a["ry"] == 0 and a["tz"] == 0 and a["ty"] == 0 and a["pz"] == 0 and a["ui"] == base["ui"] and
               not a["switchData"], json.dumps(a))
-        s.chord("Control_L", "Alt_L", "Down")
+        s.chord("Control_L", "Shift_L", "Alt_L", "Down")
         time.sleep(1.5)
         samples = ext(s, "e._lastSamples")
         check(f"{T} coming down slides the other way (+{H} to 0) onto the previous personal workspace",
@@ -154,9 +154,9 @@ def main():
         s.eval("""const a = global.get_window_actors().map(x => x.meta_window).find(w => w.get_workspace().index() === 0 && w.get_title() === 'Personal 1');
                   a.activate(global.get_current_time()); return 1""")
         time.sleep(0.8)
-        s.chord("Control_L", "Alt_L", "Up")
+        s.chord("Control_L", "Shift_L", "Alt_L", "Up")
         time.sleep(1.8)
-        s.chord("Control_L", "Alt_L", "Down")
+        s.chord("Control_L", "Shift_L", "Alt_L", "Down")
         time.sleep(1.8)
         focus = s.eval("return global.display.focus_window?.get_title() ?? null")
         check(f"{T} keyboard focus returns to the window you were in", focus == "Personal 1", str(focus))
@@ -177,7 +177,7 @@ def main():
               f"GNOME's own controls moved down, the agent workspace's own thumbnail hidden",
               info["strip"] and info["tiles"] == 1 and info["names"] == ["research"] and all(info["previews"]) and
               info["scale"] < 1 and info["shift"] > 100 and info["agentThumbHidden"] is True, json.dumps(info))
-        s.chord("Control_L", "Alt_L", "Up")
+        s.chord("Control_L", "Shift_L", "Alt_L", "Up")
         wait_for(lambda: s.state()["active"] >= n and not s.state()["overview"], 6, 0.1)
         time.sleep(1.8)
         a = leftovers(s)
@@ -187,7 +187,7 @@ def main():
         s.chord("Super_L")
         wait_for(lambda: s.state()["overview"], 5, 0.1)
         time.sleep(1.0)
-        s.chord("Control_L", "Alt_L", "Down")
+        s.chord("Control_L", "Shift_L", "Alt_L", "Down")
         wait_for(lambda: s.state()["active"] == 0 and not s.state()["overview"], 6, 0.1)
         time.sleep(1.8)
         a = leftovers(s)
@@ -204,27 +204,27 @@ def main():
         time.sleep(1.8)
         check(f"{T} clicking an agent preview in the overview goes up to it (overview closes, slide)",
               s.state()["active"] >= n and not s.state()["overview"] and ext(s, "e._lastKind") == "slide")
-        s.chord("Control_L", "Alt_L", "Down")
+        s.chord("Control_L", "Shift_L", "Alt_L", "Down")
         time.sleep(1.8)
 
         # ---- keys pressed again during a slide: queued, not cancelled
-        s.chord("Control_L", "Alt_L", "Up")
+        s.chord("Control_L", "Shift_L", "Alt_L", "Up")
         time.sleep(0.12)
-        s.chord("Control_L", "Alt_L", "Down")
+        s.chord("Control_L", "Shift_L", "Alt_L", "Down")
         time.sleep(0.08)
-        s.chord("Control_L", "Alt_L", "Up")
+        s.chord("Control_L", "Shift_L", "Alt_L", "Up")
         time.sleep(0.08)
-        s.chord("Control_L", "Alt_L", "Down")
+        s.chord("Control_L", "Shift_L", "Alt_L", "Down")
         time.sleep(3.0)
         a = leftovers(s)
         check(f"{T} Up, Down, Up, Down pressed during the slide: ends on the personal workspace with nothing stuck",
               s.state()["active"] == 0 and a["ty"] == 0 and a["ui"] == base["ui"] and not a["switchData"], json.dumps(a))
-        s.chord("Control_L", "Alt_L", "Up")
+        s.chord("Control_L", "Shift_L", "Alt_L", "Up")
         time.sleep(0.2)
-        s.chord("Control_L", "Alt_L", "Up")
+        s.chord("Control_L", "Shift_L", "Alt_L", "Up")
         time.sleep(2.5)
         check(f"{T} Up pressed twice during the slide arrives once", s.state()["active"] >= n)
-        s.chord("Control_L", "Alt_L", "Down")
+        s.chord("Control_L", "Shift_L", "Alt_L", "Down")
         time.sleep(2.0)
 
         # ---- Desktop Cube's own Left/Right, never affected, never entering the agent desktop
@@ -259,7 +259,7 @@ def main():
               json.dumps(a))
 
         # ---- workspace count changes: the viewer window goes away, the agent desktop is rebuilt on the next Up
-        s.chord("Control_L", "Alt_L", "Up")
+        s.chord("Control_L", "Shift_L", "Alt_L", "Up")
         time.sleep(2.0)
         s.eval("""for (const a of global.get_window_actors()) { const w = a.meta_window;
                   if ((w.get_gtk_application_id?.() ?? w.get_wm_class()) === 'dev.agentworkspaces.Viewer') w.delete(global.get_current_time()); } return 1""")
@@ -268,16 +268,16 @@ def main():
         n_before = s.state()["n"]
         check(f"{T} closing the viewer window by hand while up there does not strand you on an empty desktop: back down on the personal workspace",
               s.state()["active"] == 0, f"active={s.state()['active']}")
-        s.chord("Control_L", "Alt_L", "Up")
+        s.chord("Control_L", "Shift_L", "Alt_L", "Up")
         ok = wait_for(lambda: any(w["app_id"] == VIEWER for w in s.state()["windows"]), 20, 0.2)
         time.sleep(3.0)
         st = s.state()
         check(f"{T} after the viewer window was closed (GNOME removed the empty agent workspace), Ctrl+Alt+Up builds the agent desktop again",
               bool(ok) and st["active"] >= n and ext(s, "e._agentWs.index()") == st["active"], f"n before={n_before} after={st['n']} active={st['active']}")
-        s.chord("Control_L", "Alt_L", "Down")
+        s.chord("Control_L", "Shift_L", "Alt_L", "Down")
         time.sleep(2.0)
         check(f"{T} and Ctrl+Alt+Down returns to the personal workspace", s.state()["active"] == 0)
-        s.chord("Control_L", "Alt_L", "Up")
+        s.chord("Control_L", "Shift_L", "Alt_L", "Up")
         time.sleep(2.0)
 
         # ---- logs, bindings
@@ -289,8 +289,10 @@ def main():
         time.sleep(1.5)
         down = s.keyfile_get("org/gnome/desktop/wm/keybindings", "switch-to-workspace-down")
         up = s.keyfile_get("org/gnome/desktop/wm/keybindings", "switch-to-workspace-up")
-        check(f"{T} disable restores GNOME's Ctrl+Alt+Up/Down exactly", down == ["<Control><Alt>Down"] and up == ["<Control><Alt>Up"],
-              f"up={up} down={down}")
+        mup = s.keyfile_get("org/gnome/desktop/wm/keybindings", "move-to-workspace-up")
+        mdown = s.keyfile_get("org/gnome/desktop/wm/keybindings", "move-to-workspace-down")
+        check(f"{T} disable leaves GNOME's bindings exactly as they were", down == ["<Control><Alt>Down"] and up == ["<Control><Alt>Up"] and
+              mup == ["<Control><Shift><Alt>Up"] and mdown == ["<Control><Shift><Alt>Down"], f"up={up} down={down} move-up={mup} move-down={mdown}")
     finally:
         if d:
             d.stop()

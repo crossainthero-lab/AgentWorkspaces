@@ -303,7 +303,7 @@ class Daemon:
             return d
         if method == "workspace.ensure_default":
             # Idempotent: the default desktop for people ("agents", no agent assigned). Created on first use, started
-            # when stopped, otherwise returned as it is. Used by the shell extension when Ctrl+Alt+Up is pressed with
+            # when stopped, otherwise returned as it is. Used by the shell extension when Ctrl+Shift+Alt+Up is pressed with
             # nothing running, so the agent desktop is always there to go to.
             name = p.get("name") or "agents"
             if not isinstance(name, str):

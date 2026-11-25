@@ -100,7 +100,7 @@ def main():
         with record(s, out, fps=60) as rec:
             time.sleep(2.0)
             marks["up"] = time.monotonic() - rec._t0
-            s.chord("Control_L", "Alt_L", "Up")
+            s.chord("Control_L", "Shift_L", "Alt_L", "Up")
             ok = wait_for(lambda: s.state()["active"] != 0, 20, 0.05)
             check("Ctrl+Alt+Up with nothing running goes up to the agent desktop", bool(ok))
             time.sleep(3.5)                                    # the empty agent desktop: taskbar and launcher
@@ -129,7 +129,7 @@ def main():
             check("the scripted client's pointer and typing ran without errors", agent.done and not agent.errors, "; ".join(agent.errors))
             time.sleep(1.5)
             marks["down"] = time.monotonic() - rec._t0
-            s.chord("Control_L", "Alt_L", "Down")
+            s.chord("Control_L", "Shift_L", "Alt_L", "Down")
             check("Ctrl+Alt+Down comes back", bool(wait_for(lambda: s.state()["active"] == 0, 6, 0.1)))
             time.sleep(1.8)
         print("video:", json.dumps(rec.info))

@@ -174,7 +174,7 @@ Agents may only ask; a person decides through the CLI on a terminal, the viewer 
   exists and runs. `name` defaults to `agents`; the workspace is created with agent kind `none` and started when it
   is missing, started when it is stopped, and returned unchanged when it already runs. Returns the summary plus
   `created` (bool). Concurrent calls are serialised, so two shortcuts pressed together create one workspace. The
-  GNOME extension calls it when Ctrl+Alt+Up is pressed with nothing running (docs/gnome-extension.md).
+  GNOME extension calls it when Ctrl+Shift+Alt+Up is pressed with nothing running (docs/gnome-extension.md).
 * `workspace.rename {workspace, name}`, `workspace.assign {workspace, agent_kind, agent_label?}`
 * `workspace.configure {workspace, width?, height?, scale?, gpu?, clipboard?, window_policy?, memory_max?, audio?}`
   (size/scale apply live; gpu/window_policy/memory_max/audio restart the compositor and close its apps)

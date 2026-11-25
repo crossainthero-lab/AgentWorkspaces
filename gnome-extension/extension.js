@@ -1,7 +1,7 @@
 // AgentWorkspaces: optional GNOME Shell navigation.
 //
-// The agent desktop is ON TOP of your personal ones. Ctrl+Alt+Up goes up to it (the personal desktop slides down
-// and out, the agent desktop slides down into place from above); Ctrl+Alt+Down comes back to the personal workspace
+// The agent desktop is ON TOP of your personal ones. Ctrl+Shift+Alt+Up goes up to it (the personal desktop slides down
+// and out, the agent desktop slides down into place from above); Ctrl+Shift+Alt+Down comes back to the personal workspace
 // you came from. Ctrl+Alt+Left/Right keep walking through your personal workspaces only.
 // The AgentWorkspaces service does not depend on this extension.
 
@@ -21,7 +21,9 @@ import {OverviewStrip} from './overviewStrip.js';
 const VIEWER_APP_ID = 'dev.agentworkspaces.Viewer';
 const VIEWER_TITLE_PREFIX = 'AgentWorkspaces:';
 const GNOME_WM = 'org.gnome.desktop.wm.keybindings';
-const TAKEOVER_KEYS = ['switch-to-workspace-up', 'switch-to-workspace-down'];
+// GNOME binds Ctrl+Shift+Alt+Up/Down (our defaults) to move-to-workspace-up/down (move the window one workspace up/down); a
+// user who sets our shortcuts to Ctrl+Alt+Up/Down collides with switch-to-workspace-up/down. Only an exact match is taken over.
+const TAKEOVER_KEYS = ['switch-to-workspace-up', 'switch-to-workspace-down', 'move-to-workspace-up', 'move-to-workspace-down'];
 const SLIDE_MS = 250; // same as GNOME Shell's own workspace switch
 const VIEWER_WAIT_MS = 1200; // slide up anyway when the viewer window has not appeared by then
 // Small public interface so the viewer's "Back to desktop" button (and any other program) can do what the
@@ -54,7 +56,7 @@ const TEST_IFACE = `
 // ---- accelerator helpers ---------------------------------------------------------------------
 
 function normalizeAccel(accel) {
-    // '<Control><Alt>Down' -> 'alt+ctrl+down'. Enough to compare accelerators from GSettings.
+    // '<Control><Shift><Alt>Down' -> 'alt+ctrl+shift+down'. Enough to compare accelerators from GSettings.
     const mods = new Set();
     let rest = accel.trim();
     for (;;) {
@@ -173,8 +175,9 @@ export default class AgentWorkspacesExtension extends Extension {
     }
 
     /**
-     * Our accelerators may equal accelerators GNOME has bound to switch-to-workspace-up/down (it does by
-     * default: Ctrl+Alt+Up/Down). Mutter cannot reliably pick between two bindings with the same
+     * Our accelerators may equal accelerators GNOME has bound to move-to-workspace-up/down (it does by default:
+     * Ctrl+Shift+Alt+Up/Down move a window one workspace up/down) or switch-to-workspace-up/down (Ctrl+Alt+Up/Down,
+     * if you set our shortcuts to those). Ctrl+Alt+Up/Down themselves are NOT touched with the default shortcuts. Mutter cannot reliably pick between two bindings with the same
      * accelerator, so exactly those accelerators are removed from the GNOME key, and recorded in our
      * own `backup` setting BEFORE the change so a crash can be repaired. Any other binding that uses our
      * accelerators (another GNOME key, another extension) is never touched; it is reported in `conflicts`.
@@ -409,7 +412,7 @@ export default class AgentWorkspacesExtension extends Extension {
     }
 
     // name: open that agent workspace (a click in the overview); omitted: where you left off.
-    // Ctrl+Alt+Up ALWAYS goes up to the agent desktop. With nothing running the service is asked for the default one
+    // Ctrl+Shift+Alt+Up ALWAYS goes up to the agent desktop. With nothing running the service is asked for the default one
     // ('agents', no agent assigned yet) first. Never a notification or a dialog: whatever goes wrong is said, quietly,
     // inside the viewer, and details go to the log.
     enter(name = null) {
@@ -1162,7 +1165,7 @@ export default class AgentWorkspacesExtension extends Extension {
         const wins = global.get_window_actors().map(a => a.meta_window).filter(w => w.get_window_type() === Meta.WindowType.NORMAL)
             .map(w => ({title: w.get_title(), app_id: w.get_gtk_application_id?.() ?? w.get_wm_class(), ws: w.get_workspace()?.index() ?? -1}));
         const keys = {};
-        for (const k of ['switch-to-workspace-up', 'switch-to-workspace-down', 'switch-to-workspace-left', 'switch-to-workspace-right'])
+        for (const k of ['switch-to-workspace-up', 'switch-to-workspace-down', 'move-to-workspace-up', 'move-to-workspace-down', 'switch-to-workspace-left', 'switch-to-workspace-right'])
             keys[k] = this._wmSettings.get_strv(k);
         return JSON.stringify({
             active: wm.get_active_workspace_index(), n_workspaces: wm.n_workspaces,

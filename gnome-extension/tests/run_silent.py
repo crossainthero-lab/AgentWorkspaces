@@ -149,7 +149,7 @@ def main():
         # ---- (A) cold start: the service is down and nothing runs
         ext_cmd(real)
         t0 = time.monotonic()
-        s.chord("Control_L", "Alt_L", "Up")
+        s.chord("Control_L", "Shift_L", "Alt_L", "Up")
         ok = wait_for(lambda: snap(s)["viewers"] > 0 and snap(s)["active"] != a1["active"], 40, 0.2)
         took = time.monotonic() - t0
         time.sleep(3.0)
@@ -165,18 +165,18 @@ def main():
         check("(A) ... without any notification, toast, dialog or leftover animation actor",
               {k: a[k] for k in ("notes", "sliding", "wg")} == {k: a1[k] for k in ("notes", "sliding", "wg")} and not newer(a, a1), json.dumps(newer(a, a1)))
         aid = agents[0]["id"] if agents else None
-        s.chord("Control_L", "Alt_L", "Down")
+        s.chord("Control_L", "Shift_L", "Alt_L", "Down")
         time.sleep(2.0)
         check("(A) Ctrl+Alt+Down comes back to the personal desktop you left", snap(s)["active"] == a1["active"])
 
         # ---- (B) cycles reuse the workspace and the viewer
         ok_cycles = True
         for i in range(3):
-            s.chord("Control_L", "Alt_L", "Up")
+            s.chord("Control_L", "Shift_L", "Alt_L", "Up")
             time.sleep(1.2)
             a = snap(s)
             up = a["active"] == a["agent"] and a["active"] != a1["active"] and a["viewers"] == 1
-            s.chord("Control_L", "Alt_L", "Down")
+            s.chord("Control_L", "Shift_L", "Alt_L", "Down")
             time.sleep(1.2)
             b = snap(s)
             back = b["active"] == a1["active"] and b["viewers"] == 1
@@ -192,13 +192,13 @@ def main():
         # ---- (C) stopped: Up starts it again
         call(base, "workspace.stop", workspace=aid)
         time.sleep(1.5)
-        s.chord("Control_L", "Alt_L", "Up")
+        s.chord("Control_L", "Shift_L", "Alt_L", "Up")
         ok = wait_for(lambda: (workspaces(base) or [{}])[0].get("state") == "running", 20, 0.3)
         time.sleep(2.0)
         a = snap(s)
         check("(C) `agents` stopped: Ctrl+Alt+Up goes up and starts it again (same workspace, running)",
               bool(ok) and a["active"] == a["agent"] and (workspaces(base) or [{}])[0].get("id") == aid, short(a))
-        s.chord("Control_L", "Alt_L", "Down")
+        s.chord("Control_L", "Shift_L", "Alt_L", "Down")
         time.sleep(1.8)
 
         # ---- (D) the overview lists it; click and Ctrl+Alt+Up from the overview enter it
@@ -222,16 +222,16 @@ def main():
             ok = wait_for(lambda: snap(s)["active"] == snap(s)["agent"] and not snap(s)["overview"], 8, 0.2)
             time.sleep(1.5)
             check("(D) a click on the tile closes the overview and enters the agent desktop", bool(ok), short(snap(s)))
-            s.chord("Control_L", "Alt_L", "Down")
+            s.chord("Control_L", "Shift_L", "Alt_L", "Down")
             time.sleep(1.8)
         s.chord("Super_L")
         wait_for(lambda: s.state()["overview"], 5, 0.1)
         time.sleep(2.0)
-        s.chord("Control_L", "Alt_L", "Up")
+        s.chord("Control_L", "Shift_L", "Alt_L", "Up")
         ok = wait_for(lambda: snap(s)["active"] == snap(s)["agent"] and not snap(s)["overview"], 8, 0.2)
         time.sleep(1.5)
         check("(D) Ctrl+Alt+Up from the overview closes it and enters the agent desktop", bool(ok), short(snap(s)))
-        s.chord("Control_L", "Alt_L", "Down")
+        s.chord("Control_L", "Shift_L", "Alt_L", "Down")
         time.sleep(1.8)
 
         # ---- (E) service up, `agents` gone: Up creates it again; the slide starts at the viewer's first frame
@@ -244,7 +244,7 @@ def main():
           globalThis.__awt.mapId = global.window_manager.connect('map', (wm, actor) => { if (!globalThis.__awt.map) globalThis.__awt.map = GLib.get_monotonic_time(); });
           return 1""" % UUID)
         s.eval("globalThis.__awt.t0 = GLib.get_monotonic_time(); return 1")
-        s.chord("Control_L", "Alt_L", "Up")
+        s.chord("Control_L", "Shift_L", "Alt_L", "Up")
         ok = wait_for(lambda: snap(s)["viewers"] > 0 and snap(s)["active"] != a1["active"], 30, 0.1)
         time.sleep(2.5)
         t = s.eval("const t = globalThis.__awt; global.window_manager.disconnect(t.mapId); return [(t.map - t.t0) / 1000, (t.slide - t.t0) / 1000];")
@@ -271,7 +271,7 @@ def main():
         check("(E) the launcher in the agent taskbar opens an app inside the `agents` workspace, as you (activity 'You'), and nothing on your own desktop",
               bool(got) and not personal and (info.get("activity") or {}).get("last_action") == "human:launch",
               f"windows={[w['title'] for w in info.get('windows', [])]} activity={(info.get('activity') or {}).get('last_action')} personal={personal}")
-        s.chord("Control_L", "Alt_L", "Down")
+        s.chord("Control_L", "Shift_L", "Alt_L", "Down")
         time.sleep(1.8)
 
         # ---- (F) creation fails while the service is up: the viewer says so, once, in its own window
@@ -281,7 +281,7 @@ def main():
         time.sleep(2.0)
         nolabwc = wrapper(f"{s.base}/aw-wrapper-nolabwc", "export PATH=/nonexistent")
         ext_cmd(nolabwc)
-        s.chord("Control_L", "Alt_L", "Up")
+        s.chord("Control_L", "Shift_L", "Alt_L", "Up")
         ok = wait_for(lambda: snap(s)["viewers"] > 0 and snap(s)["active"] != a1["active"], 40, 0.2)
         time.sleep(2.0)
         s.shot(f"{s.base}/fail-starting.png")
@@ -300,7 +300,7 @@ def main():
             print("--- wrapper log:\n" + (open(f"{s.base}/aw-wrapper-nolabwc.log", errors="replace").read()[-1500:] if os.path.exists(f"{s.base}/aw-wrapper-nolabwc.log") else "(none)"))
             print("--- shell log:\n" + "\n".join(l for l in log.splitlines() if "agent-workspaces" in l)[-1500:])
         check("(F) ... the reason is in the shell log", "no workspace to go up to" in log)
-        s.chord("Control_L", "Alt_L", "Down")
+        s.chord("Control_L", "Shift_L", "Alt_L", "Down")
         time.sleep(1.8)
 
         # ---- (G) the service cannot be started at all
@@ -310,7 +310,7 @@ def main():
         dead = wrapper(f"{s.base}/aw-wrapper-dead", "exit 1", "export AW_NO_AUTOSTART=1")
         ext_cmd(dead)
         t0 = time.monotonic()
-        s.chord("Control_L", "Alt_L", "Up")
+        s.chord("Control_L", "Shift_L", "Alt_L", "Up")
         ok = wait_for(lambda: snap(s)["viewers"] > 0 and snap(s)["active"] != a1["active"], 40, 0.2)
         took = time.monotonic() - t0
         time.sleep(3.0)
@@ -319,20 +319,20 @@ def main():
         check("(G) the service cannot be started: Ctrl+Alt+Up still goes up and the viewer is there to say so (no popup, no notification)",
               bool(ok) and a["active"] == a["agent"] and {k: a[k] for k in quiet} == {k: a1[k] for k in quiet} and not newer(a, a1),
               f"{took:.1f}s {short(a)}")
-        s.chord("Control_L", "Alt_L", "Down")
+        s.chord("Control_L", "Shift_L", "Alt_L", "Down")
         time.sleep(1.8)
 
         # ---- the fault goes away: the same Up now works again from where it was
         s.eval("""const e = Main.extensionManager.lookup('%s').stateObj; for (const w of e._viewerWindows()) w.delete(global.get_current_time()); return 1""" % UUID)
         time.sleep(1.5)
         ext_cmd(real)
-        s.chord("Control_L", "Alt_L", "Up")
+        s.chord("Control_L", "Shift_L", "Alt_L", "Up")
         ok = wait_for(lambda: snap(s)["viewers"] > 0 and snap(s)["active"] != a1["active"] and (workspaces(base) or []), 40, 0.2)
         time.sleep(3.0)
         wl = workspaces(base) or []
         check("after the fault is gone Ctrl+Alt+Up works again: `agents` exists and runs", bool(ok) and len(wl) == 1 and wl[0]["state"] == "running",
               json.dumps([(w["name"], w["state"]) for w in wl]))
-        s.chord("Control_L", "Alt_L", "Down")
+        s.chord("Control_L", "Shift_L", "Alt_L", "Down")
         time.sleep(1.8)
 
         check("no JS errors in the shell log", not s.shell_errors(), "; ".join(s.shell_errors()[:2]))

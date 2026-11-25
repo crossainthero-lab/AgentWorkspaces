@@ -88,10 +88,17 @@ def main():
                   all(s.ext_state(u) == 1 for u in REALISTIC_COPY + REALISTIC_SYSTEM),
                   str({u.split('@')[0]: s.ext_state(u) for u in REALISTIC_COPY + REALISTIC_SYSTEM}))
         st = s.state()
-        check("GNOME's Ctrl+Alt+Down/Down were removed while the extension is enabled; Left/Right untouched",
-              st["keys"]["switch-to-workspace-up"] == [] and st["keys"]["switch-to-workspace-down"] == [] and
+        check("GNOME's own Ctrl+Alt+Up/Down (switch workspace) and Left/Right are untouched; only its Ctrl+Shift+Alt+Up/Down (move window) are taken over",
+              st["keys"]["switch-to-workspace-up"] == ["<Control><Alt>Up"] and st["keys"]["switch-to-workspace-down"] == ["<Control><Alt>Down"] and
+              st["keys"]["move-to-workspace-up"] == [] and st["keys"]["move-to-workspace-down"] == [] and
               "<Control><Alt>Left" in st["keys"]["switch-to-workspace-left"] and
               "<Control><Alt>Right" in st["keys"]["switch-to-workspace-right"])
+
+        conf = s.eval("return Main.extensionManager.lookup('%s').stateObj._settings.get_strv('conflicts')" % UUID)
+        print("keybinding conflicts logged by the extension (realistic session):", json.dumps(conf))
+        check("with the default Ctrl+Shift+Alt+Up/Down the only accelerator collision is GNOME's own move-window-up/down, taken over exactly and "
+              "restored on disable; no other GNOME key, Desktop Cube, Tiling Shell, Just Perfection, Blur my Shell or Dash to Dock binding uses them",
+              all("move-to-workspace-" in c and "taken over" in c for c in conf) and len(conf) <= 2, json.dumps(conf))
 
         # ---- real daemon + two real workspaces, each with the GTK4 test app (its event log is the oracle)
         d = Daemon(s).start()
@@ -114,7 +121,7 @@ def main():
         shown = wait_for(lambda: s.state()["overview"], 5, 0.1)
         check("Super opens GNOME's Activities overview (real key event)", bool(shown))
         time.sleep(1.2)
-        s.chord("Control_L", "Alt_L", "Up")
+        s.chord("Control_L", "Shift_L", "Alt_L", "Up")
         ok = wait_for(lambda: any(w["app_id"] == VIEWER for w in s.state()["windows"]), 20, 0.1)
         check("Ctrl+Alt+Up from inside the overview: the daemon starts the real viewer on its own GNOME workspace", bool(ok))
         time.sleep(2.5)
@@ -277,9 +284,9 @@ def main():
         check("the agent can still drive the workspace with no viewer attached", n4 > n3)
 
         # ---- re-enter: one viewer again, remembers what I was looking at
-        s.chord("Control_L", "Alt_L", "Down")
+        s.chord("Control_L", "Shift_L", "Alt_L", "Down")
         time.sleep(1.0)
-        s.chord("Control_L", "Alt_L", "Up")
+        s.chord("Control_L", "Shift_L", "Alt_L", "Up")
         ok = wait_for(lambda: any(w["app_id"] == VIEWER for w in s.state()["windows"]), 20, 0.1)
         time.sleep(2.5)
         ws = {w["name"]: w for w in c.call("workspace.list")["workspaces"]}
@@ -323,13 +330,13 @@ def main():
         s.chord("Super_L")
         wait_for(lambda: s.state()["overview"], 5, 0.1)
         time.sleep(1.0)
-        s.chord("Control_L", "Alt_L", "Down")
+        s.chord("Control_L", "Shift_L", "Alt_L", "Down")
         wait_for(lambda: s.state()["overview"] is False and s.state()["active"] == personal_ws, 6, 0.1)
         time.sleep(1.2)
         st = s.state()
         check("Ctrl+Alt+Down from inside the overview returns to the previous personal workspace with the overview closed",
               st["active"] == personal_ws and st["overview"] is False, f"active={st['active']} overview={st['overview']}")
-        s.chord("Control_L", "Alt_L", "Up")
+        s.chord("Control_L", "Shift_L", "Alt_L", "Up")
         time.sleep(2.0)
         check("Ctrl+Alt+Up from the normal desktop enters again", s.state()["active"] != personal_ws)
 
@@ -444,12 +451,12 @@ def main():
                       globalThis.__restoreCube = () => { P._prepareWorkspaceSwitch = o; };
                       return 1""")
             calls = lambda: s.eval("return globalThis.__cubeCalls")  # noqa: E731
-            s.chord("Control_L", "Alt_L", "Down")
+            s.chord("Control_L", "Shift_L", "Alt_L", "Down")
             time.sleep(1.5)
-            s.chord("Control_L", "Alt_L", "Up")
+            s.chord("Control_L", "Shift_L", "Alt_L", "Up")
             time.sleep(1.5)
             c_vertical = calls()
-            s.chord("Control_L", "Alt_L", "Down")
+            s.chord("Control_L", "Shift_L", "Alt_L", "Down")
             time.sleep(1.5)
             s.chord("Control_L", "Alt_L", "Right")
             time.sleep(1.8)
@@ -474,8 +481,11 @@ def main():
         time.sleep(1.5)
         down = s.keyfile_get("org/gnome/desktop/wm/keybindings", "switch-to-workspace-down")
         up = s.keyfile_get("org/gnome/desktop/wm/keybindings", "switch-to-workspace-up")
-        check("disable restores GNOME's Ctrl+Alt+Down/Down exactly", down == ["<Control><Alt>Down"] and up == ["<Control><Alt>Up"],
-              f"up={up} down={down}")
+        mup = s.keyfile_get("org/gnome/desktop/wm/keybindings", "move-to-workspace-up")
+        mdown = s.keyfile_get("org/gnome/desktop/wm/keybindings", "move-to-workspace-down")
+        check("disable leaves GNOME's bindings exactly as they were (Ctrl+Alt+Up/Down and Ctrl+Shift+Alt+Up/Down)",
+              down == ["<Control><Alt>Down"] and up == ["<Control><Alt>Up"] and mup == ["<Control><Shift><Alt>Up"] and mdown == ["<Control><Shift><Alt>Down"],
+              f"up={up} down={down} move-up={mup} move-down={mdown}")
     finally:
         if agent:
             agent.stop_flag = True

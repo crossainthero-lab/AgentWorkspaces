@@ -719,7 +719,7 @@ class Viewer(Gtk.Application):
             hb.add_css_class("aw-overlay-top")
         else:
             win.set_titlebar(hb)
-        self.hb_back = Gtk.Button(icon_name="go-down-symbolic", tooltip_text="Back to your desktop (Ctrl+Alt+Down)",
+        self.hb_back = Gtk.Button(icon_name="go-down-symbolic", tooltip_text="Back to your desktop (Ctrl+Shift+Alt+Down)",
                                   visible=False)
         self.hb_back.connect("clicked", lambda b: self.return_to_desktop())
         hb.pack_start(self.hb_back)
@@ -834,7 +834,7 @@ class Viewer(Gtk.Application):
         nb.append(self.new_lbl)
         self.new_btn.set_child(nb)
         self.new_btn.connect("clicked", lambda b: self.show_create_dialog())
-        self.back_btn = Gtk.Button(tooltip_text="Back to your desktop (Ctrl+Alt+Down)", visible=False)
+        self.back_btn = Gtk.Button(tooltip_text="Back to your desktop (Ctrl+Shift+Alt+Down)", visible=False)
         self.back_btn.add_css_class("flat")
         self.back_lbl = Gtk.Label(label="Back to desktop")
         bb = Gtk.Box(spacing=8)
@@ -991,7 +991,7 @@ class Viewer(Gtk.Application):
         self.hb_back.set_visible(present and self.env_mode)
 
     def return_to_desktop(self):
-        """Ask the optional extension to slide back to the personal workspace (same as Ctrl+Alt+Down)."""
+        """Ask the optional extension to slide back to the personal workspace (same as Ctrl+Shift+Alt+Down)."""
         try:
             conn = Gio.bus_get_sync(Gio.BusType.SESSION, None)
             conn.call(SHELL_EXT_NAME, SHELL_EXT_PATH, SHELL_EXT_NAME + "1", "Return", None, None,

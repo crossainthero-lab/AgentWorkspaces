@@ -1,7 +1,7 @@
 # AgentWorkspaces GNOME Shell extension (optional)
 
-The agent desktop is stacked ON TOP of your personal ones. **Ctrl+Alt+Up** goes up to it (your personal desktop slides down
-and out, the agent desktop slides down into place from above); **Ctrl+Alt+Down** comes back to the personal workspace you
+The agent desktop is stacked ON TOP of your personal ones. **Ctrl+Shift+Alt+Up** goes up to it (your personal desktop slides down
+and out, the agent desktop slides down into place from above); **Ctrl+Shift+Alt+Down** comes back to the personal workspace you
 came from. Ctrl+Alt+Left/Right still walk through your personal workspaces only (the agent desktop is skipped), also with
 Desktop Cube, which keeps doing its own rotation. The Super overview shows the running agent desktops in a strip above the
 personal ones; click one to go up to it. With no agent workspace running the extension does nothing at all: no window, no
@@ -30,9 +30,10 @@ gnome-extensions disable agent-workspaces@agentworkspaces.dev    # restores the 
 
 ## What it changes while enabled
 
-* GNOME binds Ctrl+Alt+Up and Ctrl+Alt+Down to *switch-to-workspace-up/down* (no-ops in the default horizontal
-  workspace layout). The extension takes those two accelerators over. It removes **only** the accelerators it
-  needs from `org.gnome.desktop.wm.keybindings` `switch-to-workspace-up` and `switch-to-workspace-down`. The
+* The shortcuts are **Ctrl+Shift+Alt+Up** (go up) and **Ctrl+Shift+Alt+Down** (come back). GNOME's own Ctrl+Shift+Alt+Up/Down and
+  Ctrl+Alt+Left/Right are not touched. GNOME binds Ctrl+Shift+Alt+Up/Down to *move-to-workspace-up/down* (move the
+  window one workspace up/down), so the extension takes those two accelerators over: it removes **only** the accelerators it
+  needs from `org.gnome.desktop.wm.keybindings` `move-to-workspace-up` and `move-to-workspace-down`. The
   original lists are written to its own `backup` setting *before* the change, and put back when the extension is
   disabled, when the shortcut setting changes, and at the next start if the shell ended while they were removed
   (crash, power loss).
@@ -62,16 +63,16 @@ if its systemd unit cannot). The keys `backup`, `conflicts`, `test-hooks` are st
   the file `AW_ADMIN_TOKEN_FILE`, else `<base>/admin.token`) to open the viewer there. Never a notification or popup: if something is wrong the viewer says so, once, in its own window.
 * Down: back to the recorded workspace and the window you were in; if it no longer exists (GNOME removes empty workspaces), to
   the neighbouring one. Closing the viewer window by hand while up there takes you back down.
-* Super overview: Ctrl+Alt+Up/Down work there too (the overview closes first). Agent previews appear above the personal
+* Super overview: Ctrl+Shift+Alt+Up/Down work there too (the overview closes first). Agent previews appear above the personal
   workspaces for the workspaces that are running (after the first Up that includes `agents`); they are refreshed only while the overview is open.
-* On a vertical workspace layout (for example with V-Shell) Ctrl+Alt+Up already means "the workspace above", so the keys are
+* On a vertical workspace layout (for example with V-Shell) Ctrl+Shift+Alt+Up already means "the workspace above", so the keys are
   passed through to the normal neighbour switch.
 * Animations follow GNOME's *enable-animations* setting and are skipped while the Overview is open.
 
 ## Desktop Cube, Tiling Shell, V-Shell
 
 Checked in isolated shells, see `../docs/gnome-extension.md`: Desktop Cube keeps turning for Ctrl+Alt+Left/Right and is
-not touched by the vertical slide (the agent desktop is never a cube face); Tiling Shell binds no Ctrl+Alt+Up/Down by default (a foreign binding on the same
+not touched by the vertical slide (the agent desktop is never a cube face); Tiling Shell binds no Ctrl+Shift+Alt+Up/Down by default (a foreign binding on the same
 accelerator is reported, never edited); V-Shell with a horizontal layout coexists. Not run: V-Shell with a vertical layout.
 
 ## Tests
@@ -81,7 +82,7 @@ HOME/XDG dirs, GSETTINGS_BACKEND=keyfile, private session bus and a private stan
 logind and polkit are unreachable), installs the extension there only, injects key events inside that shell and
 prints PASS/FAIL per check. `--coexist` runs a shorter check next to desktop-cube and tilingshell (private copies).
 `python3 tests/run_real.py` is the same isolation with the real daemon, workspaces and viewer and the developer's own
-extension set (53 checks); `tests/demo_video.py OUT.mp4` records the demo; `tests/measure_gs.py` measures CPU, memory and latency.
+extension set (54 checks); `tests/demo_video.py OUT.mp4` records the demo; `tests/measure_gs.py` measures CPU, memory and latency.
 `--prefs out.png` opens the preferences window in the isolated shell and saves a screenshot. It uses
 `/run/user/$UID/aw-ext-test/` and removes it afterwards (`--keep` leaves it). Needs `gnome-shell`, `dbus-daemon`,
 `glib-compile-schemas`, python3-gi with Gtk 4. Nothing is sent to your running session.

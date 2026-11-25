@@ -37,6 +37,8 @@ DISPLAY_NAME = "aw-gs"
 WM_KEYS = """[org/gnome/desktop/wm/keybindings]
 switch-to-workspace-up=['<Control><Alt>Up']
 switch-to-workspace-down=['<Control><Alt>Down']
+move-to-workspace-up=['<Control><Shift><Alt>Up']
+move-to-workspace-down=['<Control><Shift><Alt>Down']
 switch-to-workspace-left=['<Super>Page_Up', '<Super>KP_Prior', '<Super><Alt>Left', '<Control><Alt>Left']
 switch-to-workspace-right=['<Super>Page_Down', '<Super>KP_Next', '<Super><Alt>Right', '<Control><Alt>Right']
 """
@@ -388,7 +390,7 @@ class Session:
                         ws: w.get_workspace()?.index() ?? -1, maximized: w.is_maximized?.() ?? null}));
           const g = new Gio.Settings({schema_id: 'org.gnome.desktop.wm.keybindings'});
           const keys = {};
-          for (const k of ['switch-to-workspace-up', 'switch-to-workspace-down', 'switch-to-workspace-left', 'switch-to-workspace-right'])
+          for (const k of ['switch-to-workspace-up', 'switch-to-workspace-down', 'move-to-workspace-up', 'move-to-workspace-down', 'switch-to-workspace-left', 'switch-to-workspace-right'])
             keys[k] = g.get_strv(k);
           const wg = global.window_group;
           return {active: wm.get_active_workspace_index(), n: wm.n_workspaces, layout_rows: wm.layout_rows,

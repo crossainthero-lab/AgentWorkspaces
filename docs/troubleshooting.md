@@ -20,7 +20,7 @@
 
 **Leftover processes** Everything of a workspace lives in the systemd slice `aw-<id>.slice`: `systemctl --user stop aw-<id>.slice`.
 
-**GNOME extension does not capture Ctrl+Alt+Up/Down** See [gnome-extension.md](gnome-extension.md): another extension may own the accelerator; the extension reports conflicts instead of overriding them.
+**GNOME extension does not capture Ctrl+Shift+Alt+Up/Down** See [gnome-extension.md](gnome-extension.md): another extension may own the accelerator; the extension reports conflicts instead of overriding them.
 
 ## `E_UNAUTHENTICATED`, `E_NO_CREDENTIALS`, `E_FORBIDDEN`
 

@@ -63,8 +63,9 @@ def main():
         check("Desktop Cube, Tiling Shell and AgentWorkspaces are all ENABLED",
               all(s.ext_state(u) == 1 for u in (UUID, CUBE, "tilingshell@ferrarodomenico.com")))
         original = ["<Control><Alt>Down"]       # GNOME's value, as written by the harness (the extension already ran)
-        check("GNOME's Ctrl+Alt+Up/Down were taken over while enabled", s.state()["keys"]["switch-to-workspace-down"] == [] and
-              s.state()["keys"]["switch-to-workspace-up"] == [])
+        check("GNOME's Ctrl+Alt+Up/Down are untouched; Ctrl+Shift+Alt+Up/Down (move window) were taken over while enabled",
+              s.state()["keys"]["move-to-workspace-down"] == [] and s.state()["keys"]["move-to-workspace-up"] == [] and
+              s.state()["keys"]["switch-to-workspace-up"] == ["<Control><Alt>Up"])
 
         # ---- a real daemon, a real workspace with a real app, a scripted client
         d = Daemon(s).start()
@@ -112,7 +113,7 @@ def main():
 
         # ---- warm-up visit (not recorded): the first Ctrl+Alt+Up starts the viewer process
         t0 = time.monotonic()
-        s.chord("Control_L", "Alt_L", "Up")
+        s.chord("Control_L", "Shift_L", "Alt_L", "Up")
         viewer_ready = wait_for(lambda: any(x["app_id"] == "dev.agentworkspaces.Viewer" for x in windows(s)), 30, 0.1)
         cold = time.monotonic() - t0
         check("first Ctrl+Alt+Up asks the daemon and the viewer window appears on the agent workspace",
@@ -120,7 +121,7 @@ def main():
               f"{cold:.2f} s from key press to viewer window (cold start incl. python/GTK)")
         RES["cold_start_s"] = round(cold, 2)
         time.sleep(3.0)
-        s.chord("Control_L", "Alt_L", "Down")
+        s.chord("Control_L", "Shift_L", "Alt_L", "Down")
         time.sleep(1.2)
         check("Ctrl+Alt+Down returned to workspace 0", s.state()["active"] == 0)
 
@@ -145,22 +146,22 @@ def main():
             time.sleep(3.2)                                   # the agent previews above the personal desktops, live
             marks["overview_full"] = time.monotonic() - rec._t0 - 1.0
             marks["enter"] = time.monotonic() - rec._t0
-            s.chord("Control_L", "Alt_L", "Up")             # from inside the overview to the agent workspace
+            s.chord("Control_L", "Shift_L", "Alt_L", "Up")             # from inside the overview to the agent workspace
             check("Ctrl+Alt+Up from the overview reached the viewer with the overview closed",
                   bool(wait_for(lambda: s.state()["active"] != 0 and not s.state()["overview"], 5, 0.1)))
             time.sleep(9.5)                                   # the user watches the agent work
             n_in = (agent.clicks, agent.focus_calls)
             marks["leave"] = time.monotonic() - rec._t0
-            s.chord("Control_L", "Alt_L", "Down")               # back
+            s.chord("Control_L", "Shift_L", "Alt_L", "Down")               # back
             time.sleep(2.5)
             check("Ctrl+Alt+Down returned to workspace 0 with the overview closed", s.state()["active"] == 0 and not s.state()["overview"])
             time.sleep(2.5)                                   # the agent keeps working while not visible
             marks["enter2"] = time.monotonic() - rec._t0
-            s.chord("Control_L", "Alt_L", "Up")             # second visit, from the normal desktop
+            s.chord("Control_L", "Shift_L", "Alt_L", "Up")             # second visit, from the normal desktop
             time.sleep(6.5)
             check("the agent kept working while the workspace was not visible", agent.clicks > n_in[0],
                   f"clicks {n_in[0]} -> {agent.clicks}, focus calls {n_in[1]} -> {agent.focus_calls}")
-            s.chord("Control_L", "Alt_L", "Down")
+            s.chord("Control_L", "Shift_L", "Alt_L", "Down")
             time.sleep(2.0)
             marks["cube2"] = time.monotonic() - rec._t0
             s.chord("Control_L", "Alt_L", "Right")            # the cube still works afterwards
@@ -205,7 +206,8 @@ def main():
         time.sleep(1.5)
         down = s.keyfile_get("org/gnome/desktop/wm/keybindings", "switch-to-workspace-down")
         up = s.keyfile_get("org/gnome/desktop/wm/keybindings", "switch-to-workspace-up")
-        check("disable restored GNOME's Ctrl+Alt+Down/Down exactly", down == original and up == ["<Control><Alt>Up"], f"up={up} down={down}")
+        check("disable left GNOME's bindings as they were", down == original and up == ["<Control><Alt>Up"] and
+              s.keyfile_get("org/gnome/desktop/wm/keybindings", "move-to-workspace-up") == ["<Control><Shift><Alt>Up"], f"up={up} down={down}")
     finally:
         if agent:
             agent.stop_flag = True

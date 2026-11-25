@@ -1,6 +1,6 @@
 # The viewer
 
-`python3 -m aw.viewer [NAME] [--takeover] [--maximized]` (or `agent-workspaces enter NAME`, or Ctrl+Alt+Up with the
+`python3 -m aw.viewer [NAME] [--takeover] [--maximized]` (or `agent-workspaces enter NAME`, or Ctrl+Shift+Alt+Up with the
 GNOME extension) opens one window for all workspaces. A second call reuses the open window. It is a plain GTK4 client
 of your desktop; it needs no extension and uses the daemon API with the admin credential (docs/api.md).
 

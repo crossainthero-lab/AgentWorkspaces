@@ -4,13 +4,13 @@
           path="/org/gnome/shell/extensions/agent-workspaces/">
 
     <key name="enter-shortcut" type="as">
-      <default>["&lt;Control&gt;&lt;Alt&gt;Up"]</default>
+      <default>["&lt;Control&gt;&lt;Shift&gt;&lt;Alt&gt;Up"]</default>
       <summary>Go up to AgentWorkspaces</summary>
       <description>Accelerators that move from a personal workspace up to the AgentWorkspaces desktop, which is stacked above your personal ones.</description>
     </key>
 
     <key name="return-shortcut" type="as">
-      <default>["&lt;Control&gt;&lt;Alt&gt;Down"]</default>
+      <default>["&lt;Control&gt;&lt;Shift&gt;&lt;Alt&gt;Down"]</default>
       <summary>Come back down to your personal workspace</summary>
       <description>Accelerators that move from the AgentWorkspaces desktop back down to the personal workspace you came from.</description>
     </key>
