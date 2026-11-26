@@ -139,25 +139,24 @@ it): without it the daemon only runs while an agent or the CLI has started it, a
 runs. Pressing the key again during a slide queues it (only the last request counts); cancelling would make the desktops jump.
 A locked session ends everything queued or sliding (GNOME also disables extensions on the lock screen, which does the same).
 
-**The agent desktop is a real desktop in the overview** (`overviewStrip.js`). Above GNOME's workspace thumbnails there is a row with
-one thumbnail per RUNNING agent workspace. It is built from GNOME's own classes (`workspace-thumbnails`, `workspace-thumbnail`,
-`workspace-thumbnail-indicator`), so the theme draws it exactly like the real thumbnails: same size (measured equal to within 2 px
-in the tests), same corner radius, same selection ring (the theme's accent colour; no colour of our own), content = the live agent
-screen. Nothing is shown when no agent workspace runs. With the cursor over it nothing extra is drawn (GNOME's thumbnails have no
-hover style either) and it steps aside while you type in the search entry, like the real row. Clicking it goes up to that desktop (the
-overview closes, then the slide). When you open the overview while you are ON the agent desktop, its ring is shown (GNOME's own ring,
-which would sit on the agent workspace's empty slot, is hidden) and the big workspace area shows the agent desktop (the viewer, i.e.
-the live agent screen); picking one of your own thumbnails there leaves the agent desktop cleanly (no cube turn, no half animation:
-`Meta.Workspace.activate` is wrapped while you are up there, so every way out goes through the same exit) and the ring follows.
-It is a sibling actor, not a fake `Meta.Workspace`: the workspace the viewer lives on already exists in GNOME's list (it is skipped by
-Ctrl+Alt+Left/Right and by the cube) and its own thumbnail is collapsed to nothing in the real row (no gap), so there is one
-thumbnail for it, not two. The overview's controls (search, personal thumbnails, workspaces, dash) are scaled down uniformly and
-moved to make room (about 7 %; they lay themselves out against the monitor, so shrinking their box does not work); stock Ubuntu
-overview and Desktop Cube, Tiling Shell, Just Perfection, Blur my Shell and Dash to Dock all behave the same (frames in
-`gnome-extension/media/real-desktop-*`). Cost: nothing while the overview is closed; when it opens one `workspace.list` (only if the
-service is already up: the overview never starts it) and one 320 px `screen.screenshot` (`quiet`, so it is not activity) per
-thumbnail every 1.5 s, one at a time, until it closes. Known: scrolling over the row does nothing (the mouse wheel does not step into the agent desktop), the row sits above the search entry rather than between it and the
-personal thumbnails, and with several agent workspaces the ring marks the one the viewer shows.
+**The agent desktop is a real desktop in the overview** (`overviewStrip.js`). It is one more thumbnail in GNOME's own row, in the
+FIRST place, directly under the search entry together with your own: same container, spacing, size, height, corner radius and
+selection ring, because GNOME draws it. The workspace that holds the viewer is an ordinary GNOME workspace, so it already has a
+thumbnail with live content (a clone of the viewer window, i.e. the live agent screen with its taskbar); the extension draws nothing
+and polls nothing. While the overview is open it only moves that workspace to index 0 (the row follows by itself: GNOME sorts its
+thumbnails on `workspaces-reordered`) and puts it back after your own desktops when the overview closes, so everywhere else the agent
+workspace stays where it was (last, skipped by Ctrl+Alt+Left/Right and by the cube). A click on its thumbnail selects it exactly
+like any desktop (the overview stays open, GNOME's ring on it, the big workspace area shows the agent desktop); activating it (a
+click on the big preview) closes the overview on the agent desktop. The extension remembers where you came from, so Ctrl+Shift+Alt+
+Down returns there, and gives the viewer the keyboard once the overview has closed. Windows dropped on the agent thumbnail are
+refused (`handleDragOverInternal` answers NO_DROP, `acceptDropInternal` false); the personal thumbnails keep their own drag, drop,
+reorder and scroll handling untouched. When you open the overview while ON the agent desktop, its thumbnail carries the ring and the
+big area shows it; picking one of your own thumbnails leaves it cleanly (no cube turn, no half animation: `Meta.Workspace.activate`
+is wrapped while you are up there, so every way out goes through the same exit). Stock Ubuntu overview and Desktop Cube, Tiling
+Shell, Just Perfection, Blur my Shell and Dash to Dock behave the same (frames in `gnome-extension/media/real-desktop-*`).
+Known: there is one thumbnail for the agent desktop (the viewer's workspace), not one per agent workspace (the viewer shows the
+selected one; Ctrl+Alt+Left/Right switch it up there); it exists once a viewer window has opened (the first Ctrl+Shift+Alt+Up) and
+disappears with it; dragging the viewer window itself to another desktop in the overview is not blocked (not tested).
 
 **Up there, GNOME's workspace keys do nothing.** While the agent desktop is the current workspace, `switch-to-workspace-*` and
 `move-to-workspace-*` (Ctrl+Alt+Left/Right/Up/Down, Super+Page Up/Down, Super+Alt+Left/Right, the "workspace N" and "last" keys, and
@@ -181,8 +180,9 @@ Settings (`org.gnome.shell.extensions.agent-workspaces`): `enter-shortcut` (defa
 * Ctrl+Alt+Right from the last personal workspace walked into the agent desktop (it is a workspace in the row): now skipped.
 * Entering with no workspace running left you on an empty, invisible desktop and showed a notification; a silent no-op was
   tried next and was wrong too (nothing happened when you pressed the key): now Up creates and enters the default desktop.
-* The overview strip looked like a foreign square (dark card, caption, orange underline, a different size) and the agent workspace's
-  own thumbnail left a gap: it is now a thumbnail of GNOME's own kind and size and the real one is collapsed.
+* The first overview strip looked like a foreign square (dark card, caption, orange underline, a different size) above the search
+  entry and the agent workspace's own thumbnail left a gap; a second version drew GNOME-styled copies above the row, still a separate
+  object: the agent desktop is now GNOME's own thumbnail of the agent workspace, first in the same row, nothing of ours drawn.
 * Clicking the thumbnail of an agent desktop while a viewer already existed re-presented the viewer from another desktop (GNOME
   popped "AgentWorkspaces: research is ready") and slid only after a 1.2 s timeout: the slide now comes first.
 * From the agent desktop, picking one of your desktops in the overview ran GNOME's own switch (cube turn through the agent
@@ -200,9 +200,9 @@ Settings (`org.gnome.shell.extensions.agent-workspaces`): `enter-shortcut` (defa
 | suite | what | result |
 |---|---|---|
 | `gnome-extension/tests/run_isolated.py` | stand-in daemon and viewer: bindings taken over / restored exactly (including after a SIGKILL and a restart), no visible effect when there is no service and no way to start one, slide direction and samples (-720 to 0 going up, +720 to 0 coming back), Left/Right skip the agent desktop, desktop-cube + Tiling Shell coexistence, prefs write | 28/28 |
-| `gnome-extension/tests/run_cube.py --personal 2` and `--personal 4` | the real stack with Desktop Cube, Tiling Shell, Blur my Shell, Just Perfection, User Themes, Ubuntu Dock (settings read into a private keyfile): slide (never a cube) both ways, nothing left behind, Super overview strip (tile, live preview, controls scaled, agent thumbnail hidden), click a preview, Up/Down from the overview, rapid keys, focus returns, Left/Right walk the personal workspaces with the cube's own turn and never land on the agent desktop, viewer closed by hand, no JS errors, disable restores the keys | 25/25 and 25/25 |
-| `gnome-extension/tests/run_silent.py` | nothing at login/enable time; (A) cold start with the service down and nothing running creates `agents` and enters it; (B) repeated Up/Down reuse one workspace and one viewer; (C) a stopped `agents` is started by Up; (D) the overview tile, a click on it and Ctrl+Shift+Alt+Up from the overview; (E) service up, `agents` gone: re-created, slide starts when the viewer maps, and the taskbar launcher opens an app inside it; (F) creation fails and (G) the service cannot be started: the viewer says so, no popup or notification; the launcher opens an app inside the workspace; recovery; no JS errors | 20/20 |
-| `gnome-extension/tests/demo_real_desktop.py [--cube]` | the real-desktop behaviour, recorded at 60 fps and asserted, stock overview and with Desktop Cube plus the developer's extensions: the thumbnail above the personal ones (class, corner radius, size), a click on it, the shortcut from workspace 2 also with a window fullscreen, the swallowed keys, Left/Right between two agent workspaces, Down back to workspace 2 with focus, Super from the agent desktop and picking a personal desktop, no JS errors | 13/13 and 13/13 |
+| `gnome-extension/tests/run_cube.py --personal 2` and `--personal 4` | the real stack with Desktop Cube, Tiling Shell, Blur my Shell, Just Perfection, User Themes, Ubuntu Dock (settings read into a private keyfile): slide (never a cube) both ways, nothing left behind, Super overview strip (tile, live preview, controls scaled, agent thumbnail hidden), click a preview, Up/Down from the overview, rapid keys, focus returns, Left/Right walk the personal workspaces with the cube's own turn and never land on the agent desktop, viewer closed by hand, no JS errors, disable restores the keys | 26/26 and 26/26 |
+| `gnome-extension/tests/run_silent.py` | nothing at login/enable time; (A) cold start with the service down and nothing running creates `agents` and enters it; (B) repeated Up/Down reuse one workspace and one viewer; (C) a stopped `agents` is started by Up; (D) the overview tile, a click on it and Ctrl+Shift+Alt+Up from the overview; (E) service up, `agents` gone: re-created, slide starts when the viewer maps, and the taskbar launcher opens an app inside it; (F) creation fails and (G) the service cannot be started: the viewer says so, no popup or notification; the launcher opens an app inside the workspace; recovery; no JS errors | 21/21 |
+| `gnome-extension/tests/demo_real_desktop.py [--cube]` | the real-desktop behaviour, recorded at 60 fps and asserted, stock overview and with Desktop Cube plus the developer's extensions: the agent thumbnail first in GNOME's own row (same container, class, corner radius, size, height and spacing as its siblings, drops refused, put back after the overview), a click on it selects it and a click on the big preview enters, the shortcut from workspace 2 also with a window fullscreen, the swallowed keys, Left/Right between two agent workspaces, Down back to workspace 2 with focus, Super from the agent desktop and picking a personal desktop, no JS errors | 17/17 and 17/17 |
 | `gnome-extension/tests/run_real.py` | the viewer as an ordinary window: control, approvals, grants, create/stop/close, taskbar, agent pointer | see docs/testing.md |
 | `tests/unit/test_install_service.py` | `install.sh --enable-service` and `uninstall.sh` against a fake `systemctl` in a throw-away HOME | 3/3 |
 

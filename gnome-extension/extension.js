@@ -377,6 +377,8 @@ export default class AgentWorkspacesExtension extends Extension {
                 ext._leaveInto(this);
                 return;
             }
+            if (!ext._ownSwitch && ext._agentWs && this === ext._agentWs && ext._wsValid(this) && !ext._agentActive())
+                ext._noteArrival();            // its thumbnail in the overview was clicked: remember where you came from
             ext._origActivate.call(this, time);
         };
         this._activateFocusPatch = function (window, time) {
@@ -404,6 +406,22 @@ export default class AgentWorkspacesExtension extends Extension {
         if (this._origActivateFocus && proto.activate_with_focus === this._activateFocusPatch)
             proto.activate_with_focus = this._origActivateFocus;
         this._origActivate = this._origActivateFocus = this._activatePatch = this._activateFocusPatch = null;
+    }
+
+    // Arriving on the agent desktop by GNOME's own switch (its thumbnail in the overview): same bookkeeping as our own entry, so
+    // that Ctrl+Shift+Alt+Down returns to where you were, and the viewer gets the keyboard.
+    _noteArrival() {
+        this._origin = this._wm().get_active_workspace();
+        this._originFocus = global.display.focus_window ?? null;
+        if (Main.overview.visible) {
+            // picking it in the overview only selects it; the keyboard goes to the viewer once the overview has closed
+            const id = Main.overview.connect('hidden', () => {
+                Main.overview.disconnect(id);
+                this._focusViewerSoon();
+            });
+        } else {
+            this._focusViewerSoon();
+        }
     }
 
     _leaveInto(ws) {

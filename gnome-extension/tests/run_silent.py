@@ -54,7 +54,7 @@ def snap(s):
               actors: global.get_window_actors().length, uinames: Main.uiGroup.get_children().map(x => x.constructor.name + ':' + (x.style_class ?? '') + (x.visible ? '' : ':hidden')),
               sliding: !!e._slide, entering: !!e._entering, wg: [g.translation_y, g.rotation_angle_x, g.translation_z, g.opacity],
               active: global.workspace_manager.get_active_workspace_index(), n: global.workspace_manager.n_workspaces,
-              overview: Main.overview.visible, strip: !!e._strip && e._strip.actor.visible,
+              overview: Main.overview.visible, strip: !!e._strip && e._strip._open,
               ctrl: [c.scale_x, c.translation_y], viewers: v.length, viewer_ws: v.map(w => w.get_workspace()?.index() ?? -1),
               agent: e._agentWs ? e._agentWs.index() : -1, samples: e._lastSamples ?? []}};""")
 
@@ -205,23 +205,24 @@ def main():
         s.chord("Super_L")
         wait_for(lambda: s.state()["overview"], 5, 0.1)
         time.sleep(3.0)
-        tile = s.eval("""const e = Main.extensionManager.lookup('%s').stateObj; const t = e._strip ? [...e._strip._tiles.values()][0]?.slot ?? null : null;
-          if (!t) return null; const [x, y] = t.get_transformed_position(); return [x + t.width / 2, y + t.height / 2, e._strip._tiles.size];""" % UUID)
-        a = snap(s)
+        thumb = """const e = Main.extensionManager.lookup('%s').stateObj; const box = Main.overview._overview.controls._thumbnailsBox;
+          const ts = box._thumbnails; const t = ts.find(x => x.metaWorkspace === e._agentWs); if (!t) return null;
+          const [x, y] = t.get_transformed_position(); const [w, h] = t.get_transformed_size();
+          return [x + w / 2, y + h / 2, ts[0] === t, t.metaWorkspace.index(), ts.length];""" % UUID
+        tile = s.eval(thumb)
         s.shot(f"{s.base}/overview-agents.png")
-        check("(D) the overview strip shows the `agents` desktop like any running workspace", a["strip"] and bool(tile), json.dumps(tile))
+        check("(D) the overview shows the `agents` desktop as the FIRST thumbnail of GNOME's own row, like any other desktop", bool(tile) and tile[2] and tile[3] == 0, json.dumps(tile))
         if tile:
-            s.eval("Main.overview.hide(); return 1")
-            time.sleep(1.0)
-            s.chord("Super_L")
-            wait_for(lambda: s.state()["overview"], 5, 0.1)
-            time.sleep(2.5)
-            tile = s.eval("""const e = Main.extensionManager.lookup('%s').stateObj; const t = [...e._strip._tiles.values()][0].slot;
-              const [x, y] = t.get_transformed_position(); return [x + t.width / 2, y + t.height / 2];""" % UUID)
             s.click(int(tile[0]), int(tile[1]))
-            ok = wait_for(lambda: snap(s)["active"] == snap(s)["agent"] and not snap(s)["overview"], 8, 0.2)
+            ok = wait_for(lambda: snap(s)["active"] == snap(s)["agent"], 8, 0.2)
             time.sleep(1.5)
-            check("(D) a click on the tile closes the overview and enters the agent desktop", bool(ok), short(snap(s)))
+            check("(D) a click on its thumbnail selects it like any desktop (overview stays open, the big area shows it)", bool(ok) and snap(s)["overview"], short(snap(s)))
+            s.click(800, 520)
+            ok = wait_for(lambda: not snap(s)["overview"], 8, 0.2)
+            time.sleep(1.5)
+            a = snap(s)
+            check("(D) activating it closes the overview on the agent desktop (the agent workspace is back after your own desktops, not left first)",
+                  bool(ok) and a["active"] == a["agent"] and a["agent"] > 0, short(a))
             s.chord("Control_L", "Shift_L", "Alt_L", "Down")
             time.sleep(1.8)
         s.chord("Super_L")

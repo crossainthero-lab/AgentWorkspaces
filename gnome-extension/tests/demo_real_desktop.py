@@ -96,43 +96,68 @@ def main():
         vid = os.path.join(out, f"real-desktop-{tag}.mp4")
         with record(s, vid, fps=60) as rec:
             time.sleep(1.5)
-            # ---- 1. Super: the agent desktop as a thumbnail above the personal ones
+            # ---- 1. Super: the agent desktop as one more thumbnail, first in GNOME's own row
             marks["super"] = time.monotonic() - rec._t0
             s.chord("Super_L")
             wait_for(lambda: info(s)["overview"], 5, 0.1)
             time.sleep(3.2)
             s.shot(os.path.join(out, f"1-overview-{tag}.png"))
-            geo = s.eval("""const e = Main.extensionManager.lookup('%s').stateObj; const st = e._strip;
-              const t = st ? [...st._tiles.values()][0] : null;
-              const real = (Main.overview._overview.controls._thumbnailsBox._thumbnails ?? []).filter(x => x.visible).map(x => [x.get_transformed_position(), x.get_transformed_size()]);
-              if (!t) return null; const f = t.slot.get_first_child ? t.slot.get_children()[1] : null;
-              return {ours: [f.get_transformed_position(), f.get_transformed_size()], real, radius: f.get_theme_node().get_border_radius(0), realRadius: Main.overview._overview.controls._thumbnailsBox._thumbnails.find(x => x.visible)?.get_theme_node().get_border_radius(0),
-                      cls: f.style_class, rows: [t.slot.get_transformed_position()]};""" % UUID)
-            check(f"[{tag}] the agent desktop is a thumbnail in the overview, above the personal thumbnails, with GNOME's own thumbnail style class and corner radius",
-                  geo is not None and geo["cls"] == "workspace-thumbnail" and geo["ours"][0][1] < geo["real"][0][0][1] and geo["radius"] == geo["realRadius"],
-                  json.dumps(geo))
-            ow, oh = geo["ours"][1]
-            rw, rh = geo["real"][0][1]
-            # the controls are scaled a little to make room, and ours is drawn at the size GNOME's thumbnails then have
-            check(f"[{tag}] ... and the same size as GNOME's thumbnails (within 2 px)", abs(ow - rw) <= 2 and abs(oh - rh) <= 2, f"ours {ow}x{oh} real {rw}x{rh}")
+            geo = s.eval("""const e = Main.extensionManager.lookup('%s').stateObj; const box = Main.overview._overview.controls._thumbnailsBox;
+              const ts = box._thumbnails; const a = ts.find(t => t.metaWorkspace === e._agentWs);
+              if (!a) return null;
+              const R = t => ({pos: t.get_transformed_position(), size: t.get_transformed_size(), vis: t.visible, parent: t.get_parent() === a.get_parent(), cls: t.style_class,
+                               radius: t.get_theme_node().get_border_radius(0)});
+              return {n: ts.length, agentFirst: ts[0] === a, agentIndex: a.metaWorkspace.index(), rows: ts.map(R),
+                      dnd: a.handleDragOverInternal(Main.xdndHandler, null, 0), accept: a.acceptDropInternal(Main.xdndHandler, null, 0),
+                      personalDnd: ts.filter(t => t !== a).map(t => typeof t.handleDragOverInternal)};""" % UUID)
+            rows = geo["rows"] if geo else []
+            same = len(rows) >= 2 and all(r["vis"] and r["parent"] and r["cls"] == rows[0]["cls"] and r["radius"] == rows[0]["radius"] and
+                                          abs(r["size"][0] - rows[0]["size"][0]) <= 1 and abs(r["size"][1] - rows[0]["size"][1]) <= 1 and
+                                          abs(r["pos"][1] - rows[0]["pos"][1]) <= 1 for r in rows)
+            check(f"[{tag}] the agent desktop is ONE MORE THUMBNAIL in GNOME's own row, in the FIRST position: same container, class, corner radius, size and height as "
+                  f"its siblings, nothing of our own drawn", geo is not None and geo["agentFirst"] and geo["agentIndex"] == 0 and same, json.dumps(geo)[:400])
+            gaps = [round(rows[i + 1]["pos"][0] - (rows[i]["pos"][0] + rows[i]["size"][0]), 1) for i in range(len(rows) - 1)]
+            check(f"[{tag}] ... with the same spacing between it and the first personal thumbnail as between the personal ones", len(set(gaps)) == 1 or max(gaps) - min(gaps) <= 1.5, str(gaps))
+            check(f"[{tag}] ... and a window dropped on it is refused (NO_DROP), while the personal ones take drops", geo is not None and geo["dnd"] == 0 and geo["accept"] is False
+                  and all(t == "function" for t in geo["personalDnd"]), json.dumps([geo and geo["dnd"], geo and geo["accept"]]))
             s.chord("Escape")
-            time.sleep(1.0)
+            time.sleep(1.5)
+            order = s.eval("""const e = Main.extensionManager.lookup('%s').stateObj; return [e._agentWs.index(), global.workspace_manager.n_workspaces];""" % UUID)
+            check(f"[{tag}] ... and when the overview closes the agent workspace is back after your own desktops (not left in front)", order[0] == order[1] - 2 or order[0] == order[1] - 1, str(order))
 
-            # ---- 2. click on the thumbnail goes up
+            # ---- 2. click on the thumbnail selects that desktop (the big area shows it); activating it enters
             marks["click"] = time.monotonic() - rec._t0
             s.chord("Super_L")
             wait_for(lambda: info(s)["overview"], 5, 0.1)
             time.sleep(2.5)
-            xy = s.eval(f"""const st = Main.extensionManager.lookup('{UUID}').stateObj._strip; const t = [...st._tiles.values()][0].slot;
-                           const [x, y] = t.get_transformed_position(); return [x + t.width / 2, y + t.height / 2];""")
+            xy = s.eval("""const e = Main.extensionManager.lookup('%s').stateObj; const t = Main.overview._overview.controls._thumbnailsBox._thumbnails.find(x => x.metaWorkspace === e._agentWs);
+                           const [x, y] = t.get_transformed_position(); return [x + t.get_transformed_size()[0] / 2, y + t.get_transformed_size()[1] / 2];""" % UUID)
             marks["clicked"] = time.monotonic() - rec._t0
             s.click(int(xy[0]), int(xy[1]))
-            ok = wait_for(lambda: info(s)["agentActive"] and not info(s)["overview"], 8, 0.1)
+            ok = wait_for(lambda: info(s)["agentActive"], 8, 0.1)
+            time.sleep(1.8)
+            s.shot(os.path.join(out, f"2a-agent-selected-in-overview-{tag}.png"))
+            big = s.eval("""const e = Main.extensionManager.lookup('%s').stateObj; const c = Main.overview._overview.controls; let vis = null;
+              for (const v of c._workspacesDisplay?._workspacesViews ?? []) for (const w of v._workspaces ?? []) if (w.metaWorkspace === e._agentWs) vis = [w.opacity, w.visible, w.mapped];
+              const ind = c._thumbnailsBox._indicator; return {vis, ring: ind.visible, overview: Main.overview.visible};""" % UUID)
+            check(f"[{tag}] a click on the agent thumbnail selects that desktop like any other (the overview stays open, GNOME's own ring on it, the big area shows the agent desktop)",
+                  bool(ok) and big["overview"] and big["ring"] and big["vis"] is not None and big["vis"][0] == 255, json.dumps(big))
+            marks["activated"] = time.monotonic() - rec._t0
+            s.click(800, 520)                                   # the big preview of the agent desktop: activating it enters
+            ok = wait_for(lambda: not info(s)["overview"], 8, 0.1)
             time.sleep(2.0)
             i = info(s)
-            check(f"[{tag}] a click on the agent thumbnail goes up to the agent desktop (overview closed, viewer focused)",
-                  bool(ok) and i["focus"] is not None and i["focus"].startswith("AgentWorkspaces"), json.dumps(i))
+            check(f"[{tag}] activating it (a click on the big preview) closes the overview on the agent desktop with the viewer focused",
+                  bool(ok) and i["agentActive"] and i["focus"] is not None and i["focus"].startswith("AgentWorkspaces") and not i["sliding"], json.dumps(i))
             s.shot(os.path.join(out, f"2-agent-desktop-{tag}.png"))
+            s.chord(*DOWN)
+            ok = wait_for(lambda: not info(s)["agentActive"], 6, 0.1)
+            time.sleep(1.8)
+            i = info(s)
+            check(f"[{tag}] ... and Ctrl+Shift+Alt+Down from there returns to workspace 2 (where the overview was opened)", bool(ok) and i["active"] == 1 and "alculator" in (i["focus"] or ""), json.dumps(i))
+            s.chord(*UP)
+            wait_for(lambda: info(s)["agentActive"], 6, 0.1)
+            time.sleep(2.0)
 
             # ---- 3. the keys that must do nothing up here
             marks["keys"] = time.monotonic() - rec._t0
@@ -208,19 +233,20 @@ def main():
             wait_for(lambda: info(s)["overview"], 5, 0.1)
             time.sleep(3.0)
             s.shot(os.path.join(out, f"7-overview-from-agent-{tag}.png"))
-            geo = s.eval("""const c = Main.overview._overview.controls; const ts = (c._thumbnailsBox._thumbnails ?? []).filter(x => x.visible && x.metaWorkspace.index() === 0);
-              if (!ts.length) return null; const [x, y] = ts[0].get_transformed_position(); return [x + ts[0].width / 2, y + ts[0].height / 2];""")
-            check(f"[{tag}] Super works from the agent desktop and GNOME's own thumbnails of your desktops are there to pick", geo is not None, json.dumps(geo))
+            geo = s.eval("""const e = Main.extensionManager.lookup('%s').stateObj; const c = Main.overview._overview.controls;
+              const ts = (c._thumbnailsBox._thumbnails ?? []).filter(x => x.visible && x.metaWorkspace !== e._agentWs && x.metaWorkspace.index() === 1);
+              if (!ts.length) return null; const [x, y] = ts[0].get_transformed_position(); return [x + ts[0].get_transformed_size()[0] / 2, y + ts[0].get_transformed_size()[1] / 2];""" % UUID)
+            check(f"[{tag}] Super works from the agent desktop and GNOME's own thumbnails of your desktops are there to pick (the agent one first, ringed)", geo is not None, json.dumps(geo))
             if geo:
                 s.click(int(geo[0]), int(geo[1]))
-                ok = wait_for(lambda: info(s)["active"] == 0, 6, 0.1)
+                ok = wait_for(lambda: info(s)["active"] == 1 and not info(s)["agentActive"], 6, 0.1)
                 time.sleep(2.0)
                 i = info(s)
-                ring = s.eval("""const e = Main.extensionManager.lookup('%s').stateObj; return [...e._strip._tiles.values()].map(t => t.ring.visible);""" % UUID)
+                ring = s.eval("""const c = Main.overview._overview.controls; const ind = c._thumbnailsBox._indicator; return [ind.visible, global.workspace_manager.get_active_workspace_index()];""")
                 s.shot(os.path.join(out, f"8-after-picking-workspace-1-{tag}.png"))
                 check(f"[{tag}] picking workspace 1 in the overview leaves the agent desktop cleanly (now on workspace 1 like any desktop switch in the overview, "
-                      f"nothing sliding or half done, window group untouched, the agent thumbnail's ring is gone and GNOME's own ring is back)",
-                      bool(ok) and i["active"] == 0 and not i["agentActive"] and not i["sliding"] and i["wg"] == [0, 0] and not any(ring), json.dumps([i, ring]))
+                      f"nothing sliding or half done, window group untouched, GNOME's own ring on the picked thumbnail)",
+                      bool(ok) and i["active"] == 1 and not i["agentActive"] and not i["sliding"] and i["wg"] == [0, 0] and ring[0], json.dumps([i, ring]))
                 s.chord("Escape")
                 time.sleep(1.5)
                 i = info(s)
@@ -237,7 +263,7 @@ def main():
             rows = -(-count // cols)
             subprocess.run(["ffmpeg", "-v", "error", "-y", "-pattern_type", "glob", "-i", os.path.join(out, "frames", name, "frame-*.png"),
                             "-vf", f"scale=400:-1,tile={cols}x{rows}", "-frames:v", "1", os.path.join(out, f"strip-{name}-{tag}.png")], check=True)
-        strip("click-enter", marks["clicked"] + off, 0.08, 20, cols=5)
+        strip("click-enter", marks["activated"] + off, 0.08, 20, cols=5)
         strip("shortcut-enter", marks["enter"] + off - 0.02, 0.04, 20, cols=5)
         strip("down-back", marks["down"] + off - 0.02, 0.04, 20, cols=5)
         errs = s.shell_errors()

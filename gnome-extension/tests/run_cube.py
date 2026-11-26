@@ -165,18 +165,14 @@ def main():
         s.chord("Super_L")
         wait_for(lambda: s.state()["overview"], 5, 0.1)
         time.sleep(3.0)
-        info = s.eval("""const e = Main.extensionManager.lookup('%s').stateObj; const st = e._strip; const c = Main.overview._overview.controls;
-          const tiles = st ? [...st._tiles.values()] : [];
-          const ag = e._agentWs; let agentThumbHidden = null;
-          for (const t of c._thumbnailsBox?._thumbnails ?? []) if (t.metaWorkspace === ag) agentThumbHidden = !t.visible;
-          return {strip: !!st && st.actor.visible, tiles: tiles.length, names: tiles.map(t => t.name),
-                  previews: tiles.map(t => !!t.preview.content), scale: c.scale_x, shift: c.translation_y,
-                  stripY: st ? st.actor.get_transformed_position()[1] : null, agentThumbHidden};""" % UUID)
+        info = s.eval("""const e = Main.extensionManager.lookup('%s').stateObj; const c = Main.overview._overview.controls;
+          const ts = c._thumbnailsBox._thumbnails; const t = ts.find(x => x.metaWorkspace === e._agentWs);
+          return {first: !!t && ts[0] === t, idx: t ? t.metaWorkspace.index() : -1, n: ts.length, vis: !!t && t.visible,
+                  sameSize: !!t && ts.every(x => Math.abs(x.get_transformed_size()[0] - t.get_transformed_size()[0]) <= 1),
+                  scale: c.scale_x, shift: c.translation_y};""" % UUID)
         s.shot(f"{s.base}/overview.png")
-        check(f"{T} Super shows the agent desktop above the personal ones: one tile per running workspace with a live preview, "
-              f"GNOME's own controls moved down, the agent workspace's own thumbnail hidden",
-              info["strip"] and info["tiles"] == 1 and info["names"] == ["research"] and all(info["previews"]) and
-              info["scale"] < 1 and info["shift"] > 30 and info["agentThumbHidden"] is True, json.dumps(info))
+        check(f"{T} Super shows the agent desktop as the first thumbnail of GNOME's own row (visible, same size as the others, GNOME's controls untouched)",
+              info["first"] and info["idx"] == 0 and info["vis"] and info["sameSize"] and info["scale"] == 1 and info["shift"] == 0, json.dumps(info))
         s.chord("Control_L", "Shift_L", "Alt_L", "Up")
         wait_for(lambda: s.state()["active"] >= n and not s.state()["overview"], 6, 0.1)
         time.sleep(1.8)
@@ -197,13 +193,17 @@ def main():
         s.chord("Super_L")
         wait_for(lambda: s.state()["overview"], 5, 0.1)
         time.sleep(3.0)
-        xy = s.eval(f"""const st = Main.extensionManager.lookup('{UUID}').stateObj._strip; const t = [...st._tiles.values()][0].slot;
-                       const [x, y] = t.get_transformed_position(); return [x + t.width / 2, y + t.height / 2];""")
+        xy = s.eval(f"""const e = Main.extensionManager.lookup('{UUID}').stateObj; const t = Main.overview._overview.controls._thumbnailsBox._thumbnails.find(x => x.metaWorkspace === e._agentWs);
+                       const [x, y] = t.get_transformed_position(); const [w, h] = t.get_transformed_size(); return [x + w / 2, y + h / 2];""")
         s.click(int(xy[0]), int(xy[1]))
-        wait_for(lambda: s.state()["active"] >= n and not s.state()["overview"], 8, 0.1)
+        wait_for(lambda: ext(s, "e._agentActive()"), 8, 0.1)
+        time.sleep(1.5)
+        check(f"{T} clicking the agent thumbnail selects that desktop like any other (overview stays open)", ext(s, "e._agentActive()") and s.state()["overview"])
+        s.click(800, 520)
+        wait_for(lambda: not s.state()["overview"], 8, 0.1)
         time.sleep(1.8)
-        check(f"{T} clicking an agent preview in the overview goes up to it (overview closes, slide)",
-              s.state()["active"] >= n and not s.state()["overview"] and ext(s, "e._lastKind") == "slide")
+        check(f"{T} activating it (a click on the big preview) closes the overview on the agent desktop",
+              ext(s, "e._agentActive()") and not s.state()["overview"] and ext(s, "e._agentWs.index()") >= n)
         s.chord("Control_L", "Shift_L", "Alt_L", "Down")
         time.sleep(1.8)
 
