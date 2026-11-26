@@ -1,8 +1,11 @@
 # AgentWorkspaces GNOME Shell extension (optional)
 
-Ctrl+Alt+Down enters the AgentWorkspaces viewer on its own GNOME workspace. Ctrl+Alt+Up returns to the personal
-workspace you came from. The move is a vertical slide. Ctrl+Alt+Left/Right and every other workspace key are left
-alone.
+The agent desktop is stacked ON TOP of your personal ones. **Ctrl+Shift+Alt+Up** goes up to it (your personal desktop slides down
+and out, the agent desktop slides down into place from above); **Ctrl+Shift+Alt+Down** comes back to the personal workspace you
+came from. Ctrl+Alt+Left/Right still walk through your personal workspaces only (the agent desktop is skipped), also with
+Desktop Cube, which keeps doing its own rotation. The Super overview shows the running agent desktops in a strip above the
+personal ones; click one to go up to it. With no agent workspace running the extension does nothing at all: no window, no
+popup, no animation, nothing in the overview.
 
 AgentWorkspaces works fully without this extension (`agent-workspaces enter NAME` opens the viewer window from any
 terminal or from Gnotch). The extension only adds the keyboard navigation.
@@ -27,9 +30,10 @@ gnome-extensions disable agent-workspaces@agentworkspaces.dev    # restores the 
 
 ## What it changes while enabled
 
-* GNOME binds Ctrl+Alt+Up and Ctrl+Alt+Down to *switch-to-workspace-up/down* (no-ops in the default horizontal
-  workspace layout). The extension takes those two accelerators over. It removes **only** the accelerators it
-  needs from `org.gnome.desktop.wm.keybindings` `switch-to-workspace-up` and `switch-to-workspace-down`. The
+* The shortcuts are **Ctrl+Shift+Alt+Up** (go up) and **Ctrl+Shift+Alt+Down** (come back). GNOME's own Ctrl+Shift+Alt+Up/Down and
+  Ctrl+Alt+Left/Right are not touched. GNOME binds Ctrl+Shift+Alt+Up/Down to *move-to-workspace-up/down* (move the
+  window one workspace up/down), so the extension takes those two accelerators over: it removes **only** the accelerators it
+  needs from `org.gnome.desktop.wm.keybindings` `move-to-workspace-up` and `move-to-workspace-down`. The
   original lists are written to its own `backup` setting *before* the change, and put back when the extension is
   disabled, when the shortcut setting changes, and at the next start if the shell ended while they were removed
   (crash, power loss).
@@ -45,27 +49,32 @@ shortcut, press a new one with Ctrl, Alt or Super; the arrow button restores the
 AgentWorkspaces workspace on demand*.
 
 GSettings schema `org.gnome.shell.extensions.agent-workspaces`: `enter-shortcut`, `return-shortcut` (`as`),
-`create-on-demand` (`b`), `use-cube-transition` (`b`, turn the Desktop Cube when it is enabled, else slide),
-`environment-mode` (`b`, open the viewer full screen). The keys `backup`, `conflicts`, `test-hooks` are state, not options.
+`create-on-demand` (`b`), `environment-mode` (`b`, open the viewer full screen), `daemon-command` (`s`, how to start the service
+if its systemd unit cannot). The keys `backup`, `conflicts`, `test-hooks` are state, not options.
 
 ## How it behaves
 
-* Enter: records the workspace you are on, finds the workspace that holds the viewer window (window app id
-  `dev.agentworkspaces.Viewer`, or title starting with `AgentWorkspaces:`), or creates one (the empty workspace
-  GNOME keeps at the end, or a new one) and asks the daemon (`workspace.enter`, `docs/api.md`, with the admin
-  credential: `AW_ADMIN_TOKEN`, the file `AW_ADMIN_TOKEN_FILE`, else `<base>/admin.token`, base being `AW_BASE_DIR` or `$XDG_RUNTIME_DIR/agent-workspaces`) to open the viewer maximized on it. The viewer
-  (`docs/viewer.md`) is the whole UI: workspace list, overview, control, requests. It opens on the workspace you used
-  last. The viewer's "Back to desktop" button calls this extension's session-bus method `Return` (same as Ctrl+Alt+Up). With no daemon running it still switches, and shows a notice with the command to start it.
-* Return: back to the recorded workspace. If it no longer exists (GNOME removes empty workspaces), to the
-  neighbouring one.
-* On a vertical workspace layout (for example with V-Shell) Ctrl+Alt+Down already means "next workspace", so the
-  keys are passed through to the normal neighbour switch.
+* Up: always goes up. The service is started first if it is not up (the systemd user unit, else the daemon itself, bounded
+  waits; see `../docs/gnome-extension.md`) and, when nothing is running, asked for the default desktop (`workspace.ensure_default`:
+  a workspace called `agents`, no agent assigned, created or started on the first Up; never at login). The slide starts when the
+  viewer has its first frame. Records the workspace you are on and
+  the window that has focus, finds or creates the GNOME workspace that holds the viewer (the empty workspace GNOME keeps at
+  the end, or a new one), slides to it and asks the daemon (`workspace.enter`, `docs/api.md`, admin credential: `AW_ADMIN_TOKEN`,
+  the file `AW_ADMIN_TOKEN_FILE`, else `<base>/admin.token`) to open the viewer there. Never a notification or popup: if something is wrong the viewer says so, once, in its own window.
+* Down: back to the recorded workspace and the window you were in; if it no longer exists (GNOME removes empty workspaces), to
+  the neighbouring one. Closing the viewer window by hand while up there takes you back down.
+* Super overview: Ctrl+Shift+Alt+Up/Down work there too (the overview closes first). The agent desktop is one more thumbnail in GNOME's
+  own row, first, with the live agent screen: a click selects it like any desktop (the big area shows it), a click on the big
+  preview enters. Up there, Ctrl+Alt+Left/Right/Up/Down and the other workspace keys do nothing (with two or more agent workspaces,
+  Left/Right move between those only); Ctrl+Shift+Alt+Down returns to the desktop you came from; Super still opens the overview.
+* On a vertical workspace layout (for example with V-Shell) Ctrl+Shift+Alt+Up already means "the workspace above", so the keys are
+  passed through to the normal neighbour switch.
 * Animations follow GNOME's *enable-animations* setting and are skipped while the Overview is open.
 
 ## Desktop Cube, Tiling Shell, V-Shell
 
 Checked in isolated shells, see `../docs/gnome-extension.md`: Desktop Cube keeps turning for Ctrl+Alt+Left/Right and is
-not touched by the vertical slide; Tiling Shell binds no Ctrl+Alt+Up/Down by default (a foreign binding on the same
+not touched by the vertical slide (the agent desktop is never a cube face); Tiling Shell binds no Ctrl+Shift+Alt+Up/Down by default (a foreign binding on the same
 accelerator is reported, never edited); V-Shell with a horizontal layout coexists. Not run: V-Shell with a vertical layout.
 
 ## Tests
@@ -75,7 +84,7 @@ HOME/XDG dirs, GSETTINGS_BACKEND=keyfile, private session bus and a private stan
 logind and polkit are unreachable), installs the extension there only, injects key events inside that shell and
 prints PASS/FAIL per check. `--coexist` runs a shorter check next to desktop-cube and tilingshell (private copies).
 `python3 tests/run_real.py` is the same isolation with the real daemon, workspaces and viewer and the developer's own
-extension set (53 checks); `tests/demo_video.py OUT.mp4` records the demo; `tests/measure_gs.py` measures CPU, memory and latency.
+extension set (54 checks); `tests/demo_video.py OUT.mp4` records the demo; `tests/measure_gs.py` measures CPU, memory and latency.
 `--prefs out.png` opens the preferences window in the isolated shell and saves a screenshot. It uses
 `/run/user/$UID/aw-ext-test/` and removes it afterwards (`--keep` leaves it). Needs `gnome-shell`, `dbus-daemon`,
 `glib-compile-schemas`, python3-gi with Gtk 4. Nothing is sent to your running session.

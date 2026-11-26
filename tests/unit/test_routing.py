@@ -156,6 +156,8 @@ class NoHostDisplayInTheCode(unittest.TestCase):
         "aw/audio.py": "private audio daemons get XDG_RUNTIME_DIR = the workspace's own runtime dir",
         "aw/paths.py": "XDG_RUNTIME_DIR locates the base directory of the API socket",
         "aw/agentrun.py": "builds the AGENT process environment from scratch; names the host display variables to REFUSE them",
+        "aw/guard_install.py": "installs the guard: names XDG_RUNTIME_DIR for the guard environment it writes into agent settings",
+        "aw/guard.py": "the agent-shell guard: names the display variables to take them away and to deny re-assignment",
         "aw/sandbox.py": "--setenv XDG_RUNTIME_DIR <the workspace's own runtime dir>",
     }
 
@@ -178,7 +180,7 @@ class NoHostDisplayInTheCode(unittest.TestCase):
         bad = {"xdotool", "ydotool", "ydotoold", "wtype", "grim", "dotool", "/dev/uinput", "/dev/input"}
         for dirpath, _, files in os.walk(os.path.join(ROOT, "aw")):
             for f in files:
-                if f.endswith(".py"):
+                if f.endswith(".py") and f != "guard.py":      # guard.py names them only to DENY them in agent shells
                     for v, line in string_constants(os.path.join(dirpath, f)):
                         self.assertFalse(v in bad or v.startswith("/dev/input/"), f"{f}:{line}: {v}")
 

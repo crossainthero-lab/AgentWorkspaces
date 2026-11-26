@@ -76,6 +76,7 @@ POLICY: Dict[str, Tuple[str, Optional[str]]] = {
     "workspace.takeover": ("wsadmin", None), "workspace.resume": ("wsadmin", None),
     "workspace.rename": ("wsadmin", None),
     "workspace.create": ("global", None), "workspace.destroy": ("global", None),
+    "workspace.ensure_default": ("global", None),
     "workspace.assign": ("global", None), "workspace.enter": ("global", None),
     "viewer.attach": ("global", None),
     "credential.list": ("global", None), "credential.issue": ("global", None),

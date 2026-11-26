@@ -1,0 +1,38 @@
+prompt: Open http://127.0.0.1:46771/observatory.html in a browser, scroll down and tell me the diameter of the telescope's main mirror.
+model: qwen3.8-27b-agent
+result: PASS
+verified by: server log: 1 Chrome request(s) for /observatory; expected 2.55 in answer
+seconds: 59.2  exit: 0
+host display variables seen in the agent process group: []
+host wayland sockets unchanged: True
+
+[init] model=qwen3.8-27b-agent
+  call tool_search {"queries": ["agent workspaces browser", "agent workspaces screenshot"]}
+  ->  {"queries": ["agent workspaces browser", "agent workspaces screenshot"], "total_available": 33, "results": [{"...
+  call launch_browser {}
+  ->  launched google-chrome (app 1, pid 3924854), profile throwaway. Take a screenshot to see it.
+  call screenshot {}
+  -> <image as file path: MEDIA tag> {"_multimodal": true, "content": [{"type": "text", "text": "{\"result\": \" 'hermes-r21835-browser-fact-1' scr...
+  call mouse_click {"x": 500, "y": 63}
+  ->  ok (pointer at 500,63)
+  call keyboard_type {"text": "http://127.0.0.1:46771/observatory.html\n"}
+  ->  ok (pointer at 500,63)
+  call wait {"seconds": 2}
+  ->  waited
+  call screenshot {}
+  -> <image as file path: MEDIA tag> {"output": "{\"_multimodal\": true, \"content\": [{\"type\": \"text\", \"text\": \"{\\\"result\\\": \\\" 'herm...
+  call scroll {"dy": 500, "x": 640, "y": 360}
+  ->  ok (pointer at 640,360)
+  call screenshot {}
+  -> <image as file path: MEDIA tag> {"output": "{\"_multimodal\": true, \"content\": [{\"type\": \"text\", \"text\": \"{\\\"result\\\": \\\" 'herm...
+  call scroll {"dy": 2000, "x": 640, "y": 360}
+  ->  ok (pointer at 640,360)
+  call screenshot {}
+  -> <image as file path: MEDIA tag> {"output": "{\"_multimodal\": true, \"content\": [{\"type\": \"text\", \"text\": \"{\\\"result\\\": \\\" 'herm...
+  call keyboard_key {"combo": "End"}
+  ->  ok (pointer at 640,360)
+  call screenshot {}
+  -> <image as file path: MEDIA tag> {"output": "{\"_multimodal\": true, \"content\": [{\"type\": \"text\", \"text\": \"{\\\"result\\\": \\\" 'herm...
+agent: Found it. At the bottom of the page, under "Facts:", it reads:  "the main mirror of the telescope measures **2.55 metres** across."  So the diameter of the telescope's main mirror is **2.55 metres**.
+
+USAGE null

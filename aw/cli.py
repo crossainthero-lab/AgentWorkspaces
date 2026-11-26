@@ -9,7 +9,7 @@ import subprocess
 import sys
 from typing import List, Optional
 
-from . import __version__
+from . import __version__, paths
 from .client import ApiError, Client
 
 
@@ -39,6 +39,11 @@ def build_parser() -> argparse.ArgumentParser:
         p.add_argument("--as-agent", metavar="KIND", help="identify as an agent kind (claude-code, codex, ...)")
 
     sub.add_parser("daemon", help="run the workspace daemon in the foreground")
+    vw = sub.add_parser("viewer", help="open the viewer window (starts the service if it is not running)")
+    vw.add_argument("workspace", nargs="?")
+    vw.add_argument("--environment", action="store_true", help="full-screen agent desktop, no window chrome")
+    vw.add_argument("--maximized", action="store_true")
+    sub.add_parser("stop-daemon", help="stop the daemon process (workspaces keep running and are re-adopted)")
     sub.add_parser("status", help="daemon status + workspace summary").add_argument("workspace", nargs="?")
     sub.add_parser("list", help="list workspaces").add_argument("--all", action="store_true")
 
@@ -156,6 +161,7 @@ def build_parser() -> argparse.ArgumentParser:
     ig.add_argument("agent", choices=["claude-code", "codex", "antigravity", "hermes"])
     ig.add_argument("action", choices=["status", "install", "uninstall", "show", "run"])
     ig.add_argument("prompt", nargs="?", help="with 'run': the one-off prompt")
+    ig.add_argument("--no-guard", action="store_true", help="do not install the graphical-isolation guard (Claude Code, Hermes)")
     ig.add_argument("--dry-run", action="store_true", help="print what install/uninstall would do")
     ig.add_argument("--model", help="with 'run': model name (default: the cheapest suitable one)")
     ig.add_argument("--project", help="with 'run': project name used in the workspace name")
@@ -166,9 +172,27 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv: Optional[List[str]] = None) -> int:
     args = build_parser().parse_args(argv)
+    if args.cmd == "stop-daemon":
+        import signal
+        pf = os.path.join(paths.base_dir(), "daemon.pid")
+        try:
+            pid = int(open(pf).read())
+            if b"aw.daemon" not in open(f"/proc/{pid}/cmdline", "rb").read() and b"agent-workspaces" not in open(f"/proc/{pid}/cmdline", "rb").read():
+                print("the recorded pid is not the daemon; nothing stopped", file=sys.stderr)
+                return 1
+            os.kill(pid, signal.SIGTERM)
+            print(f"daemon (pid {pid}) told to stop; workspaces keep running")
+            return 0
+        except (OSError, ValueError):
+            print("no daemon is running")
+            return 0
     if args.cmd == "daemon":
         from .daemon import serve
         return serve()
+    if args.cmd == "viewer":
+        # The viewer needs no running service: it starts the service itself and says so when it cannot.
+        from .viewer import main as viewer_main
+        return viewer_main((["--environment"] if args.environment else []) + (["--maximized"] if args.maximized else []) + ([args.workspace] if args.workspace else []))
     if args.cmd == "mcp":
         from .mcp import run
         return run(args.workspace)

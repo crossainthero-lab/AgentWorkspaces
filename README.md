@@ -17,7 +17,7 @@ Each workspace is a separate headless Wayland compositor (labwc/wlroots) running
 | `agent-workspaces` CLI + daemon | create, rename, assign to an agent, list, launch apps, screenshot, windows, click/move/type/key/scroll, display info, window actions, pause/resume agent input, enter, destroy |
 | MCP server (stdio) | screenshot, windows, launch app, mouse, keyboard, scroll, window actions, display info, status. Bound to the workspace assigned to the calling agent |
 | Viewer window | one GTK4 window for all workspaces: sidebar, live overview, Agent / Paused / You control ("You" forwards your mouse and keyboard), approvals and grants, create / stop / close. No GNOME extension needed ([docs/viewer.md](docs/viewer.md)) |
-| Optional GNOME extension | Ctrl+Alt+Down enters the AgentWorkspaces workspace, Ctrl+Alt+Up returns. Separate, opt-in, restores your previous shortcuts. See [gnome-extension/](gnome-extension/README.md) |
+| Optional GNOME extension | Ctrl+Shift+Alt+Up goes up to the agent desktop (stacked above your personal ones), Ctrl+Shift+Alt+Down comes back; the Super overview shows the agent desktop as one more thumbnail in your own row, first. Separate, opt-in, restores your previous shortcuts. See [gnome-extension/](gnome-extension/README.md) |
 | Local API v2 | JSON lines over a unix socket, with events; every request carries a credential (per-workspace token for agents, admin token for you). Spec: [docs/api.md](docs/api.md) |
 | Browsers, windows, audio | `launch-browser` (private throwaway/agent profiles; a copy of your signed-in profile only after you approve it in a terminal), one window list for Wayland and XWayland windows with move/resize, a private audio sink per workspace you can record: [browsers](docs/browsers.md), [windows](docs/windows.md), [audio](docs/audio.md), [compatibility](docs/compatibility.md) |
 | Per-agent integration | Claude Code, Codex, Antigravity, Hermes Agent, each opt-in and reversible: [docs/integrations.md](docs/integrations.md) |
@@ -25,13 +25,27 @@ Each workspace is a separate headless Wayland compositor (labwc/wlroots) running
 ## Install (user level, no root, nothing in GNOME changes)
 
 ```bash
+git clone -b feat/release-agents https://github.com/crossainthero-lab/AgentWorkspaces && cd AgentWorkspaces   # main only has the README until the PRs are merged
 sudo apt install labwc          # the only package that needs root, if you do not have it yet
+./install.sh --dry-run          # optional: prints every change, writes nothing
 ./install.sh                    # copies to ~/.local/share/agent-workspaces, links ~/.local/bin/agent-workspaces
 agent-workspaces create --name research --agent claude-code
 agent-workspaces launch research -- gnome-text-editor
 agent-workspaces screenshot research -o research.png
 agent-workspaces enter research
 ```
+
+The service (daemon) starts on demand when an agent or the CLI needs it and exits when idle. To keep it running, which the GNOME extension and the viewer like: `./install.sh --enable-service` (reverse: `./uninstall.sh`, or `systemctl --user disable --now agent-workspaces.service`).
+
+Optional GNOME Shell extension (Ctrl+Shift+Alt+Up goes up to the AgentWorkspaces desktop, Ctrl+Shift+Alt+Down comes back; with nothing running, the first Up creates a default `agents` desktop; no popups; GNOME's own Ctrl+Alt shortcuts stay as they are; while enabled it takes over GNOME's Ctrl+Shift+Alt+Up/Down (move window) and restores them when disabled):
+
+```bash
+gnome-extension/install.sh      # copies files and compiles the schema, enables nothing
+# log out and in once: on Wayland GNOME only discovers a newly installed extension at login
+gnome-extensions enable agent-workspaces@agentworkspaces.dev
+```
+
+If `gsettings get org.gnome.shell disable-user-extensions` prints `true`, no user extension loads at all; set it to `false` first. Disable with `gnome-extensions disable agent-workspaces@agentworkspaces.dev`. Install, status, uninstall and restore commands for the Claude Code and Hermes integrations: [docs/RELEASE.md](docs/RELEASE.md).
 
 Remove everything with `./uninstall.sh` (`--stop-workspaces`, `--remove-integrations` are available). Requirements: labwc, python3, systemd user session, libxkbcommon, and python3-gi with GTK4 for the viewer.
 

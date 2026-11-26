@@ -31,6 +31,8 @@ class Integrations(unittest.TestCase):
 
     def test_roundtrip_each_installed_agent(self):
         before = {p: digest(p) for p in REAL}
+        cj0 = os.path.expanduser("~/.claude.json")
+        had_entry = os.path.exists(cj0) and "agent-workspaces" in open(cj0).read()     # true when really installed
         tried = []
         for agent, exe in (("claude-code", "claude"), ("codex", "codex"), ("antigravity", "agy"), ("hermes", "hermes")):
             if not shutil.which(exe):
@@ -49,6 +51,11 @@ class Integrations(unittest.TestCase):
                 if agent == "antigravity":
                     rf = os.path.join(home, ".gemini", "GEMINI.md")
                     self.assertIn("agent-workspaces:begin", open(rf).read())
+                if agent in ("claude-code", "hermes"):
+                    self.assertIn("guard is ON", st.stdout, f"{agent}: {st.stdout}")
+                if agent == "hermes":
+                    soul = os.path.join(home, ".hermes", "SOUL.md")
+                    self.assertIn("agent-workspaces:begin", open(soul).read())
                 u = self.run_cli(home, agent, "uninstall")
                 self.assertEqual(u.returncode, 0, f"{agent} uninstall: {u.stdout} {u.stderr}")
                 st = self.run_cli(home, agent, "status")
@@ -57,6 +64,11 @@ class Integrations(unittest.TestCase):
                     self.assertFalse(os.path.exists(sk))
                 if agent == "antigravity":
                     self.assertFalse(os.path.exists(rf), "the managed block (the only content) must be removed")
+                if agent == "hermes":
+                    # Hermes seeds its own starter SOUL.md: our block must be gone, the rest stays
+                    self.assertTrue(not os.path.exists(soul) or "agent-workspaces:begin" not in open(soul).read())
+                if agent in ("claude-code", "hermes"):
+                    self.assertIn("guard is OFF", st.stdout)
                 tried.append(agent)
             finally:
                 shutil.rmtree(home, ignore_errors=True)
@@ -66,7 +78,7 @@ class Integrations(unittest.TestCase):
         # ~/.claude.json is rewritten constantly by running Claude sessions, so check for our entry instead
         cj = os.path.expanduser("~/.claude.json")
         if os.path.exists(cj):
-            self.assertNotIn("agent-workspaces", open(cj).read(), "integration leaked into the real Claude config")
+            self.assertEqual(had_entry, "agent-workspaces" in open(cj).read(), "the test changed the real Claude config")
 
     def test_show_prints_the_assigned_workspace_rule(self):
         home = tempfile.mkdtemp(prefix="awint")

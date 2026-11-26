@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
+import tempfile
 import signal
 import subprocess
 import sys
@@ -20,6 +22,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)
 sys.path.insert(0, ROOT)
 
 from aw import agentrun  # noqa: E402
+from tests.acceptance import privenv  # noqa: E402
 from aw.client import Client  # noqa: E402
 
 PROMPTS = {
@@ -34,6 +37,8 @@ PROMPTS = {
 
 def start_daemon(tag: str):
     from tests.integration import common
+    d = tempfile.mkdtemp(prefix="awt-daemonhome-", dir=privenv.real_runtime_dir())
+    os.environ["AW_TEST_DAEMON_HOME"] = d       # the daemon (human-side service) gets a throw-away HOME as well
     cli = common.start_daemon(tag)
     return common, cli
 
@@ -49,13 +54,40 @@ def host_fingerprint() -> Dict[str, Any]:
     return out
 
 
+_PLAN_LOCK = threading.Lock()
+
+
 def run_agent(agent: str, prompt: str, base: str, project: str, run_dir: str, model: Optional[str] = None,
               timeout: float = 240.0, extra_env: Optional[Dict[str, str]] = None, shots_every: float = 6.0,
-              ws_name: Optional[str] = None, instructions: bool = True) -> Dict[str, Any]:
+              ws_name: Optional[str] = None, instructions: bool = True, customize=None, cwd: Optional[str] = None, post=None) -> Dict[str, Any]:
     os.makedirs(run_dir, exist_ok=True)
-    plan = agentrun.plan(agent, prompt, model=model, project=project, base_dir=base, extra_env=extra_env,
-                      instructions=instructions)
-    assert "DISPLAY" not in plan.env and "WAYLAND_DISPLAY" not in plan.env
+    if agent not in ("claude-code", "hermes"):
+        raise NotImplementedError("private-environment runs exist for claude-code and hermes only")
+    priv = privenv.PrivateEnv("agent")
+    with _PLAN_LOCK:       # tempfile.tempdir is process-global: two runs at once must not interleave
+        old_tmp, tempfile.tempdir = tempfile.tempdir, priv.tmp      # the agent's project dir and runtime dir are private too
+        try:
+            plan = agentrun.plan(agent, prompt, model=model, project=project, base_dir=base, extra_env=extra_env,
+                                 instructions=instructions, cwd=cwd)
+        finally:
+            tempfile.tempdir = old_tmp
+    plan.extra_env, plan.allowed_roots = {}, ()
+    if customize:
+        customize(plan)          # may add plan.extra_env (a STAND-IN desktop's variables) and plan.allowed_roots
+    # The environment of the agent: private HOME + XDG dirs, private runtime dir, system PATH, no display / bus / real
+    # profile. Only the agent's own login is added (symlinked login file / one environment variable).
+    env = priv.env()
+    for k in ("HERMES_HOME", "SPARK_LLM_API_KEY"):
+        if k in plan.env:
+            env[k] = plan.env[k]
+    if agent == "claude-code":
+        env.update(priv.claude_login())
+    env.update(plan.extra_env)
+    lines = privenv.assert_private(env, plan.allowed_roots, label=f"{agent} run", allowed_values=getattr(plan, "allowed_values", None))
+    with open(os.path.join(run_dir, "planned-env.txt"), "w") as f:
+        f.write("\n".join(lines) + "\nargv[0]: " + os.path.basename(plan.argv[0]) + "\n")
+    plan.argv[0] = shutil.which(plan.argv[0]) or plan.argv[0]       # resolved with the harness PATH; the agent gets a system PATH
+    plan.env = env
     out_f = open(os.path.join(run_dir, "agent.stdout"), "wb")
     err_f = open(os.path.join(run_dir, "agent.stderr"), "wb")
     t0 = time.time()
@@ -167,7 +199,21 @@ def run_agent(agent: str, prompt: str, base: str, project: str, run_dir: str, mo
     except Exception as e:
         res["workspace_error"] = str(e)
     res["dbus_proxy_calls"] = plan.keyring_summary()
+    try:      # proof of what the agent could use: the tool list it started with (Claude prints it in its init event)
+        for l in open(os.path.join(run_dir, "agent.stdout"), errors="replace"):
+            m = json.loads(l)
+            if m.get("type") == "system" and m.get("subtype") == "init":
+                res["agent_tools"] = {"tools": m.get("tools"), "mcp_servers": m.get("mcp_servers")}
+                break
+    except (OSError, ValueError):
+        pass
+    if post:
+        try:
+            res["verify"] = post(res, plan)      # independent checks, before the agent's project dir is removed
+        except Exception as e:  # noqa
+            res["verify"] = {"error": repr(e)}
     plan.close()
+    priv.close()
     out_f.close()
     err_f.close()
     return res

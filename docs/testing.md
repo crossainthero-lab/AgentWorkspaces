@@ -2,7 +2,7 @@
 
 Tests are split on purpose. Unit tests need no compositor and cannot fail because of the machine. Real integration tests start real compositors and real apps and are labelled as such in their module docstrings.
 
-## Unit tests (176, `tests/unit/`)
+## Unit tests (203, `tests/unit/`)
 
 ```bash
 python3 -m unittest discover -s tests/unit -t .
@@ -81,12 +81,10 @@ The test harness (`tests/harness.py`) provides **HostSim**, the stand-in desktop
 
 ## Isolated GNOME Shell, real stack
 
-`python3 -I gnome-extension/tests/run_real.py [--plain] [--media DIR]`: 53 checks (50 with `--plain`) with the real daemon, real workspaces, the real
+`python3 -I gnome-extension/tests/run_real.py [--plain] [--media DIR]`: 54 checks (51 with `--plain`) with the real daemon, real workspaces, the real
 viewer and the developer's extension set in a private headless GNOME Shell; `demo_video.py` records the demo video;
 `measure_gs.py` prints the numbers in [measurements.md](measurements.md). Details: [gnome-extension.md](gnome-extension.md).
-`python3 -I gnome-extension/tests/run_cube.py --personal N` (N = 2 and 4): 21 checks of the cube-native Ctrl+Alt+Down/Up turn with Desktop Cube, Tiling Shell and the other extensions of the developer's session (copied; their settings are read once with `dconf dump` into a private keyfile), full-screen environment mode and what the turn leaves behind.
-They use the user's systemd manager only to create workspace scopes (as the integration tests do), nothing on the real
-screen, no write to the real dconf (the user's extension settings are only *read* with `dconf dump`).
+`python3 -I gnome-extension/tests/run_cube.py --personal N` (N = 2 and 4): 26 checks each of the stacked agent desktop with Desktop Cube enabled (slide both ways, overview strip, rapid keys, Left/Right with the cube, focus, bar and dock). `run_silent.py` (21 checks): the cold start (nothing running: Up starts the service, creates `agents` and enters), repeated cycles, a stopped desktop, the overview tile, the slide starting on the viewer's first frame, and the two failure paths (creation fails, service cannot start) that must show no popup or notification. `run_isolated.py`: 28 checks with stand-ins. All use a private D-Bus; the harness aborts when the address is missing, empty or the real one.
 
 ## GNOME extension tests (earlier, with stand-ins)
 

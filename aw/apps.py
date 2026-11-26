@@ -76,7 +76,7 @@ def parse_desktop(path: str) -> Optional[Dict]:
         return None
     return {"id": os.path.basename(path)[:-len(".desktop")], "name": entry["Name"], "argv": argv,
             "categories": [c for c in entry.get("Categories", "").split(";") if c],
-            "comment": entry.get("Comment", ""), "mime": [m for m in entry.get("MimeType", "").split(";") if m]}
+            "comment": entry.get("Comment", ""), "icon": entry.get("Icon", ""), "mime": [m for m in entry.get("MimeType", "").split(";") if m]}
 
 
 def list_apps(deny: Optional[List[str]] = None, dirs: Optional[List[str]] = None) -> List[Dict]:

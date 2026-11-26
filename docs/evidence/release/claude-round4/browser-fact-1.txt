@@ -1,0 +1,40 @@
+prompt: Open http://127.0.0.1:37029/observatory.html in a browser, scroll down and tell me the diameter of the telescope's main mirror.
+model: haiku
+result: PASS
+verified by: server log: 1 Chrome request(s) for /observatory; expected 1.10 in answer
+seconds: 14.3  exit: 0
+host display variables seen in the agent process group: ['DISPLAY', 'WAYLAND_DISPLAY', 'WAYLAND_SOCKET', 'XAUTHORITY']
+host wayland sockets unchanged: True
+
+[init] model=claude-haiku-5-5 mcp=[('agent-workspaces', 'connected')] builtin_tools=['Bash']
+  call launch_browser {"url": "http://127.0.0.1:37029/observatory.html", "profile": "throwaway"}
+  -> launched google-chrome (app 1, pid 3823046), profile throwaway. Take a screenshot to see it.
+  call screenshot {}
+  -> <image> | workspace 'claude-code-r17529-browser-fact-1' screen 1280x720 px (captured in 10.0 ms); also saved as <run>/w1...
+agent: The screen is black, so I'll check whether the browser window actually opened.
+  call list_windows {}
+  -> [   {     "id": 1,     "kind": "wayland",     "title": "Greenfield Observatory - Google Chrome",     "app_id":...
+  call wait {"seconds": 3}
+  -> waited
+  call screenshot {}
+  -> <image> | workspace 'claude-code-r17529-browser-fact-1' screen 1280x720 px (captured in 9.4 ms); also saved as <run>/w18...
+agent: The page is loaded. I'll scroll down to find the mirror information.
+  call scroll {"dy": 10000, "x": 600, "y": 400}
+  -> ok (pointer at 600,400)
+  call screenshot {}
+  -> <image> | workspace 'claude-code-r17529-browser-fact-1' screen 1280x720 px (captured in 9.1 ms); also saved as <run>/w18...
+agent: The scroll didn't move the page, so I'll jump to the bottom with the End key.
+  call keyboard_key {"combo": "End"}
+  -> ok (pointer at 600,400)
+  call screenshot {}
+  -> <image> | workspace 'claude-code-r17529-browser-fact-1' screen 1280x720 px (captured in 23.1 ms); also saved as <run>/w1...
+agent: The page is long and the End key only moved it partway. I'll press End again and wait for it to settle.
+  call keyboard_key {"combo": "End"}
+  -> ok (pointer at 600,400)
+  call wait {"seconds": 2}
+  call screenshot {}
+  -> waited
+  -> <image> | workspace 'claude-code-r17529-browser-fact-1' screen 1280x720 px (captured in 11.1 ms); also saved as <run>/w1...
+agent: The main mirror of the telescope is **1.10 metres** across. It's in the page's "Facts" line near the bottom of http://127.0.0.1:37029/observatory.html, just above "Open on clear nights." The rest of the page is repeated ...
+
+USAGE {"turns": 13, "cost_usd": 0.0036318100000000005, "duration_ms": 13382, "input": 16, "cache_read": 116961, "cache_creation": 9798, "output": 1002}

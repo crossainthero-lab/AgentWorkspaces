@@ -29,11 +29,14 @@ class Daemon:
         os.makedirs(self.base, mode=0o700, exist_ok=True)
         home = os.path.join(session.base, "dhome")
         os.makedirs(home, mode=0o700, exist_ok=True)
-        host_rt = f"/run/user/{os.getuid()}"
+        # Fully private: the daemon gets the isolated session's runtime dir and bus, never the user's. It therefore finds
+        # no systemd user manager and runs workspaces as plain processes (no transient scopes, no cgroup accounting).
+        from gnome_session import assert_private_bus
         self.env = {"PATH": "/usr/bin:/bin", "HOME": home, "XDG_CONFIG_HOME": os.path.join(home, ".config"),
                     "XDG_STATE_HOME": os.path.join(home, ".state"), "AW_BASE_DIR": self.base, "PYTHONPATH": ROOT,
-                    "XDG_RUNTIME_DIR": host_rt, "DBUS_SESSION_BUS_ADDRESS": f"unix:path={host_rt}/bus",
+                    "XDG_RUNTIME_DIR": session.rt, "DBUS_SESSION_BUS_ADDRESS": session.env["DBUS_SESSION_BUS_ADDRESS"],
                     "LANG": "C.UTF-8", "GSETTINGS_BACKEND": "memory"}
+        assert_private_bus(self.env["DBUS_SESSION_BUS_ADDRESS"], session.base)
         for k in ("AW_VIEWER_DEBUG", "AW_VIEWER_METRICS"):     # opt-in diagnostics for the viewer the daemon starts
             if os.environ.get(k):
                 self.env[k] = os.environ[k]

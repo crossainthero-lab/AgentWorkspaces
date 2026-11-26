@@ -4,15 +4,15 @@
           path="/org/gnome/shell/extensions/agent-workspaces/">
 
     <key name="enter-shortcut" type="as">
-      <default>["&lt;Control&gt;&lt;Alt&gt;Down"]</default>
-      <summary>Enter AgentWorkspaces</summary>
-      <description>Accelerators that move from a personal workspace to the AgentWorkspaces workspace.</description>
+      <default>["&lt;Control&gt;&lt;Shift&gt;&lt;Alt&gt;Up"]</default>
+      <summary>Go up to AgentWorkspaces</summary>
+      <description>Accelerators that move from a personal workspace up to the AgentWorkspaces desktop, which is stacked above your personal ones.</description>
     </key>
 
     <key name="return-shortcut" type="as">
-      <default>["&lt;Control&gt;&lt;Alt&gt;Up"]</default>
-      <summary>Return to the personal workspace</summary>
-      <description>Accelerators that move from the AgentWorkspaces workspace back to the personal workspace you came from.</description>
+      <default>["&lt;Control&gt;&lt;Shift&gt;&lt;Alt&gt;Down"]</default>
+      <summary>Come back down to your personal workspace</summary>
+      <description>Accelerators that move from the AgentWorkspaces desktop back down to the personal workspace you came from.</description>
     </key>
 
     <key name="create-on-demand" type="b">
@@ -27,10 +27,10 @@
       <description>On: the viewer opens full screen without window chrome; its controls appear when the mouse moves. Off: it opens as an ordinary maximized window with a title bar and the workspace list.</description>
     </key>
 
-    <key name="use-cube-transition" type="b">
-      <default>true</default>
-      <summary>Turn the Desktop Cube when entering and leaving</summary>
-      <description>When the Desktop Cube extension is enabled, entering AgentWorkspaces turns the cube down onto the agent workspace and leaving turns it back up. Off, or without Desktop Cube, the vertical slide is used.</description>
+    <key name="daemon-command" type="s">
+      <default>""</default>
+      <summary>Command that starts the service</summary>
+      <description>Used when the systemd user unit cannot start the AgentWorkspaces service. Empty: look for agent-workspaces in the usual install locations and in PATH.</description>
     </key>
 
     <!-- State kept by the extension. Not shown in preferences. -->

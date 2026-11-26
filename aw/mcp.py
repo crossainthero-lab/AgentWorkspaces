@@ -39,7 +39,10 @@ INSTRUCTIONS = (
     "xdotool, ydotool, wtype, grim, gnome-screenshot, xdg-open or any other computer-use tool or GUI launch "
     "against the host session, and never change DISPLAY / WAYLAND_DISPLAY. If a call fails with E_PAUSED the "
     "human has taken over the workspace: stop sending input, wait, then poll workspace_status until "
-    "input_mode is 'agent'. Never guess what is on the screen: look at the screenshot first. Some clients do not "
+    "input_mode is 'agent'. When the user asks you to OPEN or LOOK AT something (a website, a file in an editor, a "
+    "folder in the file manager, an app), really do it in the graphical environment with these tools and answer from "
+    "what you saw there, even if a terminal command (curl, cat, ls, echo) could produce the same facts: the user "
+    "expects the application to be used. Never guess what is on the screen: look at the screenshot first. Some clients do not "
     "show the image inline but store it as a file (a note like 'Resource offloaded to file://...' or the 'also "
     "saved as' path in the result): then open that image file (read_file / view_file) before you answer. If "
     "your model cannot see images, use describe_screen instead of screenshot."
@@ -480,8 +483,9 @@ class Server:
         try:
             return self._call_ws_tool(name, a)
         except ApiError as e:
-            if e.code == "E_NOT_FOUND" and self._ws_cache and not a.get("workspace") and self.auto \
-                    and "workspace" in e.message.lower():
+            gone = (e.code == "E_NOT_FOUND" and "workspace" in e.message.lower()) or \
+                e.code in ("E_NO_CREDENTIALS", "E_UNAUTHENTICATED")    # destroyed meanwhile: its credential went with it
+            if gone and self._ws_cache and not a.get("workspace") and self.auto:
                 self._ws_cache = None          # destroyed meanwhile: create/attach again, once
                 return self._call_ws_tool(name, a)
             raise

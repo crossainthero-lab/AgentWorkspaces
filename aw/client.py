@@ -85,8 +85,18 @@ class Client:
         self._buf = b""
 
     def _spawn_daemon(self):
+        from . import service
+        if service.use_systemd():                   # the installed user unit first, when this is the normal socket
+            ok, _ = service.start_unit()
+            if ok:
+                end = time.monotonic() + 8
+                while time.monotonic() < end:
+                    if service.alive(self.path):
+                        return
+                    time.sleep(0.1)
         root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         env = {k: v for k, v in os.environ.items() if not k.startswith("AW_TOKEN") and not k.startswith("AW_ADMIN")}
+        env.setdefault("AW_IDLE_EXIT_SECONDS", "1800")     # on-demand daemon: leave nothing behind when unused
         env["PYTHONPATH"] = root + (":" + env["PYTHONPATH"] if env.get("PYTHONPATH") else "")
         log = os.path.join(paths.ensure_private_dir(paths.base_dir()), "daemon.log")
         subprocess.Popen([sys.executable, "-m", "aw.daemon"], env=env, stdin=subprocess.DEVNULL,

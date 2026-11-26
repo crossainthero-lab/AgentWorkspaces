@@ -43,6 +43,10 @@ def check(name, ok, detail=""):
     print(f"{'PASS' if ok else 'FAIL'}  {name}" + (f"   [{detail}]" if detail else ""), flush=True)
 
 
+sys.path.insert(0, HERE)
+from gnome_session import assert_private_bus  # noqa: E402
+
+
 def private_env(extra=None):
     e = {"PATH": "/usr/bin:/bin", "HOME": HOME, "XDG_CONFIG_HOME": CFG, "XDG_CACHE_HOME": CACHE,
          "XDG_DATA_HOME": DATA, "XDG_RUNTIME_DIR": RT, "XDG_DATA_DIRS": "/usr/share",
@@ -51,6 +55,8 @@ def private_env(extra=None):
          "DBUS_SYSTEM_BUS_ADDRESS": f"unix:path={BUS}/system.sock", "GIO_USE_VFS": "local",
          "NO_AT_BRIDGE": "1", "XDG_SESSION_TYPE": "wayland", "XDG_CURRENT_DESKTOP": "GNOME"}
     e.update(extra or {})
+    assert_private_bus(e["DBUS_SESSION_BUS_ADDRESS"], BASE)      # SAFETY: never the real bus
+    assert_private_bus(e["DBUS_SYSTEM_BUS_ADDRESS"], BASE)
     return e
 
 
@@ -89,6 +95,8 @@ test-hooks=true
 [org/gnome/desktop/wm/keybindings]
 switch-to-workspace-up=['<Control><Alt>Up']
 switch-to-workspace-down=['<Control><Alt>Down']
+move-to-workspace-up=['<Control><Shift><Alt>Up']
+move-to-workspace-down=['<Control><Shift><Alt>Down']
 switch-to-workspace-left=['<Super>Page_Up', '<Super>KP_Prior', '<Super><Alt>Left', '<Control><Alt>Left']
 switch-to-workspace-right=['<Super>Page_Down', '<Super>KP_Next', '<Super><Alt>Right', '<Control><Alt>Right']
 {extra}""")
@@ -243,7 +251,7 @@ def main_coexist():
     for u in OTHERS:
         shutil.copytree(f"{src_root}/{u}", f"{DATA}/gnome-shell/extensions/{u}")  # private copy; source untouched
     # a foreign extension binding the same accelerator as ours, to prove it is reported and left alone
-    write_keyfile(extra="[org/gnome/shell/extensions/tilingshell]\nmove-window-up=['<Control><Alt>Down']\n", others=OTHERS)
+    write_keyfile(extra="[org/gnome/shell/extensions/tilingshell]\nmove-window-up=['<Control><Shift><Alt>Down']\n", others=OTHERS)
     start_buses()
     shell, logf = start_shell()
     hook = None
@@ -258,6 +266,7 @@ def main_coexist():
         except GLib.Error:
             return None
     check("shell starts with desktop-cube + tilingshell + this extension", wait_for(ready, 40, 0.5) is not None)
+    FakeDaemon().start()      # the stand-in service lists one running workspace, so going up is allowed
     settle(2.5)
     hook.call("HideOverview")
     settle(1)
@@ -272,16 +281,16 @@ def main_coexist():
     wait_for(lambda: any(w["app_id"] == "dev.agentworkspaces.TestPersonal" for w in hook.state()["windows"]), 20, 0.5)
     settle(0.5)
     s0 = hook.state()["active"]
-    hook.press("Control_L", "Alt_L", "Down")
+    hook.press("Control_L", "Shift_L", "Alt_L", "Up")
     settle(1.4)
     st = hook.state()
     smp = st["slide_samples"]
-    check("enter works next to desktop-cube/tilingshell and slides vertically (not the cube)",
-          st["active"] == s0 + 1 and len(smp) >= 3 and smp[0] == 720 and smp[-1] == 0, f"active={st['active']} first={smp[:1]}")
-    hook.press("Control_L", "Alt_L", "Up")
+    check("Ctrl+Shift+Alt+Up goes up next to desktop-cube/tilingshell and slides vertically, stacked above (not the cube)",
+          st["active"] == s0 + 1 and len(smp) >= 3 and smp[0] == -720 and smp[-1] == 0, f"active={st['active']} first={smp[:1]}")
+    hook.press("Control_L", "Shift_L", "Alt_L", "Down")
     settle(1.4)
     st = hook.state()
-    check("return works next to them", st["active"] == s0 and st["slide_samples"][:1] == [-720])
+    check("return works next to them", st["active"] == s0 and st["slide_samples"][:1] == [720])
     hook.press("Control_L", "Alt_L", "Right")
     settle(1.5)
     check("Ctrl+Alt+Right still switches (desktop-cube's own animation)", hook.state()["active"] == s0 + 1)
@@ -290,7 +299,7 @@ def main_coexist():
     st = hook.state()
     check("another extension's binding on our accelerator is reported and not modified",
           any("tilingshell.move-window-up" in c for c in st["conflicts"]) and
-          parse_strv(read_key("org/gnome/shell/extensions/tilingshell", "move-window-up")) == ["<Control><Alt>Down"],
+          parse_strv(read_key("org/gnome/shell/extensions/tilingshell", "move-window-up")) == ["<Control><Shift><Alt>Down"],
           str([c for c in st["conflicts"] if "tilingshell" in c]))
     check("no JS errors attributed to this extension", not errs, errs[0][:160] if errs else "")
     cube_err = [l for l in log.splitlines() if "JS ERROR" in l][:2]
@@ -301,7 +310,7 @@ def main_coexist():
 def main_prefs(out):
     """Open the preferences window inside the isolated shell and save a screenshot of it."""
     setup_dirs()
-    write_keyfile(extra="[org/gnome/shell/keybindings]\nshow-screen-recording-ui=['<Control><Alt>Down']\n")
+    write_keyfile(extra="[org/gnome/shell/keybindings]\nshow-screen-recording-ui=['<Control><Shift><Alt>Down']\n")
     start_buses()
     shell, logf = start_shell()
     hook = None
@@ -316,6 +325,7 @@ def main_prefs(out):
         except GLib.Error:
             return None
     check("shell started", wait_for(ready, 40, 0.5) is not None)
+    FakeDaemon().start()
     settle(2)
     hook.call("HideOverview")
     hook.call("ExtOpenPrefs") if False else None
@@ -333,18 +343,24 @@ def main_prefs(out):
     hook.call("SetShortcut", ("enter-shortcut", ["<Control><Alt>e"]), "(sas)")
     settle(1.2)
     st = hook.state()
-    check("changing the enter shortcut re-binds live and GNOME's Ctrl+Alt+Down is restored (no longer ours)",
-          st["keys"]["switch-to-workspace-down"] == ["<Control><Alt>Down"] and
-          st["keys"]["switch-to-workspace-up"] == [], str(st["keys"]))
+    check("changing the enter shortcut re-binds live and GNOME's Ctrl+Shift+Alt+Up (move window up) is restored (no longer ours)",
+          st["keys"]["move-to-workspace-up"] == ["<Control><Shift><Alt>Up"] and
+          st["keys"]["move-to-workspace-down"] == [], str(st["keys"]))
     s0 = st["active"]
     hook.press("Control_L", "Alt_L", "e")
     settle(1.4)
     check("the new accelerator Ctrl+Alt+E enters the agent workspace", hook.state()["active"] != s0)
-    hook.press("Control_L", "Alt_L", "Up")
+    hook.press("Control_L", "Shift_L", "Alt_L", "Down")
     settle(1.2)
-    hook.call("SetShortcut", ("enter-shortcut", ["<Control><Alt>Down"]), "(sas)")
+    hook.call("SetShortcut", ("enter-shortcut", ["<Control><Alt>Up"]), "(sas)")
     settle(1.2)
-    check("setting it back takes Ctrl+Alt+Down over again", hook.state()["keys"]["switch-to-workspace-down"] == [])
+    check("a user who sets the shortcut to GNOME's Ctrl+Alt+Up takes switch-to-workspace-up over (exact match only), and nothing else",
+          hook.state()["keys"]["move-to-workspace-up"] == ["<Control><Shift><Alt>Up"] and hook.state()["keys"]["switch-to-workspace-up"] == []
+          and hook.state()["keys"]["switch-to-workspace-down"] == ["<Control><Alt>Down"], str(hook.state()["keys"]))
+    hook.call("SetShortcut", ("enter-shortcut", ["<Control><Shift><Alt>Up"]), "(sas)")
+    settle(1.2)
+    check("setting it back to the default restores Ctrl+Alt+Up and takes Ctrl+Shift+Alt+Up over again",
+          hook.state()["keys"]["switch-to-workspace-up"] == ["<Control><Alt>Up"] and hook.state()["keys"]["move-to-workspace-up"] == [])
     return 0
 
 
@@ -371,7 +387,7 @@ def main():
     setup_dirs()
     write_keyfile()
     original = {k: parse_strv(read_key("org/gnome/desktop/wm/keybindings", k))
-                for k in ("switch-to-workspace-up", "switch-to-workspace-down", "switch-to-workspace-left",
+                for k in ("switch-to-workspace-up", "switch-to-workspace-down", "move-to-workspace-up", "move-to-workspace-down", "switch-to-workspace-left",
                           "switch-to-workspace-right")}
     daemon = None
     try:
@@ -409,52 +425,48 @@ def main():
                                                                  for w in st["windows"]))
 
         # ---- bindings: taken over while enabled, original accelerators recorded
-        up_now, down_now = st["keys"]["switch-to-workspace-up"], st["keys"]["switch-to-workspace-down"]
-        check("GNOME Ctrl+Alt+Up/Down removed from wm keybindings while enabled", up_now == [] and down_now == [],
+        up_now, down_now = st["keys"]["move-to-workspace-up"], st["keys"]["move-to-workspace-down"]
+        check("GNOME's Ctrl+Shift+Alt+Up/Down (move window up/down, the accelerators we use) are removed from wm keybindings while enabled", up_now == [] and down_now == [],
               f"up={up_now} down={down_now}")
+        check("GNOME's own Ctrl+Alt+Up/Down (switch workspace) are NOT touched", st["keys"]["switch-to-workspace-up"] == original["switch-to-workspace-up"]
+              and st["keys"]["switch-to-workspace-down"] == original["switch-to-workspace-down"], str((st["keys"]["switch-to-workspace-up"], st["keys"]["switch-to-workspace-down"])))
         check("Left/Right keybindings untouched", st["keys"]["switch-to-workspace-left"] == original["switch-to-workspace-left"]
               and st["keys"]["switch-to-workspace-right"] == original["switch-to-workspace-right"])
         bk = json.loads(st["backup"]) if st["backup"] else {}
         check("backup recorded before change (survives a crash)",
-              bk.get("switch-to-workspace-up", {}).get("before") == original["switch-to-workspace-up"] and
-              bk.get("switch-to-workspace-down", {}).get("before") == original["switch-to-workspace-down"])
+              bk.get("move-to-workspace-up", {}).get("before") == original["move-to-workspace-up"] and
+              bk.get("move-to-workspace-down", {}).get("before") == original["move-to-workspace-down"])
         check("animations enabled in isolated shell", st["animations"] is True)
 
-        # ---- 1) enter with NO daemon: degrades gracefully, still switches
+        # ---- 1) NO service and no way to start one or to open a viewer without it: nothing to show, so nothing happens (log only).
+        #         (With a startable service Ctrl+Shift+Alt+Up always goes up: see run_silent.py.)
         s0 = st["active"]
-        hook.press("Control_L", "Alt_L", "Down")
-        settle(1.2)
+        n_actors, n_ws = st["window_actors"], st["n_workspaces"]
+        hook.press("Control_L", "Shift_L", "Alt_L", "Up")
+        settle(2.0)
         st1 = hook.state()
-        check("Ctrl+Alt+Down (real key events) moves to a new dedicated workspace with daemon absent",
-              st1["active"] != s0 and st1["agent"] == st1["active"] and shell.poll() is None,
-              f"before={s0} after={st1['active']} agent={st1['agent']} n={st1['n_workspaces']}")
-        samples = st1["slide_samples"]
-        H = 720
-        down_ok = len(samples) >= 3 and max(samples) >= H * 0.5 and samples[-1] == 0 and all(
-            samples[i] >= samples[i + 1] for i in range(len(samples) - 1))
-        check("transition is a vertical slide (window group translation-y runs H -> 0, monotone)", down_ok,
-              f"{len(samples)} frames, first={samples[:1]} last={samples[-1:]}")
-        hook.press("Control_L", "Alt_L", "Up")
-        settle(1.2)
-        st2 = hook.state()
-        check("Ctrl+Alt+Up returns to the previous personal workspace", st2["active"] == s0, f"active={st2['active']}")
-        up_samples = st2["slide_samples"]
-        check("return slides the other way (translation-y runs -H -> 0)",
-              len(up_samples) >= 3 and min(up_samples) <= -H * 0.5 and up_samples[-1] == 0, f"first={up_samples[:1]}")
+        check("no service and no command to start it or the viewer: Ctrl+Shift+Alt+Up does nothing visible (same workspace, no new window or workspace, no slide, no notification)",
+              st1["active"] == s0 and st1["window_actors"] == n_actors and st1["n_workspaces"] == n_ws and not st1["sliding"] and
+              st1["slide_samples"] == [] and st1["notifications"] == st["notifications"] and st1["wg"] == [0, 0, 0] and shell.poll() is None,
+              json.dumps({k: st1[k] for k in ("active", "window_actors", "n_workspaces", "sliding", "notifications", "wg")}))
         log = open(logf, errors="replace").read()
+        check("... and the reason is only in the shell log", "could not be started" in log and "no agent-workspaces command found" in log)
         check("no JS error from the extension in shell log", "JS ERROR" not in log or "agent-workspaces" not in
               "\n".join(l for l in log.splitlines() if "JS ERROR" in l))
 
         # ---- 2) with daemon: viewer is requested and opened on the agent workspace
         daemon = FakeDaemon()
         daemon.start()
-        hook.press("Control_L", "Alt_L", "Down")
-        stv = wait_for(lambda: (lambda s: s if any(w["app_id"] == "dev.agentworkspaces.Viewer" for w in s["windows"]) else None)(hook.state()), 20, 0.5)
+        hook.press("Control_L", "Shift_L", "Alt_L", "Up")
+        stv = wait_for(lambda: (lambda s: s if any(w["app_id"] == "dev.agentworkspaces.Viewer" for w in s["windows"]) and s["active"] == s["agent"] and not s["sliding"] else None)(hook.state()), 20, 0.5)
         check("daemon asked: workspace.list + workspace.enter", daemon.calls[:2] == ["workspace.list", "workspace.enter"],
               str(daemon.calls))
         check("stand-in viewer window appeared on the agent workspace", stv is not None and any(
             w["app_id"] == "dev.agentworkspaces.Viewer" and w["ws"] == stv["agent"] == stv["active"] for w in stv["windows"]),
             json.dumps(stv["windows"]) if stv else "")
+        if not (stv is not None and any(w["app_id"] == "dev.agentworkspaces.Viewer" and w["ws"] == stv["agent"] == stv["active"] for w in stv["windows"])):
+            print("--- extension log:\n" + "\n".join(l for l in open(logf, errors="replace").read().splitlines() if "agent-workspaces" in l)[-2500:])
+            print("--- state:", json.dumps(hook.state()))
         settle(0.8)
         try:
             hook.call("ClearNotifications")
@@ -466,22 +478,22 @@ def main():
         agent_idx = hook.state()["agent"]
         origin_idx = hook.state()["origin"]
         check("origin workspace recorded", origin_idx == s0, f"origin={origin_idx}")
-        hook.press("Control_L", "Alt_L", "Down")
+        hook.press("Control_L", "Shift_L", "Alt_L", "Up")
         settle(0.8)
-        check("Ctrl+Alt+Down while already in agent workspace is a no-op", hook.state()["active"] == agent_idx)
-        hook.press("Control_L", "Alt_L", "Up")
+        check("Ctrl+Shift+Alt+Up while already on the agent desktop is a no-op", hook.state()["active"] == agent_idx)
+        hook.press("Control_L", "Shift_L", "Alt_L", "Down")
         settle(1.2)
         check("return keeps the viewer window on the agent workspace",
               hook.state()["active"] == s0 and any(w["app_id"] == "dev.agentworkspaces.Viewer" and w["ws"] == agent_idx
                                                    for w in hook.state()["windows"]))
         daemon.calls.clear()
-        hook.press("Control_L", "Alt_L", "Down")
+        hook.press("Control_L", "Shift_L", "Alt_L", "Up")
         settle(1.2)
         s3 = hook.state()
         check("re-enter reuses the existing viewer workspace without a second viewer",
               s3["active"] == agent_idx and "workspace.enter" not in daemon.calls and
               sum(1 for w in s3["windows"] if w["app_id"] == "dev.agentworkspaces.Viewer") == 1, str(daemon.calls))
-        hook.press("Control_L", "Alt_L", "Up")
+        hook.press("Control_L", "Shift_L", "Alt_L", "Down")
         settle(1.0)
 
         # ---- 3) horizontal navigation untouched
@@ -491,27 +503,27 @@ def main():
         hook.press("Control_L", "Alt_L", "Left")
         settle(1.0)
         l1 = hook.state()["active"]
-        check("Ctrl+Alt+Right/Left still move between workspaces (GNOME default behaviour)",
-              r1 == s0 + 1 and l1 == s0, f"right->{r1} left->{l1}")
-        hook.press("Control_L", "Alt_L", "Up")
+        check("Ctrl+Alt+Right/Left walk the personal workspaces only: Right skips the agent desktop above and reaches the trailing empty workspace",
+              r1 == s0 + 2 and l1 == s0, f"right->{r1} left->{l1} (agent desktop is workspace {agent_idx})")
+        hook.press("Control_L", "Shift_L", "Alt_L", "Down")
         settle(0.6)
-        check("Ctrl+Alt+Up on a personal workspace is passed through (no-op in horizontal layout)", hook.state()["active"] == s0)
+        check("Ctrl+Shift+Alt+Down on a personal workspace is passed through (no-op in horizontal layout)", hook.state()["active"] == s0)
 
         # ---- 4) disable restores bindings; enable takes over again
         before_disable = hook.state()
         try:
             hook.ext_call("DisableExtension", UUID)
             settle(1.5)
-            kd = parse_strv(read_key("org/gnome/desktop/wm/keybindings", "switch-to-workspace-down"))
-            ku = parse_strv(read_key("org/gnome/desktop/wm/keybindings", "switch-to-workspace-up"))
+            kd = parse_strv(read_key("org/gnome/desktop/wm/keybindings", "move-to-workspace-down"))
+            ku = parse_strv(read_key("org/gnome/desktop/wm/keybindings", "move-to-workspace-up"))
             check("disable() restores GNOME bindings exactly (private keyfile)",
-                  kd == original["switch-to-workspace-down"] and ku == original["switch-to-workspace-up"], f"up={ku} down={kd}")
+                  kd == original["move-to-workspace-down"] and ku == original["move-to-workspace-up"], f"up={ku} down={kd}")
             check("backup cleared after restore", read_key("org/gnome/shell/extensions/agent-workspaces", "backup") in (None, "''", ""),
                   str(read_key("org/gnome/shell/extensions/agent-workspaces", "backup")))
             hook.ext_call("EnableExtension", UUID)
             settle(2)
             st4 = wait_for(lambda: hook.state(), 10, 0.5)
-            check("re-enable takes over again", st4 and st4["keys"]["switch-to-workspace-down"] == [])
+            check("re-enable takes over again", st4 and st4["keys"]["move-to-workspace-down"] == [])
         except GLib.Error as e:
             check("disable/enable via org.gnome.Shell.Extensions D-Bus", False, str(e))
 
@@ -521,14 +533,14 @@ def main():
         shell.wait(10)
         settle(1)
         stale_backup = read_key("org/gnome/shell/extensions/agent-workspaces", "backup")
-        stale_keys = parse_strv(read_key("org/gnome/desktop/wm/keybindings", "switch-to-workspace-down"))
+        stale_keys = parse_strv(read_key("org/gnome/desktop/wm/keybindings", "move-to-workspace-down"))
         check("after SIGKILL the keyfile still shows the removed binding and a non-empty backup (the crash case)",
               stale_keys == [] and stale_backup not in (None, "''", ""), f"keys={stale_keys}")
         # user adds another accelerator meanwhile; a foreign key also uses Ctrl+Alt+Down
         kf = GLib.KeyFile()
         kf.load_from_file(KEYFILE, GLib.KeyFileFlags.NONE)
-        kf.set_value("org/gnome/desktop/wm/keybindings", "switch-to-workspace-up", "['<Super>Up']")
-        kf.set_value("org/gnome/shell/keybindings", "show-screen-recording-ui", "['<Control><Alt>Down']")
+        kf.set_value("org/gnome/desktop/wm/keybindings", "move-to-workspace-up", "['<Super>Up']")
+        kf.set_value("org/gnome/shell/keybindings", "show-screen-recording-ui", "['<Control><Shift><Alt>Down']")
         kf.save_to_file(KEYFILE)
         for f in os.listdir(RT):  # stale wayland socket of the killed shell
             if f.startswith(DISPLAY_NAME):
@@ -544,17 +556,17 @@ def main():
         st5 = hook.state()
         check("conflict with a foreign GNOME key is reported, not modified",
               any("show-screen-recording-ui" in c for c in st5["conflicts"]) and
-              parse_strv(read_key("org/gnome/shell/keybindings", "show-screen-recording-ui")) == ["<Control><Alt>Down"],
+              parse_strv(read_key("org/gnome/shell/keybindings", "show-screen-recording-ui")) == ["<Control><Shift><Alt>Down"],
               str(st5["conflicts"]))
         check("binding the user added meanwhile is preserved by the merge (<Super>Up kept)",
-              "<Super>Up" in st5["keys"]["switch-to-workspace-up"] or st5["keys"]["switch-to-workspace-up"] == ["<Super>Up"],
-              str(st5["keys"]["switch-to-workspace-up"]))
+              "<Super>Up" in st5["keys"]["move-to-workspace-up"] or st5["keys"]["move-to-workspace-up"] == ["<Super>Up"],
+              str(st5["keys"]["move-to-workspace-up"]))
         hook.ext_call("DisableExtension", UUID)
         settle(1.5)
-        ku = set(parse_strv(read_key("org/gnome/desktop/wm/keybindings", "switch-to-workspace-up")))
-        kd = parse_strv(read_key("org/gnome/desktop/wm/keybindings", "switch-to-workspace-down"))
-        check("after crash + restart + disable, Ctrl+Alt+Up/Down are back and <Super>Up kept",
-              ku == {"<Control><Alt>Up", "<Super>Up"} and kd == original["switch-to-workspace-down"], f"up={sorted(ku)} down={kd}")
+        ku = set(parse_strv(read_key("org/gnome/desktop/wm/keybindings", "move-to-workspace-up")))
+        kd = parse_strv(read_key("org/gnome/desktop/wm/keybindings", "move-to-workspace-down"))
+        check("after crash + restart + disable, Ctrl+Shift+Alt+Up/Down are back and <Super>Up kept",
+              ku == {"<Control><Shift><Alt>Up", "<Super>Up"} and kd == original["move-to-workspace-down"], f"up={sorted(ku)} down={kd}")
         return finish(keep, shell)
     finally:
         if daemon:

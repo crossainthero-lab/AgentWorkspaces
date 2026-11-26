@@ -1,0 +1,2 @@
+/* The agent desktop in the Activities overview (overviewStrip.js) uses GNOME's own workspace-thumbnail classes, so it needs no
+   styles of its own: the theme draws it like the real thumbnails. */

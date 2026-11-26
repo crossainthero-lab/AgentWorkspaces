@@ -8,6 +8,9 @@ def host_runtime_dir() -> str:
     d = os.environ.get("XDG_RUNTIME_DIR")
     if not d:
         d = f"/run/user/{os.getuid()}"
+    if os.path.basename(d.rstrip("/")).startswith("aw-guard"):
+        # an agent shell's graphical-isolation guard (aw/guard.py) points XDG_RUNTIME_DIR at <real>/aw-guard
+        d = os.path.dirname(d.rstrip("/"))
     return d
 
 

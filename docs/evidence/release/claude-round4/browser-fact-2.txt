@@ -1,0 +1,21 @@
+prompt: Go to http://127.0.0.1:37029/team.html and tell me who the club's treasurer is.
+model: haiku
+result: PASS
+verified by: server log: 1 Chrome request(s) for /team; treasurer is Callum Fraser
+seconds: 8.0  exit: 0
+host display variables seen in the agent process group: ['DISPLAY', 'WAYLAND_DISPLAY', 'WAYLAND_SOCKET', 'XAUTHORITY']
+host wayland sockets unchanged: True
+
+[init] model=claude-haiku-5-5 mcp=[('agent-workspaces', 'connected')] builtin_tools=['Bash']
+  call launch_browser {"url": "http://127.0.0.1:37029/team.html"}
+  -> launched google-chrome (app 1, pid 3823492), profile throwaway. Take a screenshot to see it.
+  call screenshot {}
+  -> <image> | workspace 'claude-code-r17544-browser-fact-2' screen 1280x720 px (captured in 10.2 ms); also saved as <run>/w9...
+agent: The screen is black, so I'll wait a moment for the browser to finish loading.
+  call wait {"seconds": 3}
+  call screenshot {}
+  -> waited
+  -> <image> | workspace 'claude-code-r17544-browser-fact-2' screen 1280x720 px (captured in 8.8 ms); also saved as <run>/w96...
+agent: The club's treasurer is **Callum Fraser**, according to the "Club committee" table on http://127.0.0.1:37029/team.html.  I opened the page in a browser in my own workspace and read the table there.
+
+USAGE {"turns": 5, "cost_usd": 0.0015752399999999999, "duration_ms": 7067, "input": 8, "cache_read": 50094, "cache_creation": 4600, "output": 307}

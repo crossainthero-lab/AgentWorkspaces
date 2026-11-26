@@ -46,7 +46,7 @@ The socket is `0600` in a `0700` directory and the daemon refuses any peer whose
   (screen.*), `input` (input.*), `launch` (workspace.launch, app.kill), `windows` (window.list/action), `clipboard`
   (the workspace's own clipboard), `approval` (approval.request, grant.request), `admin` (never in a default
   credential: start/stop/configure/pause/resume/rename of its own workspace).
-* **Human-only methods** (admin credential only): `workspace.create|destroy|assign|enter`, `approval.resolve`,
+* **Human-only methods** (admin credential only): `workspace.create|ensure_default|destroy|assign|enter`, `approval.resolve`,
   `viewer.attach`, `credential.*`, `grant.resolve|revoke`, `audit.tail`. An agent cannot resume a takeover,
   approve its own request, change the clipboard policy or grant itself anything. A workspace credential cannot
   claim `agent_kind: "human"` to bypass manual takeover (only the admin credential can act as the human).
@@ -170,6 +170,11 @@ Agents may only ask; a person decides through the CLI on a terminal, the viewer 
   sandbox?(bool), sandbox_mounts?(["/path[:ro|:rw]"]), sandbox_net?(default true), start?}` -> summary + `token_file`
   (the path of the workspace's default credential; the token itself is never returned). With `sandbox` the apps run
   under bubblewrap (docs/isolation-model.md); `E_NO_SANDBOX`, `E_BAD_SANDBOX` on a refused mount.
+* `workspace.ensure_default {name?}` (admin credential only, idempotent): make sure the default desktop for people
+  exists and runs. `name` defaults to `agents`; the workspace is created with agent kind `none` and started when it
+  is missing, started when it is stopped, and returned unchanged when it already runs. Returns the summary plus
+  `created` (bool). Concurrent calls are serialised, so two shortcuts pressed together create one workspace. The
+  GNOME extension calls it when Ctrl+Shift+Alt+Up is pressed with nothing running (docs/gnome-extension.md).
 * `workspace.rename {workspace, name}`, `workspace.assign {workspace, agent_kind, agent_label?}`
 * `workspace.configure {workspace, width?, height?, scale?, gpu?, clipboard?, window_policy?, memory_max?, audio?}`
   (size/scale apply live; gpu/window_policy/memory_max/audio restart the compositor and close its apps)

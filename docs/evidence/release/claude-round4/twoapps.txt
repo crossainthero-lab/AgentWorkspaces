@@ -1,0 +1,68 @@
+prompt: Open the calculator and a text editor. Work out 44 times 35 in the calculator, then type the result into the editor.
+model: haiku
+result: PASS
+verified by: expected 1540 in an editor window title; windows ['1540 (Draft) - Text Editor', 'Calculator']
+seconds: 22.2  exit: 0
+host display variables seen in the agent process group: ['DISPLAY', 'WAYLAND_DISPLAY', 'WAYLAND_SOCKET', 'XAUTHORITY']
+host wayland sockets unchanged: True
+
+[init] model=claude-haiku-5-5 mcp=[('agent-workspaces', 'connected')] builtin_tools=['Bash']
+  call launch_app {"app": "calculator"}
+  call launch_app {"app": "text editor"}
+  -> <image> | launched Calculator (app 1, pid 3825503) in workspace claude-code-r17656-twoapps; workspace 'claude-code-r1765...
+  -> <image> | launched Text Editor (app 2, pid 3825540) in workspace claude-code-r17656-twoapps; workspace 'claude-code-r176...
+agent: Both apps are open. Now I'll enter 44 × 35 in the calculator.
+  call mouse_click {"x": 367, "y": 590}
+  -> ok (pointer at 367,590)
+  call mouse_click {"x": 503, "y": 686}
+  -> ok (pointer at 503,686)
+agent: I just clicked the "." key by mistake (I meant the second 4). I'll check the display before continuing.
+  call screenshot {"region": [302, 380, 978, 460]}
+  -> E_SESSION: the connection to workspace 'claude-code-r17656-twoapps''s compositor failed; the operation may not...
+  call screenshot {}
+  -> <image> | workspace 'claude-code-r17656-twoapps' screen 1280x720 px (captured in 10.2 ms); also saved as <run>/w5d6529/s...
+agent: The text editor is in front, so the calculator is behind it. I'll bring the calculator forward.
+  call list_windows {}
+  -> [   {     "id": 3,     "kind": "wayland",     "title": "New Document (Draft) - Text Editor",     "app_id": "or...
+  call window_action {"window": 4, "action": "focus"}
+  call screenshot {}
+  -> ok
+  -> <image> | workspace 'claude-code-r17656-twoapps' screen 1280x720 px (captured in 21.3 ms); also saved as <run>/w5d6529/s...
+agent: The calculator display is empty, so none of the earlier clicks registered. I'll enter the expression from the start: 44 × 35.
+  call mouse_click {"x": 367, "y": 590}
+  call screenshot {"max_width": 640}
+  -> ok (pointer at 367,590)
+  -> <image> | workspace 'claude-code-r17656-twoapps' screen 640x360 px (captured in 27.4 ms); also saved as <run>/w5d6529/sh...
+agent: The first "4" is in. Next I'll enter the second 4, the × sign, 3, and 5.
+  call mouse_click {"x": 367, "y": 590}
+  -> ok (pointer at 367,590)
+  call mouse_click {"x": 775, "y": 542}
+  -> ok (pointer at 775,542)
+  call mouse_click {"x": 639, "y": 638}
+  call mouse_click {"x": 503, "y": 590}
+  -> ok (pointer at 639,638)
+  -> ok (pointer at 503,590)
+  call screenshot {"max_width": 640}
+  -> <image> | workspace 'claude-code-r17656-twoapps' screen 640x360 px (captured in 15.8 ms); also saved as <run>/w5d6529/sh...
+agent: The expression reads "44×35". Now I'll press = and check the result.
+  call mouse_click {"x": 911, "y": 661}
+  call screenshot {}
+  -> ok (pointer at 911,661)
+  -> <image> | workspace 'claude-code-r17656-twoapps' screen 1280x720 px (captured in 9.1 ms); also saved as <run>/w5d6529/sh...
+agent: The = press may not have registered yet, so I'll take another look.
+  call screenshot {"max_width": 640}
+  -> <image> | workspace 'claude-code-r17656-twoapps' screen 640x360 px (captured in 13.5 ms); also saved as <run>/w5d6529/sh...
+agent: The calculator shows 1540, which matches 44 × 35. Next I'll switch to the text editor and type the result.
+  call window_action {"window": 3, "action": "focus"}
+  call screenshot {"max_width": 640}
+  -> ok
+  -> <image> | workspace 'claude-code-r17656-twoapps' screen 640x360 px (captured in 12.5 ms); also saved as <run>/w5d6529/sh...
+  call mouse_click {"x": 400, "y": 200}
+  call keyboard_type {"text": "1540"}
+  -> ok (pointer at 400,200)
+  -> ok (pointer at 400,200)
+  call screenshot {"max_width": 640}
+  -> <image> | workspace 'claude-code-r17656-twoapps' screen 640x360 px (captured in 13.5 ms); also saved as <run>/w5d6529/sh...
+agent: Done. The calculator computed 44 × 35 = 1540, and I typed "1540" into the text editor. The editor now shows that value as an unsaved draft.  Along the way, one of my early clicks landed on the decimal point instead of th...
+
+USAGE {"turns": 25, "cost_usd": 0.006560310000000002, "duration_ms": 21361, "input": 28, "cache_read": 258291, "cache_creation": 13988, "output": 2354}

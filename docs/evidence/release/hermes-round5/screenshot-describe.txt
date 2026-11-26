@@ -1,0 +1,16 @@
+prompt: Open the calculator, take a screenshot of it and describe what you see.
+model: qwen3.8-27b-agent
+result: PASS
+verified by: calculator window True; description terms ['basic', 'keypad', 'buttons', 'display', 'clear', 'equals', 'calculator']
+seconds: 57.1  exit: 0
+host display variables seen in the agent process group: []
+host wayland sockets unchanged: True
+
+[init] model=qwen3.8-27b-agent
+  call tool_search {"queries": ["workspace launch calculator app", "screenshot workspace screen", "ensure workspace created", "list apps available"]}
+  ->  {"queries": ["workspace launch calculator app", "screenshot workspace screen", "ensure workspace created", "li...
+  call launch_app {"app": "calculator"}
+  -> <image as file path: MEDIA tag> {"_multimodal": true, "content": [{"type": "text", "text": "{\"result\": \" Calculator (app 1, pid 3939115) in...
+agent: Done — the calculator is open and I captured the screen right after it launched. Here's what I see:  It's the GNOME Calculator, running in "Basic" mode (a "Basic" dropdown is centered in the top bar, with back/forward arrows at the left and the window controls — menu, minimize, maximize, close — at the right).  The layout: - A large, empty light-gray display/history area takes up the top half. - B...
+
+USAGE null

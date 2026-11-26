@@ -1,0 +1,18 @@
+prompt: Could you open my browser and go to agdc.dev? I'd like to know what the big headline says.
+model: qwen3.8-27b-agent
+result: PASS
+verified by: window titles ['AgentDock Silver — one workspace, every agent - Google Chrome']; answer missing []
+seconds: 34.2  exit: 0
+host display variables seen in the agent process group: []
+host wayland sockets unchanged: True
+
+[init] model=qwen3.8-27b-agent
+  call tool_search {"queries": ["launch browser open website", "browser navigate url"]}
+  ->  {"queries": ["launch browser open website", "browser navigate url"], "total_available": 33, "results": [{"quer...
+  call tool_search {"queries": ["agent-workspaces browser", "agent-workspaces launch app", "agent-workspaces open window", "agent-workspaces display ...
+  ->  {"queries": ["agent-workspaces browser", "agent-workspaces launch app", "agent-workspaces open window", "agent...
+  call launch_app {"app": "browser", "args": ["https://agdc.dev"]}
+  -> <image as file path: MEDIA tag> {"output": "{\"_multimodal\": true, \"content\": [{\"type\": \"text\", \"text\": \"{\\\"result\\\": \\\" googl...
+agent: I opened agdc.dev in your browser (Google Chrome, in the AgentDock workspace).  The big headline reads:  **One workspace. Every agent.**  Right under it, the sub-headline says: "Claude Code, Codex, and Antigravity. All in one place."  For context, the site is for a product called **AgentDock** (the tab title shows "AgentDock Silver — one..."). There's a macOS banner up top noting the builds are av...
+
+USAGE null

@@ -160,6 +160,50 @@ class EventBusFilters(Base):
         self.assertTrue(q.empty())
 
 
+class EnsureDefault(Base):
+    """workspace.ensure_default is idempotent: create (kind none) -> start when stopped -> unchanged when running.
+    The compositor start is replaced by a state flip, so no compositor is needed."""
+    def setUp(self):
+        super().setUp()
+        from aw import manager
+        m = self.daemon.mgr
+        self.started = []
+        orig_create = m.create
+
+        def create(name, **kw):
+            kw["start"] = False
+            ws = orig_create(name, **kw)
+            self.started.append(("create", name))
+            ws.state = "running"
+            return ws
+
+        def start(ws):
+            self.started.append(("start", ws.name))
+            ws.state = "running"
+            return ws
+        m.create, m.start = create, start
+
+    def test_creates_once_then_returns_same(self):
+        a = self.call("workspace.ensure_default")
+        self.assertEqual((a["name"], a["created"], a["state"]), ("agents", True, "running"))
+        self.assertEqual(a["agent"]["kind"], "none")
+        b = self.call("workspace.ensure_default")
+        self.assertEqual((b["id"], b["created"]), (a["id"], False))
+        self.assertEqual(self.started, [("create", "agents")])
+        self.assertEqual(len(self.call("workspace.list")["workspaces"]), 1)
+
+    def test_starts_a_stopped_one(self):
+        a = self.call("workspace.ensure_default")
+        self.daemon.mgr.get("agents").state = "stopped"
+        b = self.call("workspace.ensure_default")
+        self.assertEqual((b["id"], b["created"], b["state"]), (a["id"], False, "running"))
+        self.assertEqual(self.started[-1], ("start", "agents"))
+
+    def test_workspace_credential_cannot_call_it(self):
+        from aw import auth
+        self.assertEqual(auth.POLICY["workspace.ensure_default"], ("global", None))
+
+
 class SocketFraming(Base):
     def test_real_socket_roundtrip_and_event_stream(self):
         from aw import daemon

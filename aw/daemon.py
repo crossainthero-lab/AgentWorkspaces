@@ -80,7 +80,7 @@ class EventBus:
 
 
 # Methods whose successful use is written to the audit log (never with parameters).
-AUDITED = {"workspace.create", "workspace.destroy", "workspace.start", "workspace.stop", "workspace.pause",
+AUDITED = {"workspace.create", "workspace.ensure_default", "workspace.destroy", "workspace.start", "workspace.stop", "workspace.pause",
            "workspace.takeover", "workspace.resume", "workspace.configure", "workspace.assign", "workspace.rename",
            "workspace.enter", "workspace.launch", "app.kill", "approval.request", "approval.resolve",
            "credential.issue", "credential.rotate", "credential.revoke", "auth.exchange", "viewer.attach"}
@@ -90,6 +90,7 @@ MAX_LINE = 16 * 1024 * 1024
 class Daemon:
     def __init__(self):
         self.bus = EventBus()
+        self._ensure_lock = threading.Lock()
         self.mgr = Manager(emit=self.bus.emit)
         self.creds = self.mgr.creds
         self.audit = auth.AuditLog(paths.base_dir())
@@ -300,6 +301,27 @@ class Daemon:
             d = m.summary(ws)
             d["token_file"] = self.creds.token_path(ws.id)
             return d
+        if method == "workspace.ensure_default":
+            # Idempotent: the default desktop for people ("agents", no agent assigned). Created on first use, started
+            # when stopped, otherwise returned as it is. Used by the shell extension when Ctrl+Shift+Alt+Up is pressed with
+            # nothing running, so the agent desktop is always there to go to.
+            name = p.get("name") or "agents"
+            if not isinstance(name, str):
+                raise ManagerError("E_BAD_NAME", "name must be a string")
+            with self._ensure_lock:
+                try:
+                    ws = m.get(name)
+                    created = False
+                except ManagerError as e:
+                    if e.code != "E_NOT_FOUND":
+                        raise
+                    ws = m.create(name, agent_kind="none", start=True)
+                    created = True
+                if ws.state != "running":
+                    ws = m.start(ws)
+                d = m.summary(ws)
+            d["created"] = created
+            return d
         if method == "workspace.rename":
             return m.summary(m.rename(self._ws(p).id, p.get("name", "")))
         if method == "workspace.assign":
@@ -334,7 +356,7 @@ class Daemon:
             argv = p.get("argv")
             if not isinstance(argv, list) or not all(isinstance(a, str) for a in argv):
                 raise ManagerError("E_BAD_ARGS", "'argv' must be a list of strings")
-            m.note_action(ws, "launch", "agent")
+            m.note_action(ws, "launch", self._actor(p, pr))
             return m.launch(ws, argv, cwd=p.get("cwd"), extra_env=p.get("env"))
         if method == "app.list":
             ws = self._ws(p)
@@ -788,9 +810,31 @@ def serve(foreground: bool = True) -> int:
     signal.signal(signal.SIGTERM, on_sig)
     signal.signal(signal.SIGINT, on_sig)
     print(f"agent-workspacesd {__version__} listening on {sock}", flush=True)
+    pidfile = os.path.join(paths.base_dir(), "daemon.pid")
+    with open(pidfile, "w") as f:
+        f.write(str(os.getpid()))
+    idle = float(os.environ.get("AW_IDLE_EXIT_SECONDS") or 0)
+    if idle > 0:
+        # A daemon started on demand by an agent's MCP server exits by itself after being idle (no workspace) for this
+        # long: no persistent process is left behind when nobody uses it. Workspaces are never touched by this.
+        def idle_watch():
+            since = None
+            while not stop.wait(min(15.0, max(idle / 2, 0.5))):
+                if d.mgr.workspaces:
+                    since = None
+                elif since is None:
+                    since = time.time()
+                elif time.time() - since >= idle:
+                    on_sig()
+                    return
+        threading.Thread(target=idle_watch, daemon=True).start()
     try:
         srv.serve_forever()
     finally:
+        try:
+            os.unlink(pidfile)
+        except OSError:
+            pass
         d.mgr.shutdown_sessions()
         srv.server_close()
         try:

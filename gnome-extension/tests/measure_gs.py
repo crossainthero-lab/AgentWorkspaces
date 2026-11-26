@@ -95,7 +95,7 @@ def main():
         time.sleep(1.5)
         s.launch(["gnome-calculator"], "calc.log")
         time.sleep(3)
-        s.chord("Control_L", "Alt_L", "Down")
+        s.chord("Control_L", "Shift_L", "Alt_L", "Up")
         wait_for(lambda: any(w["app_id"] == VIEWER for w in s.state()["windows"]), 20)
         time.sleep(4)
         vpid = d.viewer_pids()[0]
@@ -133,11 +133,11 @@ def main():
         out["pss_mib_busy"] = {"viewer": round(pss_kib(vpid) / 1024, 1), "gnome-shell": round(pss_kib(spid) / 1024, 1)}
         # the same motion while the viewer is NOT visible (user is on a personal workspace): the workspace keeps
         # running, the viewer should stop capturing/painting
-        s.chord("Control_L", "Alt_L", "Up")
+        s.chord("Control_L", "Shift_L", "Alt_L", "Down")
         time.sleep(2)
         r = sample([vpid, spid], 8, drive)
         out["busy_8s_60hz_viewer_on_other_workspace_cpu_percent"] = {"viewer": r[vpid], "gnome-shell": r[spid]}
-        s.chord("Control_L", "Alt_L", "Down")
+        s.chord("Control_L", "Shift_L", "Alt_L", "Up")
         time.sleep(2)
         u0 = c.call("workspace.usage", workspace="research")
         time.sleep(5)

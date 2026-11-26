@@ -1,14 +1,14 @@
 #!/usr/bin/python3 -I
-"""The cube-native enter/leave transition, in an ISOLATED headless GNOME Shell with the developer's own extension set
-(Desktop Cube, Tiling Shell, Blur my Shell, Just Perfection, User Themes, Ubuntu Dock; settings read once from
-`dconf dump` into a PRIVATE keyfile), the real daemon, a real workspace and the real viewer.
+"""The agent desktop stacked above the personal ones, WITH Desktop Cube enabled, in an ISOLATED headless GNOME Shell
+with the developer's own extension set (Desktop Cube, Tiling Shell, Blur my Shell, Just Perfection, User Themes, Ubuntu
+Dock; settings read once from `dconf dump` into a PRIVATE keyfile), the real daemon, a real workspace and the real viewer.
 
 Usage: run_cube.py [--personal N]      N personal workspaces (default 2; the suite is run for 2 and 4)
 
-Checks the turn itself (the window group's rotation about the horizontal axis runs from +-90 degrees to 0 over many
-frames, monotone), what is left afterwards (no overlay actors, window group untransformed, nothing in flight, the shell's
-bar and dock back), the Super overview path, pressing the key again half way (queued, not cancelled), the cube's own
-horizontal turns still working, GNOME's bindings restored on disable and no JS errors.
+Ctrl+Alt+Up goes up to the agent desktop and Ctrl+Alt+Down comes back, with a vertical slide: never a cube face and never
+a cube rotation. Desktop Cube keeps doing Ctrl+Alt+Left/Right between personal workspaces and is never involved in our
+moves. Also: the Super overview paths and the agent previews there, rapid key presses, focus and bar/dock after leaving,
+workspace count changes, GNOME's bindings restored on disable, no JS errors.
 """
 import json
 import os
@@ -22,6 +22,7 @@ from live_env import Daemon, PROBE_APP, wait_for  # noqa: E402
 
 VIEWER = "dev.agentworkspaces.Viewer"
 RESULTS = []
+H = 900
 
 
 def check(name, ok, detail=""):
@@ -34,38 +35,39 @@ def ext(s, expr):
 
 
 def leftovers(s):
-    """Everything a turn must not leave behind."""
+    """Everything a move must not leave behind."""
     return s.eval("""
       const g = global.window_group;
       const ctrl = Main.wm._workspaceAnimation;
       const chrome = [Main.layoutManager.panelBox, ...Main.uiGroup.get_children().filter(c => c.constructor.name === 'DashToDock')];
+      const c = Main.overview._overview.controls;
       return {rx: g.rotation_angle_x, ry: g.rotation_angle_y, tz: g.translation_z, ty: g.translation_y, pz: g.pivot_point_z,
               opacity: g.opacity, ui: Main.uiGroup.get_n_children(), switchData: !!ctrl?._switchData,
-              chrome: chrome.map(c => c.opacity), overview: Main.overview.visible};""")
+              chrome: chrome.map(x => x.opacity), overview: Main.overview.visible, ctrlScale: [c.scale_x, c.translation_y]};""")
 
 
-def bright(path, box):
-    """Near-black pixels in box: the revealed header is a dark bar over the (light) test workspace."""
-    from PIL import Image
-    im = Image.open(path).convert("RGB").crop(box)
-    return sum(1 for r, g, b in im.get_flattened_data() if max(r, g, b) < 45)
+def sample_check(samples, first):
+    """monotone slide from `first` (+-H) to 0 over many frames"""
+    mono = all(abs(samples[i]) >= abs(samples[i + 1]) for i in range(len(samples) - 1))
+    return len(samples) >= 8 and samples[0] == first and samples[-1] == 0 and mono
 
 
 def main():
     n = int(sys.argv[sys.argv.index("--personal") + 1]) if "--personal" in sys.argv else 2
+    T = f"[{n} personal]"
     s = Session(monitors=("1600x900",), copy_extensions=REALISTIC_COPY, enable_extensions=REALISTIC_SYSTEM,
-                dump_user_settings=True)
+                dump_user_settings=True, keep="--keep" in sys.argv)
     d = None
     try:
         s.start()
         time.sleep(2.0)
         s.eval("Main.overview.hide(); return 1")
         time.sleep(1.0)
-        check(f"[{n} personal] extension and Desktop Cube are ACTIVE", s.ext_state(UUID) == 1 and
+        check(f"{T} extension and Desktop Cube are ACTIVE", s.ext_state(UUID) == 1 and
               s.ext_state("desktop-cube@schneegans.github.com") == 1)
-        check(f"[{n} personal] extension reports the cube is enabled (so the cube-native turn is used)",
-              ext(s, "e._cubeEnabled()") is True)
-        # N personal workspaces, each with its own window (stand-in GTK windows with distinct app ids)
+        st0 = s.state()
+        check(f"{T} nothing at enable time: no viewer, no notification beyond the shell's own, no extra window",
+              not any(w["app_id"] == VIEWER for w in st0["windows"]))
         standin = os.path.join(HERE, "standin_viewer.py")
         for i in range(n):
             s.launch([sys.executable, standin, f"Personal {i + 1}", f"dev.agentworkspaces.TestPersonal{i + 1}"], f"p{i}.log")
@@ -78,8 +80,8 @@ def main():
         s.eval("global.workspace_manager.get_workspace_by_index(0).activate(global.get_current_time()); return 1")
         time.sleep(1.5)
         st = s.state()
-        check(f"[{n} personal] {n} personal workspaces with a window each", len({w['ws'] for w in st['windows']}) == n and st["n"] == n + 1,
-              str([(w['title'], w['ws']) for w in st['windows']]) + f" n_workspaces={st['n']}")
+        check(f"{T} {n} personal workspaces with a window each", len({w['ws'] for w in st['windows']}) == n and st["n"] == n + 1,
+              f"n_workspaces={st['n']}")
 
         d = Daemon(s).start()
         c = d.client()
@@ -90,167 +92,224 @@ def main():
         assert wait_for(lambda: os.path.getsize(lg) > 0, 20)
         time.sleep(1.0)
 
-        # ---- cold enter: viewer starts, then warm it
-        s.chord("Control_L", "Alt_L", "Down")
+        # ---- cold: Ctrl+Alt+Up starts the viewer on the agent desktop
+        s.chord("Control_L", "Shift_L", "Alt_L", "Up")
         ok = wait_for(lambda: any(w["app_id"] == VIEWER for w in s.state()["windows"]), 20, 0.1)
         time.sleep(3.0)
         st = s.state()
         vw = next((w for w in st["windows"] if w["app_id"] == VIEWER), None)
-        check(f"[{n} personal] first Ctrl+Alt+Down starts the viewer on the agent workspace, which is not a personal one",
+        check(f"{T} Ctrl+Alt+Up with a running workspace goes up: the viewer opens on the agent desktop, not a personal one",
               bool(ok) and vw and vw["ws"] == st["active"] and st["active"] >= n, json.dumps(vw))
-        check(f"[{n} personal] the viewer window is full screen (environment, no window chrome)",
+        check(f"{T} the viewer window is full screen (environment)",
               s.eval("""const w = global.get_window_actors().map(a => a.meta_window).find(w => (w.get_gtk_application_id?.() ?? w.get_wm_class()) === 'dev.agentworkspaces.Viewer');
                         return w ? w.is_fullscreen() : null;""") is True)
-        # environment chrome: hidden until the mouse moves, then it appears, then it goes away again
         shotp = f"{s.base}/env.png"
         s.move(900, 500)
         time.sleep(3.5)
         s.shot(shotp)
-        hidden0 = bright(shotp, (1100, 8, 1400, 40))
+        hidden0 = dark(shotp, (1100, 8, 1400, 40))
         s.move(930, 520)
         time.sleep(0.6)
         s.move(900, 500)
         time.sleep(0.5)
         s.shot(shotp)
-        shown = bright(shotp, (1100, 8, 1400, 40))
+        shown = dark(shotp, (1100, 8, 1400, 40))
         time.sleep(4.0)
         s.shot(shotp)
-        hidden1 = bright(shotp, (1100, 8, 1400, 40))
-        check(f"[{n} personal] environment: header hidden at rest, appears on mouse movement, hides again",
+        hidden1 = dark(shotp, (1100, 8, 1400, 40))
+        check(f"{T} environment: header hidden at rest, appears on mouse movement, hides again",
               hidden0 < 400 and shown > 5000 and hidden1 < 400, f"dark px at rest={hidden0}, after move={shown}, after idle={hidden1}")
-        s.chord("Control_L", "Alt_L", "Up")
+        s.chord("Control_L", "Shift_L", "Alt_L", "Down")
         time.sleep(1.5)
-        check(f"[{n} personal] Ctrl+Alt+Up returns to the previous personal workspace", s.state()["active"] == 0)
+        check(f"{T} Ctrl+Alt+Down returns to the previous personal workspace", s.state()["active"] == 0)
         time.sleep(1.0)
-        s.chord("Control_L", "Alt_L", "Down")      # one more full cycle, so dock items etc. exist before we count actors
+        s.chord("Control_L", "Shift_L", "Alt_L", "Up")        # one more full cycle so dock items etc. exist before we count actors
         time.sleep(2.0)
-        s.chord("Control_L", "Alt_L", "Up")
+        s.chord("Control_L", "Shift_L", "Alt_L", "Down")
         time.sleep(2.0)
         base = leftovers(s)
 
-        # ---- the turn down
-        s.chord("Control_L", "Alt_L", "Down")
+        # ---- the stacked slide, with Desktop Cube on
+        s.chord("Control_L", "Shift_L", "Alt_L", "Up")
         time.sleep(1.5)
-        kind = ext(s, "e._lastKind")
         samples = ext(s, "e._lastSamples")
-        mono = all(abs(samples[i]) >= abs(samples[i + 1]) for i in range(len(samples) - 1))
-        check(f"[{n} personal] Ctrl+Alt+Down turns the cube (kind=cube) from 90 degrees to 0 over many frames, monotone",
-              kind == "cube" and len(samples) >= 8 and abs(samples[0]) == 90 and samples[-1] == 0 and mono,
-              f"{len(samples)} frames: {samples[:3]}..{samples[-3:]}")
-        down_first = samples[0]
+        check(f"{T} going up is a vertical slide (kind=slide, never a cube): the agent desktop comes down into place from above "
+              f"(-{H} to 0, monotone, {len(samples)} frames)", ext(s, "e._lastKind") == "slide" and sample_check(samples, -H),
+              f"{samples[:3]}..{samples[-3:]}")
         a = leftovers(s)
-        check(f"[{n} personal] nothing is left behind after the turn down: window group untransformed, no overlay actors, nothing in flight",
+        check(f"{T} nothing left behind after going up: window group untransformed, no overlay actor, nothing in flight",
               a["rx"] == 0 and a["ry"] == 0 and a["tz"] == 0 and a["ty"] == 0 and a["pz"] == 0 and a["ui"] == base["ui"] and
               not a["switchData"], json.dumps(a))
-        # ---- the turn up
-        s.chord("Control_L", "Alt_L", "Up")
+        s.chord("Control_L", "Shift_L", "Alt_L", "Down")
         time.sleep(1.5)
         samples = ext(s, "e._lastSamples")
-        mono = all(abs(samples[i]) >= abs(samples[i + 1]) for i in range(len(samples) - 1))
-        check(f"[{n} personal] Ctrl+Alt+Up turns the cube back the other way to the previous personal workspace",
-              ext(s, "e._lastKind") == "cube" and len(samples) >= 8 and samples[0] == -down_first and samples[-1] == 0 and mono and
-              s.state()["active"] == 0, f"{samples[:3]}..{samples[-3:]}")
+        check(f"{T} coming down slides the other way (+{H} to 0) onto the previous personal workspace",
+              ext(s, "e._lastKind") == "slide" and sample_check(samples, H) and s.state()["active"] == 0, f"{samples[:3]}..{samples[-3:]}")
         a = leftovers(s)
-        check(f"[{n} personal] after the turn up: untransformed, no overlays, bar and dock back to full opacity",
-              a["rx"] == 0 and a["tz"] == 0 and a["pz"] == 0 and a["ui"] == base["ui"] and all(o == 255 for o in a["chrome"]),
-              json.dumps(a))
+        check(f"{T} after coming down: untransformed, no overlays, bar and dock back to full opacity, Desktop Cube not left mid-turn",
+              a["rx"] == 0 and a["tz"] == 0 and a["pz"] == 0 and a["ui"] == base["ui"] and all(o == 255 for o in a["chrome"]) and
+              not a["switchData"], json.dumps(a))
 
-        # ---- through the Super overview
+        # ---- focus returns to the window you were in
+        s.eval("""const a = global.get_window_actors().map(x => x.meta_window).find(w => w.get_workspace().index() === 0 && w.get_title() === 'Personal 1');
+                  a.activate(global.get_current_time()); return 1""")
+        time.sleep(0.8)
+        s.chord("Control_L", "Shift_L", "Alt_L", "Up")
+        time.sleep(1.8)
+        s.chord("Control_L", "Shift_L", "Alt_L", "Down")
+        time.sleep(1.8)
+        focus = s.eval("return global.display.focus_window?.get_title() ?? null")
+        check(f"{T} keyboard focus returns to the window you were in", focus == "Personal 1", str(focus))
+
+        # ---- the Super overview: agent previews above the personal workspaces; Up and Down from inside it
         s.chord("Super_L")
         wait_for(lambda: s.state()["overview"], 5, 0.1)
-        time.sleep(1.0)
-        s.chord("Control_L", "Alt_L", "Down")
+        time.sleep(3.0)
+        info = s.eval("""const e = Main.extensionManager.lookup('%s').stateObj; const c = Main.overview._overview.controls;
+          const ts = c._thumbnailsBox._thumbnails; const t = ts.find(x => x.metaWorkspace === e._agentWs);
+          return {first: !!t && ts[0] === t, idx: t ? t.metaWorkspace.index() : -1, n: ts.length, vis: !!t && t.visible,
+                  sameSize: !!t && ts.every(x => Math.abs(x.get_transformed_size()[0] - t.get_transformed_size()[0]) <= 1),
+                  scale: c.scale_x, shift: c.translation_y};""" % UUID)
+        s.shot(f"{s.base}/overview.png")
+        check(f"{T} Super shows the agent desktop as the first thumbnail of GNOME's own row (visible, same size as the others, GNOME's controls untouched)",
+              info["first"] and info["idx"] == 0 and info["vis"] and info["sameSize"] and info["scale"] == 1 and info["shift"] == 0, json.dumps(info))
+        s.chord("Control_L", "Shift_L", "Alt_L", "Up")
         wait_for(lambda: s.state()["active"] >= n and not s.state()["overview"], 6, 0.1)
         time.sleep(1.8)
-        check(f"[{n} personal] Ctrl+Alt+Down from the Super overview: overview closes, then the cube turns",
-              s.state()["active"] >= n and not s.state()["overview"] and ext(s, "e._lastKind") == "cube")
+        a = leftovers(s)
+        check(f"{T} Ctrl+Alt+Up from inside the overview closes it and goes up (slide); GNOME's overview controls are back to normal",
+              s.state()["active"] >= n and not a["overview"] and a["ctrlScale"] == [1, 0] and ext(s, "e._lastKind") == "slide",
+              json.dumps(a))
         s.chord("Super_L")
         wait_for(lambda: s.state()["overview"], 5, 0.1)
         time.sleep(1.0)
-        s.chord("Control_L", "Alt_L", "Up")
+        s.chord("Control_L", "Shift_L", "Alt_L", "Down")
         wait_for(lambda: s.state()["active"] == 0 and not s.state()["overview"], 6, 0.1)
         time.sleep(1.8)
         a = leftovers(s)
-        check(f"[{n} personal] Ctrl+Alt+Up from the overview returns to the previous personal workspace, overview closed, nothing left",
+        check(f"{T} Ctrl+Alt+Down from inside the overview returns to the previous personal workspace, overview closed, nothing left",
               s.state()["active"] == 0 and not a["overview"] and a["rx"] == 0 and a["ui"] == base["ui"], json.dumps(a))
+        # click a preview in the overview
+        s.chord("Super_L")
+        wait_for(lambda: s.state()["overview"], 5, 0.1)
+        time.sleep(3.0)
+        xy = s.eval(f"""const e = Main.extensionManager.lookup('{UUID}').stateObj; const t = Main.overview._overview.controls._thumbnailsBox._thumbnails.find(x => x.metaWorkspace === e._agentWs);
+                       const [x, y] = t.get_transformed_position(); const [w, h] = t.get_transformed_size(); return [x + w / 2, y + h / 2];""")
+        s.click(int(xy[0]), int(xy[1]))
+        wait_for(lambda: ext(s, "e._agentActive()"), 8, 0.1)
+        time.sleep(1.5)
+        check(f"{T} clicking the agent thumbnail selects that desktop like any other (overview stays open)", ext(s, "e._agentActive()") and s.state()["overview"])
+        s.click(800, 520)
+        wait_for(lambda: not s.state()["overview"], 8, 0.1)
+        time.sleep(1.8)
+        check(f"{T} activating it (a click on the big preview) closes the overview on the agent desktop",
+              ext(s, "e._agentActive()") and not s.state()["overview"] and ext(s, "e._agentWs.index()") >= n)
+        s.chord("Control_L", "Shift_L", "Alt_L", "Down")
+        time.sleep(1.8)
 
-        # ---- key pressed again half way: queued, not cancelled
-        s.chord("Control_L", "Alt_L", "Down")
-        time.sleep(0.18)
-        s.chord("Control_L", "Alt_L", "Up")               # while the cube is still turning down
-        time.sleep(0.1)
-        s.chord("Control_L", "Alt_L", "Down")             # and again: only the last request counts
-        time.sleep(0.1)
-        s.chord("Control_L", "Alt_L", "Up")
+        # ---- keys pressed again during a slide: queued, not cancelled
+        s.chord("Control_L", "Shift_L", "Alt_L", "Up")
+        time.sleep(0.12)
+        s.chord("Control_L", "Shift_L", "Alt_L", "Down")
+        time.sleep(0.08)
+        s.chord("Control_L", "Shift_L", "Alt_L", "Up")
+        time.sleep(0.08)
+        s.chord("Control_L", "Shift_L", "Alt_L", "Down")
         time.sleep(3.0)
         a = leftovers(s)
-        check(f"[{n} personal] Down, Up, Down, Up pressed during the turn: ends on the personal workspace, nothing stuck",
-              s.state()["active"] == 0 and a["rx"] == 0 and a["tz"] == 0 and a["ui"] == base["ui"] and not a["switchData"],
-              json.dumps(a))
-        s.chord("Control_L", "Alt_L", "Down")
+        check(f"{T} Up, Down, Up, Down pressed during the slide: ends on the personal workspace with nothing stuck",
+              s.state()["active"] == 0 and a["ty"] == 0 and a["ui"] == base["ui"] and not a["switchData"], json.dumps(a))
+        s.chord("Control_L", "Shift_L", "Alt_L", "Up")
         time.sleep(0.2)
-        s.chord("Control_L", "Alt_L", "Down")             # repeated Down during the turn is harmless
+        s.chord("Control_L", "Shift_L", "Alt_L", "Up")
         time.sleep(2.5)
-        check(f"[{n} personal] Down pressed twice during the turn: on the agent workspace once", s.state()["active"] >= n)
-        s.chord("Control_L", "Alt_L", "Up")
+        check(f"{T} Up pressed twice during the slide arrives once", s.state()["active"] >= n)
+        s.chord("Control_L", "Shift_L", "Alt_L", "Down")
         time.sleep(2.0)
 
-        # ---- the cube's own horizontal turns still work, and are the cube's (not ours)
+        # ---- Desktop Cube's own Left/Right, never affected, never entering the agent desktop
         s.eval("""const m = await import('resource:///org/gnome/shell/ui/workspaceAnimation.js');
                   const P = m.WorkspaceAnimationController.prototype; globalThis.__cc = 0; const o = P._prepareWorkspaceSwitch;
                   P._prepareWorkspaceSwitch = function (...a) { globalThis.__cc++; return o.apply(this, a); };
                   globalThis.__restore = () => { P._prepareWorkspaceSwitch = o; }; return 1""")
+        agent_idx = ext(s, "e._agentWs.index()")
+        visited = []
         for i in range(n - 1):
             s.chord("Control_L", "Alt_L", "Right")
             time.sleep(1.6)
-        at_last = s.state()["active"]
+            visited.append(s.state()["active"])
+        s.chord("Control_L", "Alt_L", "Right")        # past the last personal workspace: skips the agent desktop
+        time.sleep(1.8)
+        beyond = s.state()["active"]
+        s.chord("Control_L", "Alt_L", "Left")
+        time.sleep(1.8)
+        back = s.state()["active"]
         for i in range(n - 1):
             s.chord("Control_L", "Alt_L", "Left")
             time.sleep(1.6)
         cc = s.eval("return globalThis.__cc")
-        check(f"[{n} personal] Ctrl+Alt+Right/Left walk through all {n} personal workspaces with the cube's own turn",
-              at_last == n - 1 and s.state()["active"] == 0 and cc == 2 * (n - 1), f"cube turns: {cc}, last={at_last}")
+        check(f"{T} Ctrl+Alt+Right/Left walk the {n} personal workspaces with Desktop Cube's own turn and never land on the agent desktop "
+              f"(past the last one: the trailing empty workspace)",
+              visited == list(range(1, n)) and agent_idx not in visited and beyond == n + 1 and beyond != agent_idx and
+              back == n - 1 and s.state()["active"] == 0 and cc == 2 * (n - 1) + 2,
+              f"visited={visited} beyond={beyond} agent={agent_idx} cube turns={cc}")
         s.eval("globalThis.__restore?.(); return 1")
         a = leftovers(s)
-        check(f"[{n} personal] no cube switch left in flight, window group untransformed", not a["switchData"] and a["rx"] == 0 and
-              a["ry"] == 0 and a["tz"] == 0, json.dumps(a))
+        check(f"{T} no cube switch left in flight, window group untransformed", not a["switchData"] and a["rx"] == 0 and a["ry"] == 0 and a["tz"] == 0 and a["ty"] == 0,
+              json.dumps(a))
 
-        # ---- slide fallback when the setting is off
-        ext(s, "e._settings.set_boolean('use-cube-transition', false)")
-        time.sleep(0.5)
-        s.chord("Control_L", "Alt_L", "Down")
-        time.sleep(1.5)
-        check(f"[{n} personal] with `use-cube-transition` off the vertical slide is used", ext(s, "e._lastKind") == "slide")
-        s.chord("Control_L", "Alt_L", "Up")
-        time.sleep(1.5)
-        ext(s, "e._settings.set_boolean('use-cube-transition', true)")
+        # ---- workspace count changes: the viewer window goes away, the agent desktop is rebuilt on the next Up
+        s.chord("Control_L", "Shift_L", "Alt_L", "Up")
+        time.sleep(2.0)
+        s.eval("""for (const a of global.get_window_actors()) { const w = a.meta_window;
+                  if ((w.get_gtk_application_id?.() ?? w.get_wm_class()) === 'dev.agentworkspaces.Viewer') w.delete(global.get_current_time()); } return 1""")
+        wait_for(lambda: not any(w["app_id"] == VIEWER for w in s.state()["windows"]), 10)
+        time.sleep(2.5)
+        n_before = s.state()["n"]
+        check(f"{T} closing the viewer window by hand while up there does not strand you on an empty desktop: back down on the personal workspace",
+              s.state()["active"] == 0, f"active={s.state()['active']}")
+        s.chord("Control_L", "Shift_L", "Alt_L", "Up")
+        ok = wait_for(lambda: any(w["app_id"] == VIEWER for w in s.state()["windows"]), 20, 0.2)
+        time.sleep(3.0)
+        st = s.state()
+        check(f"{T} after the viewer window was closed (GNOME removed the empty agent workspace), Ctrl+Alt+Up builds the agent desktop again",
+              bool(ok) and st["active"] >= n and ext(s, "e._agentWs.index()") == st["active"], f"n before={n_before} after={st['n']} active={st['active']}")
+        s.chord("Control_L", "Shift_L", "Alt_L", "Down")
+        time.sleep(2.0)
+        check(f"{T} and Ctrl+Alt+Down returns to the personal workspace", s.state()["active"] == 0)
+        s.chord("Control_L", "Shift_L", "Alt_L", "Up")
+        time.sleep(2.0)
 
         # ---- logs, bindings
         log = open(s.log, errors="replace").read()
-        bad = [l for l in log.splitlines() if "enter failed" in l or "return failed" in l or "cube turn failed" in l]
-        check(f"[{n} personal] no JS errors and no failed turn in the shell log", not s.shell_errors() and not bad,
+        bad = [l for l in log.splitlines() if "enter failed" in l or "return failed" in l or "slide failed" in l]
+        check(f"{T} no JS errors and no failed move in the shell log", not s.shell_errors() and not bad,
               "; ".join((s.shell_errors() + bad)[:2]))
-        names0 = s.eval("return Main.uiGroup.get_children().map(c => c.constructor.name + ':' + (c.style_class ?? ''))")
         s.ext_call("DisableExtension", UUID)
         time.sleep(1.5)
-        names1 = s.eval("return Main.uiGroup.get_children().map(c => c.constructor.name + ':' + (c.style_class ?? ''))")
-        from collections import Counter
-        added = Counter(names1) - Counter(names0)   # a popup menu (and Blur my Shell's blur widget for it) is built lazily by the shell
         down = s.keyfile_get("org/gnome/desktop/wm/keybindings", "switch-to-workspace-down")
         up = s.keyfile_get("org/gnome/desktop/wm/keybindings", "switch-to-workspace-up")
-        check(f"[{n} personal] disable restores GNOME's Ctrl+Alt+Up/Down exactly", down == ["<Control><Alt>Down"] and up == ["<Control><Alt>Up"],
-              f"up={up} down={down}")
-        a = leftovers(s)
-        check(f"[{n} personal] after disable: nothing transformed, no actor of ours left (only shell popups appeared lazily)",
-              a["rx"] == 0 and a["tz"] == 0 and all("popup" in k for k in added), json.dumps(dict(added)))
+        mup = s.keyfile_get("org/gnome/desktop/wm/keybindings", "move-to-workspace-up")
+        mdown = s.keyfile_get("org/gnome/desktop/wm/keybindings", "move-to-workspace-down")
+        check(f"{T} disable leaves GNOME's bindings exactly as they were", down == ["<Control><Alt>Down"] and up == ["<Control><Alt>Up"] and
+              mup == ["<Control><Shift><Alt>Up"] and mdown == ["<Control><Shift><Alt>Down"], f"up={up} down={down} move-up={mup} move-down={mdown}")
     finally:
         if d:
             d.stop()
         s.stop()
         print("leftover processes carrying the private runtime dir:", s.mine() or "none")
+        if "--keep" in sys.argv:
+            print("kept:", s.base)
     bad = [m for m, ok in RESULTS if not ok]
     print(f"{len(RESULTS) - len(bad)}/{len(RESULTS)} checks passed" + (f"; FAILED: {bad}" if bad else ""))
     return 1 if bad else 0
+
+
+def dark(path, box):
+    """Near-black pixels in box: the revealed header is a dark bar over the (light) test workspace."""
+    from PIL import Image
+    im = Image.open(path).convert("RGB").crop(box)
+    return sum(1 for r, g, b in im.get_flattened_data() if max(r, g, b) < 45)
 
 
 if __name__ == "__main__":
