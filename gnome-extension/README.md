@@ -63,8 +63,10 @@ if its systemd unit cannot). The keys `backup`, `conflicts`, `test-hooks` are st
   the file `AW_ADMIN_TOKEN_FILE`, else `<base>/admin.token`) to open the viewer there. Never a notification or popup: if something is wrong the viewer says so, once, in its own window.
 * Down: back to the recorded workspace and the window you were in; if it no longer exists (GNOME removes empty workspaces), to
   the neighbouring one. Closing the viewer window by hand while up there takes you back down.
-* Super overview: Ctrl+Shift+Alt+Up/Down work there too (the overview closes first). Agent previews appear above the personal
-  workspaces for the workspaces that are running (after the first Up that includes `agents`); they are refreshed only while the overview is open.
+* Super overview: Ctrl+Shift+Alt+Up/Down work there too (the overview closes first). The agent desktop is a thumbnail of GNOME's own
+  kind and size in a row above the personal thumbnails, with the live agent screen; click it to go up. Up there, Ctrl+Alt+Left/Right/
+  Up/Down and the other workspace keys do nothing (with two or more agent workspaces, Left/Right move between those only);
+  Ctrl+Shift+Alt+Down returns to the desktop you came from; Super still opens the overview.
 * On a vertical workspace layout (for example with V-Shell) Ctrl+Shift+Alt+Up already means "the workspace above", so the keys are
   passed through to the normal neighbour switch.
 * Animations follow GNOME's *enable-animations* setting and are skipped while the Overview is open.

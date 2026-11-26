@@ -91,6 +91,7 @@ export default class AgentWorkspacesExtension extends Extension {
         this._slide = null;
         this._pendingViewer = false;
         this._entering = null;
+        this._ownSwitch = false;
         this._lastSamples = [];
         this._boundKeys = new Set();
 
@@ -106,6 +107,8 @@ export default class AgentWorkspacesExtension extends Extension {
         this._syncTestHooks();
         this._exportPublic(true);
         this._patchNeighbors();
+        this._patchActivate();
+        this._patchKeyHandlers();
         // The overview strip is built only when the overview first opens: nothing exists at login or enable time.
         this._overviewId = Main.overview.connect('showing', () => {
             if (!this._strip && this._settings && !Main.layoutManager._startingUp)
@@ -138,6 +141,8 @@ export default class AgentWorkspacesExtension extends Extension {
         this._unwatchAgent();
         this._strip?.destroy();
         this._strip = null;
+        this._unpatchKeyHandlers();
+        this._unpatchActivate();
         this._unpatchNeighbors();
         this._exportPublic(false);
         for (const id of this._handlers ?? [])
@@ -161,7 +166,7 @@ export default class AgentWorkspacesExtension extends Extension {
         const conflicts = this._takeOverAndCollectConflicts();
         this._settings.set_strv('conflicts', conflicts);
         const flags = Meta.KeyBindingFlags.IGNORE_AUTOREPEAT;
-        const modes = Shell.ActionMode.NORMAL | Shell.ActionMode.OVERVIEW; // like GNOME's own workspace keys
+        const modes = Shell.ActionMode.NORMAL | Shell.ActionMode.OVERVIEW | Shell.ActionMode.POPUP; // also with a menu open
         const a1 = Main.wm.addKeybinding('enter-shortcut', this._settings, flags, modes, () => this._onEnter());
         const a2 = Main.wm.addKeybinding('return-shortcut', this._settings, flags, modes, () => this._onReturn());
         log(`bound enter=${a1} return=${a2}; conflicts=${JSON.stringify(conflicts)}`);
@@ -345,13 +350,144 @@ export default class AgentWorkspacesExtension extends Extension {
         this._origNeighbor = this._neighborPatch = null;
     }
 
+    _agentActive() {
+        return !!(this._agentWs && this._wsValid(this._agentWs) && this._wm().get_active_workspace() === this._agentWs);
+    }
+
+    // The agent workspace the viewer shows (its title is "AgentWorkspaces: <name>").
+    _currentAgentName() {
+        for (const w of this._viewerWindows()) {
+            const t = w.get_title?.() ?? '';
+            if (t.startsWith(VIEWER_TITLE_PREFIX))
+                return t.slice(VIEWER_TITLE_PREFIX.length).trim() || null;
+        }
+        return null;
+    }
+
+    // Leaving the agent desktop by any way other than Ctrl+Shift+Alt+Down (a click on one of your desktops in the overview, a
+    // window of another desktop being activated) goes through our own, clean exit: no cube turn, no half animation. Our own
+    // switches set _ownSwitch and bypass this.
+    _patchActivate() {
+        const proto = Meta.Workspace.prototype;
+        const ext = this;
+        this._origActivate = proto.activate;
+        this._origActivateFocus = proto.activate_with_focus;
+        this._activatePatch = function (time) {
+            if (!ext._ownSwitch && ext._agentActive() && this !== ext._agentWs && ext._wsValid(this)) {
+                ext._leaveInto(this);
+                return;
+            }
+            ext._origActivate.call(this, time);
+        };
+        this._activateFocusPatch = function (window, time) {
+            if (!ext._ownSwitch && ext._agentActive() && this !== ext._agentWs && ext._wsValid(this)) {
+                ext._leaveInto(this);
+                GLib.timeout_add(GLib.PRIORITY_DEFAULT, SLIDE_MS + 60, () => {
+                    try {
+                        window.activate(global.get_current_time());
+                    } catch (e) { /* gone */ }
+                    return GLib.SOURCE_REMOVE;
+                });
+                return;
+            }
+            ext._origActivateFocus.call(this, window, time);
+        };
+        proto.activate = this._activatePatch;
+        if (this._origActivateFocus)
+            proto.activate_with_focus = this._activateFocusPatch;
+    }
+
+    _unpatchActivate() {
+        const proto = Meta.Workspace.prototype;
+        if (this._origActivate && proto.activate === this._activatePatch)
+            proto.activate = this._origActivate;
+        if (this._origActivateFocus && proto.activate_with_focus === this._activateFocusPatch)
+            proto.activate_with_focus = this._origActivateFocus;
+        this._origActivate = this._origActivateFocus = this._activatePatch = this._activateFocusPatch = null;
+    }
+
+    _leaveInto(ws) {
+        this._origin = ws;
+        this._originFocus = null;
+        this.leave();
+    }
+
+    // While you are on the agent desktop, GNOME's workspace keys (Ctrl+Alt+Left/Right/Up/Down, Super+Page Up/Down, switch/move to
+    // workspace N, last) do nothing at all: no switch, no cube turn, no switcher popup. The one exception: with more than one
+    // agent workspace, Left/Right move between agent workspaces only. Everywhere else they are GNOME's own handler, untouched.
+    _patchKeyHandlers() {
+        const names = [];
+        for (const a of ['switch', 'move']) {
+            for (const d of ['left', 'right', 'up', 'down', 'last'])
+                names.push(`${a}-to-workspace-${d}`);
+            for (let i = 1; i <= 12; i++)
+                names.push(`${a}-to-workspace-${i}`);
+        }
+        this._swallowed = names;
+        this._origSwitcher = Main.wm._showWorkspaceSwitcher.bind(Main.wm);
+        for (const n of names) {
+            Main.wm.setCustomKeybindingHandler(n, Shell.ActionMode.NORMAL, (display, window, event, binding) => {
+                if (!this._agentActive()) {
+                    this._origSwitcher(display, window, event, binding);
+                    return;
+                }
+                const name = binding.get_name();
+                if (name === 'switch-to-workspace-left')
+                    this._cycleAgent(-1).catch(e => log(`cycle: ${e}`));
+                else if (name === 'switch-to-workspace-right')
+                    this._cycleAgent(+1).catch(e => log(`cycle: ${e}`));
+            });
+        }
+    }
+
+    _unpatchKeyHandlers() {
+        for (const n of this._swallowed ?? [])
+            Main.wm.setCustomKeybindingHandler(n, Shell.ActionMode.NORMAL, (...a) => Main.wm._showWorkspaceSwitcher(...a));
+        this._swallowed = null;
+    }
+
+    // Left/Right on the agent desktop with several agent workspaces: the previous / next one (stops at the ends, like workspaces).
+    async _cycleAgent(dir) {
+        if (!this._daemonAlive())
+            return;
+        const {workspaces} = await this._daemonCall('workspace.list', {});
+        const running = (workspaces ?? []).filter(w => w.state === 'running');
+        if (running.length < 2)
+            return;
+        const cur = this._currentAgentName();
+        let i = running.findIndex(w => w.name === cur);
+        if (i < 0)
+            i = 0;
+        const j = Math.min(running.length - 1, Math.max(0, i + dir));
+        if (j !== i)
+            await this._requestViewer(running[j].name);
+    }
+
+    // Once you are up there, the keyboard belongs to the viewer (so typing and the shortcuts go where you expect).
+    _focusViewerSoon() {
+        GLib.timeout_add(GLib.PRIORITY_DEFAULT, SLIDE_MS + 40, () => {
+            const v = this._viewerWindows().find(w => w.get_workspace() === this._agentWs);
+            if (v && this._agentActive() && global.display.focus_window !== v) {
+                try {
+                    v.activate(global.get_current_time());
+                } catch (e) { /* gone */ }
+            }
+            return GLib.SOURCE_REMOVE;
+        });
+    }
+
     _passThrough(direction) {
         // The GNOME binding for this accelerator was taken over, so reproduce its behaviour:
         // move to the neighbouring workspace if the current layout has one (V-Shell's vertical layout does).
         const active = this._wm().get_active_workspace();
         const next = active.get_neighbor(direction);
         if (next && next !== active)
-            next.activate(global.get_current_time());
+            this._ownSwitch = true;
+            try {
+                next.activate(global.get_current_time());
+            } finally {
+                this._ownSwitch = false;
+            }
     }
 
     // A click on an agent desktop's preview in the overview: close the overview, then go up to that workspace.
@@ -456,7 +592,7 @@ export default class AgentWorkspacesExtension extends Extension {
         const token = {cancelled: false, abort: null};
         this._entering = token;
         try {
-            const haveViewer = slide && !name && this._viewerWindows().length > 0;
+            const haveViewer = slide && this._viewerWindows().length > 0;
             let target = {daemon: true, name};
             if (!haveViewer) {
                 // Normally the service answers (and creates the default desktop) well inside VIEWER_WAIT_MS. When it
@@ -503,9 +639,15 @@ export default class AgentWorkspacesExtension extends Extension {
                         w.change_workspace(ws);
                 }
                 this._switchTo(ws, -1);                       // the agent desktop comes down from above
+                this._focusViewerSoon();
                 // The viewer is already there, so no waiting: whatever is missing (service stopped, desktop stopped
-                // or gone) is made good in the background and the viewer follows it.
-                this._prepareDesktop(null).catch(e => log(`prepare: ${e}`));
+                // or gone) is made good in the background and the viewer follows it. A particular workspace is asked for only
+                // now that you are on the agent desktop: asking a window on another desktop to present itself makes GNOME
+                // announce that it is "ready".
+                if (name)
+                    this._requestViewer(name).catch(e => log(`viewer: ${e}`));
+                else
+                    this._prepareDesktop(null).catch(e => log(`prepare: ${e}`));
                 return;
             }
             await this._openViewer(ws, target, slide, token);
@@ -533,8 +675,10 @@ export default class AgentWorkspacesExtension extends Extension {
                 if (timer)
                     GLib.source_remove(timer);
                 mapId = timer = 0;
-                if (doSlide && slide && !token.cancelled && this._wsValid(ws) && this._wm().get_active_workspace() !== ws)
+                if (doSlide && slide && !token.cancelled && this._wsValid(ws) && this._wm().get_active_workspace() !== ws) {
                     this._switchTo(ws, -1);
+                    this._focusViewerSoon();
+                }
                 resolve();
             };
             token.abort = () => finish(false);
@@ -717,7 +861,12 @@ export default class AgentWorkspacesExtension extends Extension {
         let snap = null;
         const animate = St.Settings.get().enable_animations && !Main.overview.visible;
         if (!animate) {
-            ws.activate(global.get_current_time());
+            this._ownSwitch = true;
+            try {
+                ws.activate(global.get_current_time());
+            } finally {
+                this._ownSwitch = false;
+            }
             return;
         }
         try {
@@ -739,10 +888,12 @@ export default class AgentWorkspacesExtension extends Extension {
             patched = true;
         }
         this._allowAgentNeighbor = true;
+        this._ownSwitch = true;
         try {
             ws.activate(global.get_current_time());
         } finally {
             this._allowAgentNeighbor = false;
+            this._ownSwitch = false;
         }
         if (patched) { // the switch did not go through animateSwitch (e.g. animations blocked)
             delete ctrl.animateSwitch;
@@ -1173,7 +1324,7 @@ export default class AgentWorkspacesExtension extends Extension {
             origin: this._wsValid(this._origin) ? this._origin.index() : -1,
             layout_rows: wm.layout_rows, windows: wins, keys, backup: this._settings.get_string('backup'),
             conflicts: this._settings.get_strv('conflicts'), slide_samples: this._lastSamples,
-            sliding: !!this._slide, entering: !!this._entering, daemon_socket: this._socketPath(),
+            sliding: !!this._slide, agent_active: this._agentActive(), focus: global.display.focus_window?.get_title?.() ?? null, entering: !!this._entering, daemon_socket: this._socketPath(),
             animations: St.Settings.get().enable_animations, pointer: global.get_pointer().slice(0, 2),
             notifications: Main.messageTray.getSources().map(x => `${x.title}:${x.notifications?.length ?? 0}`),
             window_actors: global.get_window_actors().length, overview: Main.overview.visible,

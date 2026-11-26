@@ -176,7 +176,7 @@ def main():
         check(f"{T} Super shows the agent desktop above the personal ones: one tile per running workspace with a live preview, "
               f"GNOME's own controls moved down, the agent workspace's own thumbnail hidden",
               info["strip"] and info["tiles"] == 1 and info["names"] == ["research"] and all(info["previews"]) and
-              info["scale"] < 1 and info["shift"] > 100 and info["agentThumbHidden"] is True, json.dumps(info))
+              info["scale"] < 1 and info["shift"] > 30 and info["agentThumbHidden"] is True, json.dumps(info))
         s.chord("Control_L", "Shift_L", "Alt_L", "Up")
         wait_for(lambda: s.state()["active"] >= n and not s.state()["overview"], 6, 0.1)
         time.sleep(1.8)
@@ -197,7 +197,7 @@ def main():
         s.chord("Super_L")
         wait_for(lambda: s.state()["overview"], 5, 0.1)
         time.sleep(3.0)
-        xy = s.eval(f"""const st = Main.extensionManager.lookup('{UUID}').stateObj._strip; const t = [...st._tiles.values()][0].button;
+        xy = s.eval(f"""const st = Main.extensionManager.lookup('{UUID}').stateObj._strip; const t = [...st._tiles.values()][0].slot;
                        const [x, y] = t.get_transformed_position(); return [x + t.width / 2, y + t.height / 2];""")
         s.click(int(xy[0]), int(xy[1]))
         wait_for(lambda: s.state()["active"] >= n and not s.state()["overview"], 8, 0.1)

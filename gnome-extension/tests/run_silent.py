@@ -205,7 +205,7 @@ def main():
         s.chord("Super_L")
         wait_for(lambda: s.state()["overview"], 5, 0.1)
         time.sleep(3.0)
-        tile = s.eval("""const e = Main.extensionManager.lookup('%s').stateObj; const t = e._strip ? [...e._strip._tiles.values()][0]?.button ?? null : null;
+        tile = s.eval("""const e = Main.extensionManager.lookup('%s').stateObj; const t = e._strip ? [...e._strip._tiles.values()][0]?.slot ?? null : null;
           if (!t) return null; const [x, y] = t.get_transformed_position(); return [x + t.width / 2, y + t.height / 2, e._strip._tiles.size];""" % UUID)
         a = snap(s)
         s.shot(f"{s.base}/overview-agents.png")
@@ -216,7 +216,7 @@ def main():
             s.chord("Super_L")
             wait_for(lambda: s.state()["overview"], 5, 0.1)
             time.sleep(2.5)
-            tile = s.eval("""const e = Main.extensionManager.lookup('%s').stateObj; const t = [...e._strip._tiles.values()][0].button;
+            tile = s.eval("""const e = Main.extensionManager.lookup('%s').stateObj; const t = [...e._strip._tiles.values()][0].slot;
               const [x, y] = t.get_transformed_position(); return [x + t.width / 2, y + t.height / 2];""" % UUID)
             s.click(int(tile[0]), int(tile[1]))
             ok = wait_for(lambda: snap(s)["active"] == snap(s)["agent"] and not snap(s)["overview"], 8, 0.2)

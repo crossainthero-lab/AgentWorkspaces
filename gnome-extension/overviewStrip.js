@@ -1,13 +1,17 @@
 // The agent desktop in the Activities overview.
 //
-// The agent desktop is stacked ABOVE your personal ones, so in the overview it sits above them too: a strip at the very top
-// with one small live preview per RUNNING agent workspace (nothing at all when there is none). Click one to go up to it.
+// The agent desktop is stacked ABOVE your personal ones, so in the overview it is a desktop above them too: one thumbnail per
+// RUNNING agent workspace in a row of its own directly above GNOME's workspace thumbnails, built from the same style classes
+// (`workspace-thumbnails`, `workspace-thumbnail`, `workspace-thumbnail-indicator`) and the same size as the real thumbnails, so it
+// is drawn by the theme exactly like them: same size, corner radius, border and selection ring. Its content is the live agent
+// screen. When you are on the agent desktop its ring is shown (and GNOME's own ring, which would sit on the agent
+// workspace's hidden slot, is hidden). A click goes up to that desktop.
 //
-// Built as its own widget, not by patching GNOME's workspace thumbnails or its controls layout: the strip is an overlay at
-// the top of the overview, and the whole of GNOME's controls (search entry, thumbnails, workspaces, dash) is moved down and
-// scaled uniformly to make room (the controls lay themselves out against the monitor, so shrinking their box is not an
-// option). It therefore works the same with Just Perfection, Blur my Shell, Dash to Dock and Tiling Shell, which change
-// what is inside the controls but not how they are placed.
+// It is a sibling actor, not a Meta.Workspace: the agent workspace the viewer lives on is already in GNOME's list (it is
+// hidden from Ctrl+Alt+Left/Right and from the cube), and its own thumbnail is collapsed to nothing here, so there is one
+// thumbnail for it, not two. The overview's controls (search, thumbnails, workspaces, dash) are moved down and scaled
+// uniformly to make room (they lay themselves out against the monitor, so shrinking their box is not an option), which
+// works the same with Just Perfection, Blur my Shell, Dash to Dock and Tiling Shell.
 //
 // Cost: while the overview is closed, nothing runs. When it opens, one `workspace.list` call (only if the service is
 // already up: this never starts it) and then one low-resolution screenshot per tile every 1.5 s, one at a time, until it
@@ -23,27 +27,28 @@ import St from 'gi://St';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 
 const REFRESH_MS = 1500;
-const PREVIEW_W = 144;
-const PREVIEW_H = 90;
-const TILES_H = 124;           // preview + caption + padding
-const GAP = 12;                // between the tiles and GNOME's search entry
+const GAP = 8;                 // between the row and GNOME's search entry
+const RING = 3;                // width of the selection ring (workspace-thumbnail-indicator)
+const ROW_PAD = 6;             // padding of .workspace-thumbnails
 
 export class OverviewStrip {
     constructor(ext) {
         this._ext = ext;
-        this._tiles = new Map();          // workspace id -> {button, preview, name}
+        this._tiles = new Map();          // workspace id -> {slot, ring, preview, name}
         this._hidden = [];                // undo functions for what was hidden in the overview
         this._open = false;
         this._gen = 0;                    // invalidates in-flight requests when the overview closes
         this._timer = 0;
+        this._searchId = 0;
+        this._activeId = 0;
 
-        this.actor = new St.BoxLayout({
-            style_class: 'aw-ov-strip', x_align: Clutter.ActorAlign.FILL, reactive: false,
-            visible: false, clip_to_allocation: true,
-        });
+        this.actor = new St.Widget({visible: false, reactive: false});
         this.actor.set_height(0);
-        this._row = new St.BoxLayout({style_class: 'aw-ov-row', x_align: Clutter.ActorAlign.CENTER, x_expand: true});
-        this.actor.add_child(this._row);
+        // Same classes as GNOME's ThumbnailsBox, so the theme draws it the same way.
+        this._row = new St.BoxLayout({style_class: 'workspace-thumbnails', x_expand: true, x_align: Clutter.ActorAlign.CENTER});
+        this._outer = new St.BoxLayout();           // as wide as the screen, so the row can be centred like GNOME's
+        this._outer.add_child(this._row);
+        this.actor.add_child(this._outer);
         Main.layoutManager.overviewGroup.add_child(this.actor);
 
         this._ids = [
@@ -63,31 +68,77 @@ export class OverviewStrip {
 
     // ---- open / close --------------------------------------------------------------------------------------
 
-    // The agent desktop is a GNOME workspace too (it holds the viewer). In the overview it is already shown above, so its
-    // own thumbnail and its peek at the edge of the workspace view are hidden: one place for it, not two.
+    // The agent workspace is a GNOME workspace too (it holds the viewer). Here it is already a thumbnail above, so its own
+    // thumbnail is collapsed to nothing (no gap), GNOME's selection ring (which would sit on that empty slot) is hidden,
+    // and, unless you are on it, its peek at the edge of the workspace view is hidden.
     _hideAgentWorkspace() {
         const agent = this._ext._agentWs;
         if (!agent || !this._ext._wsValid(agent))
             return;
+        const onAgent = this._ext._agentActive();
         try {
             const c = Main.overview._overview.controls;
-            for (const t of c._thumbnailsBox?._thumbnails ?? []) {
+            const box = c._thumbnailsBox;
+            for (const t of box?._thumbnails ?? []) {
                 if (t.metaWorkspace === agent) {
+                    const was = t.collapse_fraction;
+                    t.collapse_fraction = 1;
                     t.hide();
-                    this._hidden.push(() => t.show());
+                    this._hidden.push(() => {
+                        t.collapse_fraction = was;
+                        t.show();
+                    });
                 }
             }
-            for (const v of c._workspacesDisplay?._workspacesViews ?? []) {
-                for (const w of v._workspaces ?? []) {
-                    if (w.metaWorkspace === agent) {
-                        w.opacity = 0;
-                        this._hidden.push(() => (w.opacity = 255));
-                    }
+            this._hidden.push(() => {
+                box?._indicator?.show();
+                for (const v of c._workspacesDisplay?._workspacesViews ?? []) {
+                    for (const w of v._workspaces ?? [])
+                        w.opacity = 255;
                 }
-            }
+            });
+            this._applyActive();
+            box?.queue_relayout();
         } catch (e) {
             console.log(`[agent-workspaces] overview: cannot hide the agent workspace: ${e}`);
         }
+    }
+
+    // Which desktop is current decides: GNOME's own selection ring (hidden while you are on the agent desktop, where it would sit
+    // on the agent workspace's empty slot), ours (shown while you are), and whether the workspace view shows the agent
+    // desktop's own page (only while you are on it: otherwise it would peek in at the edge).
+    _applyActive() {
+        const agent = this._ext._agentWs;
+        if (!agent || !this._ext._wsValid(agent))
+            return;
+        const onAgent = this._ext._agentActive();
+        try {
+            const c = Main.overview._overview.controls;
+            const box = c._thumbnailsBox;
+            if (box?._indicator)
+                box._indicator.visible = !onAgent;
+            for (const v of c._workspacesDisplay?._workspacesViews ?? []) {
+                for (const w of v._workspaces ?? []) {
+                    if (w.metaWorkspace === agent)
+                        w.opacity = onAgent ? 255 : 0;
+                }
+            }
+        } catch (e) {
+            console.log(`[agent-workspaces] overview: ${e}`);
+        }
+        const current = onAgent ? this._ext._currentAgentName() : null;
+        for (const t of this._tiles.values())
+            t.ring.visible = current !== null && (current === t.name || this._tiles.size === 1);
+    }
+
+    // The size GNOME's own thumbnails have right now (they exist from the moment the overview starts to show, but get their
+    // size at the first layout).
+    _thumbSize() {
+        const box = Main.overview._overview.controls._thumbnailsBox;
+        const wa = Main.layoutManager.getWorkAreaForMonitor(Main.layoutManager.primaryIndex);
+        const t = (box?._thumbnails ?? []).find(x => x.visible && x.width > 0);
+        const w = t ? t.width : Math.round(wa.width * (box?._maxThumbnailScale ?? 0.05));
+        return {w, h: Math.round(w * wa.height / wa.width)};      // the width is settled at once, the height is mid-animation
     }
 
     async _onShowing() {
@@ -97,6 +148,9 @@ export class OverviewStrip {
         this._open = true;
         const gen = ++this._gen;
         this._hideAgentWorkspace();
+        if (!this._activeId) {
+            this._activeId = global.workspace_manager.connect('active-workspace-changed', () => this._applyActive());
+        }
         if (!this._ext._daemonAlive())
             return;                        // no service: nothing extra, and the overview must not start it
         let list;
@@ -110,23 +164,43 @@ export class OverviewStrip {
         const running = list.filter(w => w.state === 'running');
         if (!running.length)
             return;                        // nothing running: nothing in the overview
-        this._build(running);
-        // The top bar is drawn over the overview: leave its height free above the tiles.
-        const bar = Main.panel.height;
+        await new Promise(r => GLib.timeout_add(GLib.PRIORITY_DEFAULT, 60, () => {
+            r();
+            return GLib.SOURCE_REMOVE;
+        }));                               // let GNOME lay its thumbnails out first, to read their size
+        if (gen !== this._gen || !this._open)
+            return;
         const mon = Main.layoutManager.primaryMonitor;
-        this._row.style = `padding-top: ${bar + 6}px;`;
-        this.actor.set_position(mon.x, mon.y);
-        this.actor.set_width(mon.width);
+        const real = this._thumbSize();
+        // The controls are scaled down to make room, so GNOME's thumbnails will look `sc` times their size: ours match that.
+        const bar = Main.panel.height;
+        const room0 = real.h + 2 * ROW_PAD + 2 * RING;
+        const sc0 = (mon.height - room0 - GAP) / mon.height;
+        const thumb = {w: Math.round(real.w * sc0), h: Math.round(real.h * sc0)};
+        this._build(running, thumb);
+        const room = thumb.h + 2 * ROW_PAD + 2 * RING;
+        const sc = (mon.height - room - GAP) / mon.height;
         this._controls = Main.overview._overview.controls;
         this._controls.set_pivot_point(0.5, 0);
-        const scale = (mon.height - TILES_H - GAP) / mon.height;
+        this._outer.style = 'padding-top: ' + (bar + 4) + 'px;';
+        this.actor.set_position(mon.x, mon.y);
+        this.actor.set_width(mon.width);
+        this._outer.set_width(mon.width);
         this.actor.visible = true;
         this.actor.remove_all_transitions();
         this.actor.opacity = 0;
-        this.actor.set_height(bar + TILES_H);
+        this.actor.set_height(bar + room);
         this.actor.ease({opacity: 255, duration: 180, mode: Clutter.AnimationMode.EASE_OUT_CUBIC});
-        this._controls.ease({scale_x: scale, scale_y: scale, translation_y: TILES_H + GAP, duration: 180,
+        this._controls.ease({scale_x: sc, scale_y: sc, translation_y: room + GAP, duration: 180,
             mode: Clutter.AnimationMode.EASE_OUT_CUBIC});
+        // Like GNOME's thumbnails, the row steps aside while you search.
+        const entry = Main.overview.searchEntry?.clutter_text;
+        if (entry && !this._searchId) {
+            this._searchId = entry.connect('text-changed', () =>
+                this._row.ease({opacity: entry.get_text() ? 0 : 255, duration: 150, mode: Clutter.AnimationMode.EASE_OUT_QUAD}));
+            this._searchEntry = entry;
+        }
+        this._applyActive();
         this._refresh(gen);
     }
 
@@ -142,6 +216,19 @@ export class OverviewStrip {
             GLib.source_remove(this._timer);
             this._timer = 0;
         }
+        if (this._searchId) {
+            try {
+                this._searchEntry.disconnect(this._searchId);
+            } catch (e) { /* gone */ }
+            this._searchId = 0;
+            this._searchEntry = null;
+        }
+        if (this._activeId) {
+            global.workspace_manager.disconnect(this._activeId);
+            this._activeId = 0;
+        }
+        this._row.remove_all_transitions();
+        this._row.opacity = 255;
         this.actor.remove_all_transitions();
         this.actor.visible = false;
         this.actor.set_height(0);
@@ -157,26 +244,27 @@ export class OverviewStrip {
 
     // ---- tiles -----------------------------------------------------------------------------------------------
 
-    _build(workspaces) {
+    _build(workspaces, thumb) {
         this._row.destroy_all_children();
         this._tiles.clear();
         for (const w of workspaces) {
-            const button = new St.Button({style_class: 'aw-ov-tile', reactive: true, can_focus: true, track_hover: true});
-            const col = new St.BoxLayout({vertical: true});
-            const preview = new St.Widget({style_class: 'aw-ov-preview', width: PREVIEW_W, height: PREVIEW_H,
-                content_gravity: Clutter.ContentGravity.RESIZE_ASPECT});
-            const cap = new St.BoxLayout({style_class: 'aw-ov-caption'});
-            cap.add_child(new St.Icon({icon_name: 'avatar-default-symbolic', icon_size: 13, style_class: 'aw-ov-icon'}));
-            cap.add_child(new St.Label({text: w.name, style_class: 'aw-ov-name', y_align: Clutter.ActorAlign.CENTER}));
-            const agent = w.agent?.label ?? '';
-            if (agent && !w.name.toLowerCase().includes(agent.toLowerCase()))
-                cap.add_child(new St.Label({text: agent, style_class: 'aw-ov-sub', y_align: Clutter.ActorAlign.CENTER}));
-            col.add_child(preview);
-            col.add_child(cap);
-            button.set_child(col);
-            button.connect('clicked', () => this._ext._enterFromOverview(w.name));
-            this._row.add_child(button);
-            this._tiles.set(w.id, {button, preview, name: w.name});
+            // slot: the thumbnail's own box; the ring is drawn around it, outside, like GNOME's indicator
+            const slot = new St.Widget({width: thumb.w, height: thumb.h, reactive: true, track_hover: true});
+            const ring = new St.Bin({style_class: 'workspace-thumbnail-indicator', visible: false});
+            ring.set_position(-RING, -RING);
+            ring.set_size(thumb.w + 2 * RING, thumb.h + 2 * RING);
+            const face = new St.Widget({style_class: 'workspace-thumbnail', clip_to_allocation: true, width: thumb.w,
+                height: thumb.h, track_hover: true});
+            const content = new St.Widget({width: thumb.w, height: thumb.h, content_gravity: Clutter.ContentGravity.RESIZE_ASPECT});
+            face.add_child(content);
+            slot.add_child(ring);
+            slot.add_child(face);
+            ring.visible = false;
+            const click = new Clutter.ClickGesture();
+            click.connect('recognize', () => this._ext._enterFromOverview(w.name));
+            slot.add_action(click);
+            this._row.add_child(slot);
+            this._tiles.set(w.id, {slot, ring, preview: content, name: w.name});
         }
     }
 

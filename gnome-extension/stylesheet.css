@@ -1,10 +1,2 @@
-/* The agent desktop in the Activities overview (overviewStrip.js). Quiet: dark tiles, one thin orange line per preview. */
-.aw-ov-strip { padding: 0; }
-.aw-ov-row { spacing: 14px; padding: 6px 12px 0 12px; }
-.aw-ov-tile { border-radius: 10px; padding: 6px; background-color: rgba(8, 8, 8, 0.55); border: 1px solid rgba(255, 255, 255, 0.10); }
-.aw-ov-tile:hover, .aw-ov-tile:focus { border-color: rgba(255, 255, 255, 0.38); background-color: rgba(8, 8, 8, 0.75); }
-.aw-ov-preview { border-bottom: 3px solid #ff7a00; border-radius: 4px; }
-.aw-ov-caption { spacing: 6px; padding-top: 5px; }
-.aw-ov-icon { color: rgba(255, 255, 255, 0.75); }
-.aw-ov-name { color: #ffffff; font-weight: 600; font-size: 10pt; }
-.aw-ov-sub { color: rgba(255, 255, 255, 0.6); font-size: 9pt; }
+/* The agent desktop in the Activities overview (overviewStrip.js) uses GNOME's own workspace-thumbnail classes, so it needs no
+   styles of its own: the theme draws it like the real thumbnails. */
